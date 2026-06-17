@@ -6,7 +6,8 @@
 > update the relevant section AND add a line to the Decision Log.
 >
 > **Last updated:** 2026-06-17
-> **Status:** Design / pre-implementation (no engine code written yet)
+> **Status:** Planning complete; pre-implementation (no engine code yet)
+> **Repository:** https://github.com/B0RE16/laughing-waffle (private) · local folder: `coldwar-rts/`
 
 ---
 

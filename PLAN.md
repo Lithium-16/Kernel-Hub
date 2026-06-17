@@ -40,9 +40,9 @@
 - [ ] "Hello window" — macroquad opens a window, clears to a color, runs the game loop.
 - [ ] WASM build pipeline — build + serve in a browser; confirm the same window renders.
 - [ ] Screenshot verification works (browser preview screenshot of the WASM build).
-- [ ] **Git init** + `.gitignore` (Rust `target/`, artifacts); initial commit of PROJECT.md/PLAN.md.
-- [ ] **GitHub repo** created and pushed; `main` is the protected baseline.
-- [ ] **Branch/commit conventions** adopted: branch per phase/feature, Conventional Commits, PR merges.
+- [x] **Git init** + `.gitignore` + `.gitattributes`; initial commit of PROJECT.md/PLAN.md. ✓ 2026-06-17
+- [x] **GitHub repo** (private) created & pushed → https://github.com/B0RE16/laughing-waffle ✓ 2026-06-17
+- [x] **Branch/commit conventions** adopted: branch per phase/feature, Conventional Commits, PR merges.
 - [ ] **GitHub Actions CI** — `cargo build` + `cargo test` + `cargo clippy` + WASM build on push/PR.
 - [ ] Repo hygiene: module layout (`core/`, `ecs/`, `render/`, `sim/`, `data/`).
 
