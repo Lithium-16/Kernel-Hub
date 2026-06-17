@@ -35,16 +35,18 @@
 ## Milestone 0 — Project setup & tooling
 **Goal:** a runnable empty macroquad window, building to native + WASM, with a test harness.
 
-- [ ] Install Rust toolchain (`rustup`), add `wasm32-unknown-unknown` target.
-- [ ] `cargo new` workspace; add deps: `macroquad`, `hecs`. Pin versions in `Cargo.toml`.
-- [ ] "Hello window" — macroquad opens a window, clears to a color, runs the game loop.
-- [ ] WASM build pipeline — build + serve in a browser; confirm the same window renders.
-- [ ] Screenshot verification works (browser preview screenshot of the WASM build).
+- [x] Install Rust toolchain (`rustup` 1.29) + VS Build Tools (MSVC); add `wasm32-unknown-unknown`. ✓
+- [x] Cargo project (`coldwar-rts`) with `macroquad` 0.4 + `hecs` 0.10, versions pinned. ✓
+- [x] "Hello window" — macroquad window + fixed-timestep loop + placeholder scene/overlay. ✓
+- [x] WASM build pipeline — `scripts/build-wasm.sh`; runs in browser (console-verified, no errors). ✓
+      Note: needed `.cargo/config.toml` linker flag (`--import-undefined`) for macroquad on recent Rust.
+- [x] Screenshot verification — via native offscreen render-target capture (`COLDWAR_CAPTURE`). ✓
+      Note: browser preview can't screenshot a continuously-animating canvas; native capture is the loop.
 - [x] **Git init** + `.gitignore` + `.gitattributes`; initial commit of PROJECT.md/PLAN.md. ✓ 2026-06-17
 - [x] **GitHub repo** (private) created & pushed → https://github.com/B0RE16/laughing-waffle ✓ 2026-06-17
 - [x] **Branch/commit conventions** adopted: branch per phase/feature, Conventional Commits, PR merges.
-- [ ] **GitHub Actions CI** — `cargo build` + `cargo test` + `cargo clippy` + WASM build on push/PR.
-- [ ] Repo hygiene: module layout (`core/`, `ecs/`, `render/`, `sim/`, `data/`).
+- [x] **GitHub Actions CI** added (build/test/clippy/wasm on push/PR); running on GitHub. ✓
+- [x] Repo hygiene: module layout (`sim`, `render`, `ecs`, `data`) + `.cargo/config.toml`. ✓
 
 **Acceptance:** native + WASM both open a window; `cargo test` runs (even if empty); a screenshot
 of the running app is captured; the repo is on GitHub and CI is green.

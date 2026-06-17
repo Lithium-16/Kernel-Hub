@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cold War RTS (working title) — Milestone 0</title>
+    <style>
+      html, body, canvas { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; }
+      body { background: #12161c; }
+    </style>
+  </head>
+  <body>
+    <canvas id="glcanvas" tabindex="1"></canvas>
+    <!-- macroquad / miniquad JS bootstrap -->
+    <script src="https://not-fl3.github.io/miniquad-samples/mq_js_bundle.js"></script>
+    <script>
+      load("coldwar-rts.wasm");
+    </script>
+  </body>
+</html>

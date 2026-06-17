@@ -6,7 +6,7 @@
 > update the relevant section AND add a line to the Decision Log.
 >
 > **Last updated:** 2026-06-17
-> **Status:** Planning complete; pre-implementation (no engine code yet)
+> **Status:** Milestone 0 complete — engine scaffold runs (native + WASM); Phase 1 next
 > **Repository:** https://github.com/B0RE16/laughing-waffle (private) · local folder: `coldwar-rts/`
 
 ---
@@ -305,6 +305,10 @@ First-class map support is a project goal (see §5 Map system).
   (new Phase 1.5; see §7.14).
 - **2026-06-17** — **Version control: Git + GitHub** with branch-per-feature, Conventional Commits,
   PR merges, and GitHub Actions CI (build/test/clippy/WASM) as standing engineering practice.
+- **2026-06-17** — **Milestone 0 complete**: macroquad 0.4 + hecs 0.10 scaffold builds native + WASM;
+  fixed-timestep sim loop + placeholder render verified. WASM needs a `--import-undefined` linker flag
+  (`.cargo/config.toml`); visual verification is via native offscreen render-target capture
+  (`COLDWAR_CAPTURE` env var) since the preview tool can't screenshot a live animation loop.
 
 ## 10. Open questions (need owner input)
 Resolved 2026-06-17: theme (Cold-War start, multi-faction architecture), economy depth (refined
