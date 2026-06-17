@@ -1,0 +1,277 @@
+# PLAN.md — Implementation Plan
+
+> Companion to **PROJECT.md** (which holds the vision/design/decisions). This file is the
+> *actionable build plan*: milestones, the systems each phase delivers, concrete tasks, key
+> data types, and acceptance criteria. Update checkboxes and notes as work progresses.
+>
+> **Last updated:** 2026-06-17 · **Status:** plan complete, implementation not started.
+
+## How to use this plan
+- Phases are **sequential** and each ends in a **verifiable, runnable build**. Do not start a phase
+  before the prior one's acceptance criteria pass.
+- **Verify every phase** two ways: `cargo test` (logic) + a screenshot (WASM-in-browser or native
+  window). Never mark a phase done on "it compiles."
+- **Stress-test scale early and continuously** — from Phase 2 on, every build runs a 1,000+-unit
+  scene and reports frame/tick timings. Scale is a feature, not an afterthought.
+- Keep everything **data-driven** (units/buildings/factions in data files) from Phase 1 so content
+  is authored, not coded.
+- **Use version control properly** — branch per phase/feature, small Conventional Commits, merge to
+  `main` via PR only when CI is green; update PROJECT.md/PLAN.md in the same PR as the work.
+
+## Guiding technical principles
+- **Fixed-timestep sim (20 Hz) decoupled from render**, with render interpolation. Deterministic-friendly.
+- **Data-oriented ECS (hecs)** — components are plain data; systems are functions over queries.
+- **No O(n²) anywhere** — all neighbor/range queries go through the spatial grid.
+- **Pluggable boundaries** — renderer, pathfinding, and AI behind clean interfaces so pieces can be
+  swapped (e.g. renderer → custom WebGL, or macroquad → Bevy) without rewrites.
+- **Extensible by construction** — data-driven content, ECS composition + ability lists, trait-based
+  system boundaries, registries (no central match-statements), an event bus, and versioned data/map
+  schemas. Goal: add or overhaul a system by adding code/data, not rewriting existing systems.
+- **Target build matrix:** native (`cargo run`, performance) + WASM (`wasm32-unknown-unknown`,
+  browser verification). Both must build at every phase.
+
+---
+
+## Milestone 0 — Project setup & tooling
+**Goal:** a runnable empty macroquad window, building to native + WASM, with a test harness.
+
+- [ ] Install Rust toolchain (`rustup`), add `wasm32-unknown-unknown` target.
+- [ ] `cargo new` workspace; add deps: `macroquad`, `hecs`. Pin versions in `Cargo.toml`.
+- [ ] "Hello window" — macroquad opens a window, clears to a color, runs the game loop.
+- [ ] WASM build pipeline — build + serve in a browser; confirm the same window renders.
+- [ ] Screenshot verification works (browser preview screenshot of the WASM build).
+- [ ] **Git init** + `.gitignore` (Rust `target/`, artifacts); initial commit of PROJECT.md/PLAN.md.
+- [ ] **GitHub repo** created and pushed; `main` is the protected baseline.
+- [ ] **Branch/commit conventions** adopted: branch per phase/feature, Conventional Commits, PR merges.
+- [ ] **GitHub Actions CI** — `cargo build` + `cargo test` + `cargo clippy` + WASM build on push/PR.
+- [ ] Repo hygiene: module layout (`core/`, `ecs/`, `render/`, `sim/`, `data/`).
+
+**Acceptance:** native + WASM both open a window; `cargo test` runs (even if empty); a screenshot
+of the running app is captured; the repo is on GitHub and CI is green.
+
+---
+
+## Phase 1 — Engine skeleton
+**Goal:** a fixed-timestep engine drawing a large tilemap with placeholder sprites and a pannable
+camera; unit/building definitions loaded from data.
+
+**Build:**
+- [ ] **Core loop** — fixed-timestep accumulator (20 Hz sim), variable-rate render, alpha for interpolation.
+- [ ] **ECS bootstrap** — hecs world; define starter components: `Position`, `Velocity`, `Sprite`, `Faction`.
+- [ ] **Renderer** — sprite/quad batch draw via macroquad; layered passes (terrain → buildings →
+      units → projectiles → UI); world↔screen transform.
+- [ ] **Camera** — pan (drag/edge/keys), zoom, clamped to map bounds.
+- [ ] **Tilemap** — large grid (target 256×256) of tile types (ground/water/cliff/resource-node);
+      efficient render (only visible tiles).
+- [ ] **Data layer scaffold** — load unit/building/faction definitions from data files (e.g. RON);
+      one Cold-War faction defined; spawn entities from definitions.
+- [ ] **Map format (v1)** — versioned, layered map file (terrain/elevation/passability/resources/
+      spawns/markers); load + render a hand-authored test map.
+- [ ] **Extensibility scaffolding** — registries (unit/ability/job/victory types), an event bus, and
+      trait definitions for swappable systems; establish the data-schema versioning convention.
+- [ ] **Debug overlay** — FPS, tick time, entity count, camera pos.
+
+**Key types:** `Tile`, `TileMap`, `Camera2D`, `UnitDef`/`BuildingDef`/`FactionDef`, `World` wrapper.
+
+**Acceptance:** pan/zoom over a 256×256 map; placeholder units rendered from data definitions;
+debug overlay live; native + WASM screenshots match; `cargo test` covers map + def loading.
+
+---
+
+## Phase 1.5 — Map system & editor
+**Goal:** a usable in-engine map editor and a solid, versioned map format — so every later system is
+easy to test on purpose-built maps. The editor is expanded in later phases as new placeables appear.
+
+**Build:**
+- [ ] **Map format hardening** — finalize layered, versioned format (terrain, elevation, passability/
+      cost, resource nodes, spawns, markers/triggers, pre-placed infra slots); load/save round-trip.
+- [ ] **Editor core** — paint terrain & elevation, place/erase resource nodes & spawn points, set map
+      size, undo/redo, save/load.
+- [ ] **Test-play** — launch a skirmish on the current map directly from the editor.
+- [ ] **Validation** — reachability, resource balance, spawn fairness warnings.
+- [ ] **Tile/terrain data-driven** — new terrain types added in data appear in the editor palette.
+- [ ] (Stretch) **Procedural generator** emitting the same format.
+
+**Key types:** `MapFile` (versioned), `MapLayer`, `EditorState`, `BrushTool`, `MapValidator`.
+
+**Acceptance:** author a map in-editor, save, reload, and test-play it; a new terrain type added via
+data shows up in the palette; editor screenshot; tests for save/load round-trip + validation.
+
+> Note: the editor is a living tool — Phases 4–7 add resource/infrastructure/zone/trigger placement
+> to it as those systems land.
+
+---
+
+## Phase 2 — Pathfinding at scale
+**Goal:** hundreds of units move smoothly to a destination using flow fields, with local avoidance —
+proven under a 1,000+-unit stress test.
+
+**Build:**
+- [ ] **Spatial grid** — uniform bucket grid; `query_radius`, `query_rect`; rebuilt/maintained per tick.
+- [ ] **Navigation grid** — passability + movement-cost layer derived from the tilemap.
+- [ ] **Flow fields** — Dijkstra/BFS integration field to a goal → flow direction per tile; cached
+      per active destination; shared by all units heading there. **Primary mover.**
+- [ ] **A\*** — single-unit path for stragglers/special cases (fallback), with path smoothing.
+- [ ] **Local avoidance** — boid-style separation + simple collision so units don't stack/overlap.
+- [ ] **Movement system** — steering = flow dir + avoidance; respects terrain cost; arrival behavior.
+- [ ] **Staggered ticks** — units recompute steering on a rotating schedule, not every tick.
+- [ ] **Stress harness** — spawn N (1,000+) units, issue a group move, log tick/frame timings.
+
+**Key types:** `SpatialGrid`, `NavGrid`, `FlowField`, `PathRequest`, `Movement` component.
+
+**Acceptance:** 1,000+ units path around obstacles to a shared goal without stacking; tick time
+within budget (recorded baseline); screenshot of a mass move; tests for flow-field correctness &
+grid queries.
+
+---
+
+## Phase 3 — Autonomy core (the "low micro" engine)
+**Goal:** units act on their own via utility AI + a job system; squads command as one unit; minimal
+player input produces sensible behavior.
+
+**Build:**
+- [ ] **Utility AI** — per-unit scorer over candidate actions (idle, take-job, move-to, engage,
+      retreat, resupply); pick highest; standing orders bias weights. Runs on staggered schedule.
+- [ ] **Standing orders & stances** — Aggressive / Defensive / Hold-fire / Hold-ground / Cautious;
+      retreat-at-X%-HP; auto-resupply toggle. Set per unit or per squad; persist until changed.
+- [ ] **Job system** — global job board (haul, build-assist, repair, garrison, reinforce); idle
+      units claim by priority + proximity; jobs have state (open/claimed/done) and re-queue on fail.
+- [ ] **Squad/formation layer** — named squads; **formations** (line/column/wedge/spread); squad-level
+      orders fan out; shared flow-field target; **squad templates** define desired composition;
+      auto-reinforce hook (stubbed until production exists).
+- [ ] **Selection & command UI** — click, drag-box, double-click select-type, control groups 1–9;
+      order types (move / attack-move / patrol / hold / guard / garrison / retreat / rally / ability)
+      with **Shift to queue waypoints**; **opt-in squad drafting** for direct control.
+- [ ] **Zones** — paint defense/staging/no-go zones that orders and jobs reference.
+- [ ] **Doctrine presets** — save/apply policy bundles (stances + priorities) to a force in one action.
+
+**Key types:** `UtilityAgent`, `StandingOrder`, `Job`, `JobBoard`, `Squad`, `Zone`, `Selection`.
+
+**Acceptance:** undrafted units idle→claim jobs and defend zones with no per-unit input; a squad
+moves/holds as one; drafting a squad gives direct control; screenshot of squads holding zones; tests
+for utility scoring + job claim/release.
+
+---
+
+## Phase 4 — Economy, Logistics & Infrastructure (the identity phase)
+**Goal:** the full multi-stage, self-running supply chain — extraction → refining → manufacturing →
+storage → distribution → front — plus **infrastructure as a core build/plan pillar** (roads, rail,
+power, supply networks) with a blueprint/planning mode, throughput, and coverage.
+
+**Build:**
+- [ ] **Resources** — Ore, Crude (raw); Metal, Fuel (refined); Components (manufactured); Power (flow).
+- [ ] **Production buildings** — Extractor, Refinery, Foundry, factories; **production bills**
+      (standing orders: "keep N, then pause"); gradual resource drain while producing.
+- [ ] **Supply/network graph** — depots/conduits as nodes, in-range/connected edges; carries
+      resources + power; throughput (bandwidth) per edge; coverage radius.
+- [ ] **Power grid** — production vs consumption balance per tick; buildings stall on deficit.
+- [ ] **Storage** — stockpile zones + warehouses/depots with priorities & capacity.
+- [ ] **Pull-based hauling** — dumps/stockpiles have target levels; shortfalls emit haul jobs;
+      Supply Trucks (from Phase 3 job system) fulfill them. Convoys burn Fuel.
+- [ ] **Infrastructure construction** — roads (speed + throughput), **rail backbone** with stations,
+      **power transmission lines/pylons**, depots/hubs, pipelines, fortifications; built by
+      construction units via the job system; terrain-aware (bridges/cuts).
+- [ ] **Blueprint / planning mode** — ghost-place a whole network, validate, then commit to build;
+      save/copy plans. (A headline feature — infrastructure planning is a core pillar.)
+- [ ] **Throughput, upgrades & vulnerability** — links have capacity; upgrade to scale; infra can be
+      damaged/destroyed and repaired; cutting enemy roads/power/supply is a strategic objective.
+- [ ] **Supply coverage** — "is tile X supplied?" query (used by combat resupply in Phase 5).
+- [ ] **Resource flow solver** — deterministic per-tick balance pass across the network.
+- [ ] **Economy UI** — resource readouts, power balance, bills, network overlay.
+
+**Key types:** `Resource`, `Stockpile`, `ProductionBill`, `SupplyNode`/`SupplyEdge`/`SupplyGraph`,
+`PowerGrid`, `HaulJob`, `Road`.
+
+**Acceptance:** a base auto-refines raw → components and auto-distributes to a forward dump with
+zero manual hauling; cutting a route starves the downstream dump; power deficit stalls buildings;
+network overlay screenshot; a blueprinted road+power network builds out and a destroyed segment
+cuts throughput; tests for flow solver + coverage + bill logic.
+
+---
+
+## Phase 5 — Combat (abstracted, logistics-fed)
+**Goal:** auto-resolving combat driven by positioning, cover, and supply — combat as the demand
+signal on the logistics system.
+
+**Build:**
+- [ ] **Health/damage** — HP, death, wreckage; damage application system.
+- [ ] **Weapons & projectiles** — projectile entities (travel time, can miss movers); range, ROF,
+      damage; **splash** flag (artillery).
+- [ ] **Anti-air rule** — AA hits only air; non-AA hits only ground (the whole RPS, one rule).
+- [ ] **Targeting** — auto-acquire via spatial grid; threat/priority selection.
+- [ ] **Cover & terrain** — accuracy/range modifiers from elevation/cover tiles; positioning matters.
+- [ ] **Suppression** — incoming fire reduces effectiveness/forces caution (ties to utility AI).
+- [ ] **Ammo & fuel consumption** — burn per volley/move; low units auto-pull resupply from nearest
+      forward dump via job system; starved units can't fire/maneuver.
+- [ ] **Damage/repair** — Engineers repair; wreck salvage (optional).
+- [ ] **Combat feedback** — health bars, hit/explosion FX, suppression indicator.
+
+**Key types:** `Health`, `Weapon`, `Projectile`, `Armament`, `Ammo`, `Suppression`, `DamageEvent`.
+
+**Acceptance:** two armies auto-fight on positioning + supply with no micro; a unit cut off from
+supply degrades and stops firing; AA/air interaction correct; screenshot of a supplied vs starved
+engagement; tests for damage, AA targeting rules, ammo/resupply.
+
+---
+
+## Phase 6 — Enemy AI (commander-level)
+**Goal:** a macro AI opponent that plays the same game you do — economy, logistics, and attacks.
+
+**Build:**
+- [ ] **Economic AI** — expand to nodes, build extractors/refineries/foundries, keep bills running.
+- [ ] **Logistics AI** — build depots/roads, maintain forward supply, defend corridors.
+- [ ] **Military AI** — mass to a threshold, form squads, attack-move toward objectives; defend if hit.
+- [ ] **Strategic targeting** — value targets (incl. raiding enemy supply lines as a win path).
+- [ ] **Difficulty knobs** — economy multiplier, aggression threshold, reaction time.
+- [ ] **AI debug view** — show AI intent/state for tuning.
+
+**Key types:** `AiBrain`, `AiGoal`, `ThreatMap`, difficulty config.
+
+**Acceptance:** AI builds a functioning logistics economy and mounts coordinated attacks; raids
+player supply when advantageous; a full match is playable start→finish; tests for AI decision steps
+where feasible.
+
+---
+
+## Phase 7 — Polish, UI & match rules
+**Goal:** a complete, playable single-player match with all the framing systems.
+
+**Build:**
+- [ ] **Fog of war** — unexplored/explored-dimmed/visible; per-unit sight on spatial grid.
+- [ ] **Minimap** — terrain, units, supply network, alerts.
+- [ ] **Command/policy UI** — bills, zones, network design, standing orders, drafting.
+- [ ] **Configurable victory conditions** — annihilation / decapitation / economic / survival /
+      custom combos selected at match setup.
+- [ ] **Match setup** — pick faction, map, opponents, rules, difficulty.
+- [ ] **Audio** — SFX + ambient (lightweight).
+- [ ] **A real playable map** + a short scenario to validate the whole loop.
+- [ ] **Performance pass** — confirm scale targets hold in a full match (sim LOD, render budget).
+
+**Acceptance:** a full match is winnable/losable under at least two victory rulesets at the scale
+target with acceptable performance; fog/minimap/UI functional; screenshots of a complete match.
+
+---
+
+## Cross-cutting systems (where they live)
+- **Data-driven definitions & factions** — scaffold in Phase 1; populated through Phases 4–6;
+  second faction is a later content pass once one faction is fully playable.
+- **Victory conditions** — minimal hook can land in Phase 6 (for AI matches); full configurable
+  system in Phase 7.
+- **Determinism hygiene** — keep RNG seeded and centralized from Phase 1 (cheap insurance, keeps a
+  future replay/multiplayer door open even though out of scope).
+- **Map editor** — format + basic editor in Phase 1.5; placement of resources/infrastructure/zones/
+  triggers is added to it as those systems land (Phases 4–7).
+- **Extensibility** — registries, event bus, trait boundaries, and versioned schemas established in
+  Phase 1 and maintained as a standing rule for every new system.
+
+## Parking lot (explicitly deferred)
+Naval/amphibious units · multiplayer/netcode · replays · campaign/story · map editor · player-facing
+modding · additional factions beyond the first · advanced tech/upgrade tree (v1 is build-gated).
+
+## Risk register
+- **Rendering throughput at 1,000+ sprites** — mitigate via batching; escalate to custom WebGL/Bevy
+  if Phase 2 stress test fails. *Tripwire: Phase 2.*
+- **Sim tick budget at scale** — mitigate via staggered AI + sim LOD + spatial grid. *Tripwire: Phase 2/5.*
+- **Logistics complexity vs fun** — keep it self-running by default (pull-based); validate it's not
+  tedious in Phase 4 playtests.
+- **Scope** — large for a solo project; the phase gates keep a playable artifact at every step.
