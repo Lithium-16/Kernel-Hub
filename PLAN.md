@@ -58,20 +58,15 @@ of the running app is captured; the repo is on GitHub and CI is green.
 camera; unit/building definitions loaded from data.
 
 **Build:**
-- [ ] **Core loop** — fixed-timestep accumulator (20 Hz sim), variable-rate render, alpha for interpolation.
-- [ ] **ECS bootstrap** — hecs world; define starter components: `Position`, `Velocity`, `Sprite`, `Faction`.
-- [ ] **Renderer** — sprite/quad batch draw via macroquad; layered passes (terrain → buildings →
-      units → projectiles → UI); world↔screen transform.
-- [ ] **Camera** — pan (drag/edge/keys), zoom, clamped to map bounds.
-- [ ] **Tilemap** — large grid (target 256×256) of tile types (ground/water/cliff/resource-node);
-      efficient render (only visible tiles).
-- [ ] **Data layer scaffold** — load unit/building/faction definitions from data files (e.g. RON);
-      one Cold-War faction defined; spawn entities from definitions.
-- [ ] **Map format (v1)** — versioned, layered map file (terrain/elevation/passability/resources/
-      spawns/markers); load + render a hand-authored test map.
-- [ ] **Extensibility scaffolding** — registries (unit/ability/job/victory types), an event bus, and
-      trait definitions for swappable systems; establish the data-schema versioning convention.
-- [ ] **Debug overlay** — FPS, tick time, entity count, camera pos.
+- [x] **Core loop** — fixed-timestep accumulator (20 Hz) + variable-rate render. ✓ (interpolation deferred until entities move)
+- [x] **ECS bootstrap** — hecs world; starter components `Position`, `Renderable`, `Faction` (Velocity later). ✓
+- [x] **Renderer** — view-culled tile draw + entity draw through the game camera; offscreen-capture path. ✓ (sprite batching when needed)
+- [x] **Camera** — WASD/arrow pan + mouse-wheel zoom, clamped to map bounds. ✓
+- [x] **Tilemap** — 256×256 grid (ground/water/cliff/resource); only visible tiles drawn. ✓
+- [x] **Data layer scaffold** — units/factions loaded from `assets/definitions.ron` (versioned); entities spawned from defs. ✓
+- [ ] **Map format (v1)** — versioned, layered map *file* (procedural test map for now; file format slated for Phase 1.5).
+- [ ] **Extensibility scaffolding** — registries + event bus + swappable-system traits (data-driven defs landed; registries/bus pending).
+- [x] **Debug overlay** — FPS, tick, entity count, camera pos/zoom, map size. ✓
 
 **Key types:** `Tile`, `TileMap`, `Camera2D`, `UnitDef`/`BuildingDef`/`FactionDef`, `World` wrapper.
 
