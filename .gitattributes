@@ -1,0 +1,11 @@
+# Normalize line endings: LF in the repo, auto on checkout.
+* text=auto eol=lf
+
+# Treat these as binary (no EOL/diff munging).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.wasm binary
+*.ogg binary
+*.wav binary
