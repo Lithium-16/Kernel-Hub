@@ -420,29 +420,34 @@ BuildingDef(
 )
 ```
 
-## 8. Roadmap (phased; playable/verifiable at each step)
-- **Phase 1 — Engine skeleton:** core loop, data-oriented ECS, macroquad renderer + camera, large
-  tilemap, render placeholder sprites, + data-driven definition loader scaffold (one faction),
-  versioned map format, and extensibility scaffolding (registries, event bus, traits).
-  Goal: something on screen (native + WASM screenshot).
-- **Phase 1.5 — Map system & editor:** versioned layered map format + in-engine editor (paint
-  terrain/elevation, place resources/spawns, validate, test-play). The editor grows in later phases.
-- **Phase 2 — Pathfinding at scale:** flow fields (primary), A* fallback, local avoidance, staggered
-  ticks. **Stress-test 1,000+ dummy units here.**
+## 8. Roadmap (core-first, then content; playable/verifiable at each step)
+> **Restructured 2026-06-18 — core-first.** Front-load UI + core unit/building gameplay + combat +
+> a polish pass into a *complete, polished vertical slice*, THEN add major features/content. The deep
+> logistics/infrastructure (our identity) moves to Phase 6; a **minimal** economy stays in Phase 3 to
+> make the core loop playable. (Map editor → Phase 8.) This §8 list is the canonical phase order.
+
+**Done:** Milestone 0 · Phase 1 (engine skeleton) · Phase 2 (pathfinding at scale).
+
+**Core & polish — finish a polished game first:**
 - **Phase 2.5 — Modular UI system:** reusable widget toolkit (panels, buttons, layout, theming, input
-  layering, icon atlas) that every later panel (command card, build menu, economy, minimap) builds on.
-- **Phase 3 — Units & buildings + autonomy:** registry/event-bus, ability framework, Forms/transitions,
-  command-card UI, auto-cast; **building placement / construction / production**; utility AI, job
-  system, squads. The "low micro" engine for both units and buildings.
-- **Phase 4 — Economy, logistics & infrastructure:** refining chain, supply/network graph,
-  self-running haulers, production bills, power grid, **roads/rail/power construction with a
-  blueprint/planning mode**, throughput/coverage, **research/upgrade buildings**. (The deep,
-  identity-defining phase.)
-- **Phase 5 — Combat:** auto-fire pipeline, cover, suppression, **damage table (subsumes AA)**, splash,
-  projectiles, ammo/fuel + **upkeep**, resupply.
-- **Phase 6 — Enemy AI:** commander-level macro AI managing a logistics economy.
-- **Phase 7 — Polish:** fog of war, minimap, command/policy UI, configurable victory conditions,
-  sound, a real playable map.
+  layering, icon atlas) every later panel builds on.
+- **Phase 3 — Core units & buildings:** registry/event-bus, ability framework, Forms/transitions,
+  command-card UI, selection + control groups; building placement / construction / production +
+  build/repair jobs; a **minimal economy** (simple resource(s) to gate building/production). → build-and-produce loop.
+- **Phase 4 — Combat & a fightable opponent:** damage table (subsumes AA), projectiles, suppression,
+  death, health bars/FX, ammo basics + a basic skirmish enemy. → a playable battle.
+- **Phase 5 — Polish / "game-ready":** full HUD, fog of war, minimap, audio, win/lose + match setup,
+  controls & feel polish, performance pass. → a complete, polished core game (vertical slice).
+
+**Major features & content — built on the polished core:**
+- **Phase 6 — Deep logistics & infrastructure (the identity depth):** refined chain (Ore/Crude →
+  Metal/Fuel → Components), supply/network graph, self-running haulers, production bills, power grid,
+  roads/rail/power construction + blueprint mode, throughput/coverage, upkeep.
+- **Phase 7 — Research/upgrades + advanced autonomy:** upgrade/research buildings, auto-cast policies,
+  doctrines, deeper utility AI, formations.
+- **Phase 8 — Content & factions:** full unit/building rosters, multiple factions, the in-engine map
+  editor (content tool), maps, scenarios/campaign.
+- **Phase 9 — Balance & final polish.**
 
 ## 9. Decision log
 - **2026-06-17** — Genre set: macro-scale, low-micro logistics RTS (not a direct RW clone).
@@ -489,6 +494,12 @@ BuildingDef(
   layering, icon atlas) before Phase 3, since the command card and later panels build on it (§7.15).
 - **2026-06-17** — **Phase 3 expanded to full unit AND building infrastructure** — placement,
   construction, production queues/rally, deploy↔undeploy — all on the Forms model (§7.16).
+- **2026-06-18** — **Roadmap restructured to core-first** (see §8): UI + core unit/building gameplay +
+  combat + a polish pass (a complete, polished vertical slice) come BEFORE major features. Deep
+  logistics/infrastructure (the identity) → Phase 6; a minimal economy stays in Phase 3; map editor → Phase 8.
+- **2026-06-18** — **Pathfinding upgraded** to 8-neighbour Dijkstra + gradient flow + bilinear sampling
+  (natural, anticipatory routing). **Placeholder art** swapped to Kenney "Top-down Tanks Redux" (CC0).
+  **Camera Y-pan** fixed (world is Y-up via from_display_rect; derive screen-relative dirs from the camera).
 
 ## 10. Open questions (need owner input)
 Resolved 2026-06-17: theme (Cold-War start, multi-faction architecture), economy depth (refined

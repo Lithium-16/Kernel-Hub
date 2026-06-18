@@ -4,8 +4,10 @@
 > *actionable build plan*: milestones, the systems each phase delivers, concrete tasks, key
 > data types, and acceptance criteria. Update checkboxes and notes as work progresses.
 >
-> **Last updated:** 2026-06-17 · **Status:** M0 + Phase 1 + Phase 2 merged; Phase 3 in progress
-> (movement, collision, perf done); **unit-model + combat design locked** (PROJECT.md §7.3–7.4).
+> **Last updated:** 2026-06-18 · **Status:** M0 + Phase 1 + Phase 2 done; movement / perf / art /
+> pathfinding polished. **Roadmap restructured core-first — canonical phase ORDER is now PROJECT.md §8.**
+> Next: **Phase 2.5 (UI toolkit)**. The detailed phase sections below predate the restructure; treat
+> PROJECT.md §8 as the source of truth for order — they're re-sequenced/migrated as each phase begins.
 
 ## How to use this plan
 - Phases are **sequential** and each ends in a **verifiable, runnable build**. Do not start a phase
