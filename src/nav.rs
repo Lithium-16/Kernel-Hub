@@ -1,7 +1,10 @@
-//! Navigation: a passability grid derived from the tilemap, and flow fields that
-//! steer whole groups toward a goal (the primary mover for large unit counts).
+//! Navigation: a passability grid from the tilemap + flow fields that route whole
+//! groups along the true shortest path (8-neighbour Dijkstra), with smooth
+//! gradient-based, bilinearly-sampled directions so movement looks natural and
+//! anticipates obstacles instead of veering at the last moment.
 
-use std::collections::VecDeque;
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
 use macroquad::prelude::*;
 
@@ -29,83 +32,85 @@ impl NavGrid {
     }
 }
 
-/// A per-tile flow direction toward a goal, computed by BFS over passable tiles.
+const ORTHO: u32 = 10;
+const DIAG: u32 = 14;
+/// Treat blocked/edge neighbours as this much costlier than the current cell, so the
+/// flow gradient steers units away from walls before they reach them.
+const WALL_PENALTY: u32 = 40;
+
+/// A per-tile flow direction toward a goal, from an 8-neighbour Dijkstra cost field.
 pub struct FlowField {
     w: usize,
     h: usize,
     dir: Vec<Vec2>,
 }
 
-fn relax(
-    nav: &NavGrid,
-    dist: &mut [u32],
-    q: &mut VecDeque<(usize, usize)>,
-    nx: i32,
-    ny: i32,
-    d: u32,
-) {
-    if nx < 0 || ny < 0 || nx >= nav.w as i32 || ny >= nav.h as i32 {
-        return;
-    }
-    let (nx, ny) = (nx as usize, ny as usize);
-    if !nav.passable(nx, ny) {
-        return;
-    }
-    let i = ny * nav.w + nx;
-    if dist[i] != u32::MAX {
-        return;
-    }
-    dist[i] = d + 1;
-    q.push_back((nx, ny));
-}
-
 impl FlowField {
     pub fn to_goal(nav: &NavGrid, goal: (usize, usize)) -> Self {
         let (w, h) = (nav.w, nav.h);
-        let mut dist = vec![u32::MAX; w * h];
-        let mut q = VecDeque::new();
+        let mut cost = vec![u32::MAX; w * h];
+        let mut heap: BinaryHeap<Reverse<(u32, usize, usize)>> = BinaryHeap::new();
 
         if nav.passable(goal.0, goal.1) {
-            dist[goal.1 * w + goal.0] = 0;
-            q.push_back(goal);
-        }
-        // 4-neighbour BFS integration field.
-        while let Some((x, y)) = q.pop_front() {
-            let d = dist[y * w + x];
-            relax(nav, &mut dist, &mut q, x as i32 + 1, y as i32, d);
-            relax(nav, &mut dist, &mut q, x as i32 - 1, y as i32, d);
-            relax(nav, &mut dist, &mut q, x as i32, y as i32 + 1, d);
-            relax(nav, &mut dist, &mut q, x as i32, y as i32 - 1, d);
+            cost[goal.1 * w + goal.0] = 0;
+            heap.push(Reverse((0, goal.0, goal.1)));
         }
 
-        // Flow direction = toward the lowest-distance 8-neighbour (allows diagonals).
+        const NB: [(i32, i32, u32); 8] = [
+            (1, 0, ORTHO), (-1, 0, ORTHO), (0, 1, ORTHO), (0, -1, ORTHO),
+            (1, 1, DIAG), (1, -1, DIAG), (-1, 1, DIAG), (-1, -1, DIAG),
+        ];
+
+        while let Some(Reverse((c, x, y))) = heap.pop() {
+            if c > cost[y * w + x] {
+                continue;
+            }
+            for (dx, dy, step) in NB {
+                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                    continue;
+                }
+                let (nx, ny) = (nx as usize, ny as usize);
+                if !nav.passable(nx, ny) {
+                    continue;
+                }
+                // No diagonal corner-cutting through wall corners.
+                if dx != 0 && dy != 0
+                    && (!nav.passable((x as i32 + dx) as usize, y) || !nav.passable(x, (y as i32 + dy) as usize))
+                {
+                    continue;
+                }
+                let nc = c + step;
+                if nc < cost[ny * w + nx] {
+                    cost[ny * w + nx] = nc;
+                    heap.push(Reverse((nc, nx, ny)));
+                }
+            }
+        }
+
+        // Flow = steepest descent of the cost field (central differences), with blocked
+        // neighbours treated as costlier so the gradient bends away from walls.
+        let at = |x: i32, y: i32, here: u32| -> u32 {
+            if x < 0 || y < 0 || x >= w as i32 || y >= h as i32 {
+                return here.saturating_add(WALL_PENALTY);
+            }
+            let c = cost[y as usize * w + x as usize];
+            if c == u32::MAX { here.saturating_add(WALL_PENALTY) } else { c }
+        };
+
         let mut dir = vec![Vec2::ZERO; w * h];
         for y in 0..h {
             for x in 0..w {
-                if dist[y * w + x] == u32::MAX {
+                let here = cost[y * w + x];
+                if here == u32::MAX {
                     continue;
                 }
-                let mut best = dist[y * w + x];
-                let (mut bx, mut by) = (0i32, 0i32);
-                for dy in -1..=1i32 {
-                    for dx in -1..=1i32 {
-                        if dx == 0 && dy == 0 {
-                            continue;
-                        }
-                        let (nx, ny) = (x as i32 + dx, y as i32 + dy);
-                        if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
-                            continue;
-                        }
-                        let nd = dist[ny as usize * w + nx as usize];
-                        if nd < best {
-                            best = nd;
-                            bx = dx;
-                            by = dy;
-                        }
-                    }
-                }
-                if bx != 0 || by != 0 {
-                    dir[y * w + x] = vec2(bx as f32, by as f32).normalize();
+                let (xi, yi) = (x as i32, y as i32);
+                let gx = at(xi - 1, yi, here) as f32 - at(xi + 1, yi, here) as f32;
+                let gy = at(xi, yi - 1, here) as f32 - at(xi, yi + 1, here) as f32;
+                let g = vec2(gx, gy);
+                if g.length_squared() > 0.0 {
+                    dir[y * w + x] = g.normalize();
                 }
             }
         }
@@ -113,17 +118,34 @@ impl FlowField {
         Self { w, h, dir }
     }
 
+    fn dir_tile(&self, x: i32, y: i32) -> Vec2 {
+        if x < 0 || y < 0 || x >= self.w as i32 || y >= self.h as i32 {
+            return Vec2::ZERO;
+        }
+        self.dir[y as usize * self.w + x as usize]
+    }
+
+    /// Bilinearly-sampled flow direction at a world position (smooth, continuous turning).
     pub fn dir_at(&self, world_pos: Vec2) -> Vec2 {
-        let x = (world_pos.x / TILE_SIZE).clamp(0.0, (self.w - 1) as f32) as usize;
-        let y = (world_pos.y / TILE_SIZE).clamp(0.0, (self.h - 1) as f32) as usize;
-        self.dir[y * self.w + x]
+        let fx = world_pos.x / TILE_SIZE - 0.5; // integer coords sit at tile centers
+        let fy = world_pos.y / TILE_SIZE - 0.5;
+        let (x0, y0) = (fx.floor() as i32, fy.floor() as i32);
+        let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+        let top = self.dir_tile(x0, y0).lerp(self.dir_tile(x0 + 1, y0), tx);
+        let bot = self.dir_tile(x0, y0 + 1).lerp(self.dir_tile(x0 + 1, y0 + 1), tx);
+        let v = top.lerp(bot, ty);
+        if v.length_squared() > 0.0001 {
+            v.normalize()
+        } else {
+            Vec2::ZERO
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::map::{TileMap, TILE_SIZE};
+    use crate::map::TILE_SIZE;
 
     #[test]
     fn flow_points_toward_goal() {
@@ -137,7 +159,6 @@ mod tests {
         let w = vec2((cell.0 as f32 + 0.5) * TILE_SIZE, (cell.1 as f32 + 0.5) * TILE_SIZE);
         let dir = ff.dir_at(w);
         assert!(dir.length() > 0.5, "flow direction should be set");
-        // Goal is to the right (greater x), so flow should carry a positive x.
-        assert!(dir.x > 0.0, "flow should point toward goal, got {dir:?}");
+        assert!(dir.x > 0.0, "flow should point toward goal (to the right), got {dir:?}");
     }
 }
