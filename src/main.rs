@@ -122,7 +122,10 @@ fn issue_move(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache, uni
             positions.push((e, p.0));
         }
     }
-    let arrive = movement::UNIT_RADIUS * 3.0;
+    // Stall-window radius: a unit that gets within this of its slot but then stops making
+    // progress (blocked by the packed crowd) counts as arrived. Sized to ~2 slot pitches
+    // so units whose exact slot is occupied still settle cleanly instead of nudging forever.
+    let arrive = spacing * 2.0;
     let mut taken = vec![false; slots.len()];
     for (e, p) in positions {
         let mut best: Option<usize> = None;
