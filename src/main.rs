@@ -25,7 +25,7 @@ mod spatial;
 mod ui;
 
 use assets::Sprites;
-use components::{Faction, Heading, MoveOrder, Position, Renderable, Selected, Velocity};
+use components::{Faction, Heading, MoveOrder, MoveState, Position, Renderable, Selected, Velocity};
 use data::Definitions;
 use map::TileMap;
 use nav::{FlowField, NavGrid};
@@ -63,6 +63,7 @@ fn spawn_army(world: &mut hecs::World, defs: &Definitions, sprites: &Sprites, ma
             Position(pos),
             Velocity(Vec2::ZERO),
             Heading(-std::f32::consts::FRAC_PI_2),
+            MoveState { last: pos, stall: 0 },
             Renderable { sprite, tint, size: unit.radius * 2.6 },
             Faction(unit.faction.clone()),
         ));

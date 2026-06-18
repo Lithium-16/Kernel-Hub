@@ -25,6 +25,13 @@ pub struct Renderable {
 /// Which faction an entity belongs to (faction id from the data definitions).
 pub struct Faction(pub String);
 
+/// Per-unit arrival bookkeeping: last tick's position + a stall counter (consecutive
+/// near-goal ticks with little real progress → the unit has effectively arrived).
+pub struct MoveState {
+    pub last: Vec2,
+    pub stall: u8,
+}
+
 /// Marker: entity is currently selected by the player.
 pub struct Selected;
 

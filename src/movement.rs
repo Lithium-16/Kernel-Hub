@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use hecs::{Entity, World};
 use macroquad::prelude::*;
 
-use crate::components::{Heading, MoveOrder, Position, Velocity};
+use crate::components::{Heading, MoveOrder, MoveState, Position, Velocity};
 use crate::map::TILE_SIZE;
 use crate::nav::NavGrid;
 use crate::spatial::SpatialGrid;
@@ -57,9 +57,10 @@ fn try_move(nav: &NavGrid, old: Vec2, new: Vec2) -> Vec2 {
 /// Steer units with a `MoveOrder` along their flow field, with local avoidance.
 /// (Arrival/settling is handled separately by `settle_arrivals`.)
 pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, dt: f32) {
-    for (e, (pos, vel, head, order)) in
-        world.query::<(&mut Position, &mut Velocity, &mut Heading, &MoveOrder)>().iter()
+    for (e, (pos, vel, head, state, order)) in
+        world.query::<(&mut Position, &mut Velocity, &mut Heading, &mut MoveState, &MoveOrder)>().iter()
     {
+        state.last = pos.0; // record pre-move position; settle_arrivals compares against it
         let mut steer = order.flow.dir_at(pos.0) * SPEED;
 
         let mut sep = Vec2::ZERO;
@@ -90,34 +91,32 @@ pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, 
     }
 }
 
-/// Settle move orders: a unit "arrives" when it reaches the goal core, OR when it's
-/// near the goal AND blocked by an already-settled friend that is closer to the goal.
-/// This packs a filled disk from the center outward instead of ringing the arrival
-/// radius. Call after the collision pass.
+/// Settle move orders so packed groups don't jitter. A unit "arrives" (drops its order
+/// and stops) when it reaches the goal core, OR when it's near the goal and makes almost
+/// no real progress for several ticks (it's blocked by the crowd). Stall detection kills
+/// the back-of-group shaking — a stuck unit stops pushing instead of oscillating.
+/// Call after the collision pass.
 const ARRIVE_CORE: f32 = UNIT_RADIUS * 1.6;
+const MIN_PROGRESS: f32 = 0.6; // px/tick below which a near-goal unit counts as stalled
+const STALL_TICKS: u8 = 3;
 
 pub fn settle_arrivals(world: &mut World) {
-    let moving: HashSet<Entity> = world.query::<&MoveOrder>().iter().map(|(e, _)| e).collect();
-    let settled: Vec<Vec2> = world
-        .query::<&Position>()
-        .iter()
-        .filter(|(e, _)| !moving.contains(e))
-        .map(|(_, p)| p.0)
-        .collect();
-
     let mut arrived = Vec::new();
-    for (e, (pos, order)) in world.query::<(&Position, &MoveOrder)>().iter() {
+    for (e, (pos, state, order)) in world.query::<(&Position, &mut MoveState, &MoveOrder)>().iter() {
         let d = pos.0.distance(order.goal);
         if d < ARRIVE_CORE {
             arrived.push(e);
         } else if d < order.arrive {
-            let p = pos.0;
-            let blocked = settled
-                .iter()
-                .any(|&s| s.distance(p) < UNIT_RADIUS * 2.3 && s.distance(order.goal) < d - 1.0);
-            if blocked {
-                arrived.push(e);
+            if pos.0.distance(state.last) < MIN_PROGRESS {
+                state.stall = state.stall.saturating_add(1);
+                if state.stall >= STALL_TICKS {
+                    arrived.push(e);
+                }
+            } else {
+                state.stall = 0;
             }
+        } else {
+            state.stall = 0;
         }
     }
 
