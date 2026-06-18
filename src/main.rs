@@ -1,10 +1,12 @@
 //! Cold War RTS (working title) — entry point.
 //!
-//! Phase 2: tilemap, camera, ECS, placeholder sprites, plus the movement stack —
-//! spatial grid, flow-field pathfinding, local avoidance, selection & move orders.
+//! Phase 2-3: tilemap, camera, ECS, placeholder sprites, flow-field movement with
+//! avoidance + collision + facing, selection, and per-unit move orders.
 
 // Some scaffolding is intentionally unused while systems are wired up phase by phase.
 #![allow(dead_code, unused_imports)]
+
+use std::sync::Arc;
 
 use hecs::Entity;
 use macroquad::prelude::*;
@@ -22,7 +24,7 @@ mod sim;
 mod spatial;
 
 use assets::Sprites;
-use components::{Faction, Heading, Moving, Position, Renderable, Selected, Velocity};
+use components::{Faction, Heading, MoveOrder, Position, Renderable, Selected, Velocity};
 use data::Definitions;
 use map::TileMap;
 use nav::{FlowField, NavGrid};
@@ -30,7 +32,7 @@ use spatial::SpatialGrid;
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: "Cold War RTS (working title) - Phase 2".to_owned(),
+        window_title: "Cold War RTS (working title) - Phase 3".to_owned(),
         window_width: 1280,
         window_height: 720,
         high_dpi: false,
@@ -66,6 +68,26 @@ fn clear_selection(world: &mut hecs::World) {
     }
 }
 
+/// Build one shared flow field for `goal` and assign it to `units` as a move order.
+/// Only the listed units are affected — other units keep their existing orders.
+fn issue_move(world: &mut hecs::World, nav: &NavGrid, units: &[Entity], goal: Vec2) {
+    let (tx, ty) = ((goal.x / map::TILE_SIZE) as i32, (goal.y / map::TILE_SIZE) as i32);
+    if units.is_empty()
+        || tx < 0
+        || ty < 0
+        || tx as usize >= nav.w
+        || ty as usize >= nav.h
+        || !nav.passable(tx as usize, ty as usize)
+    {
+        return;
+    }
+    let flow = Arc::new(FlowField::to_goal(nav, (tx as usize, ty as usize)));
+    let arrive = (movement::UNIT_RADIUS * (units.len() as f32).sqrt() * 1.2).max(24.0);
+    for &e in units {
+        let _ = world.insert_one(e, MoveOrder { flow: flow.clone(), goal, arrive });
+    }
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     let capture_path = std::env::var("COLDWAR_CAPTURE").ok();
@@ -92,27 +114,20 @@ async fn main() {
     }
 
     let mut grid = SpatialGrid::new(map_px, 24.0);
-    let mut active_flow: Option<FlowField> = None;
-    let mut goal = Vec2::ZERO;
-    let mut arrive_radius = 24.0f32;
     let mut drag_start: Option<Vec2> = None;
 
     let mut sim = sim::Sim::new();
     let tick_dt = 1.0 / sim::TICK_RATE as f32;
     let mut accumulator = 0.0f32;
 
-    // Capture mode: auto-select everything and issue a move so the screenshot shows
-    // flow-field movement + avoidance, then grab a frame and exit.
+    // Capture mode: select all and order a move so the screenshot shows movement.
     if capture_path.is_some() {
         let all: Vec<Entity> = world.query::<&Position>().iter().map(|(e, _)| e).collect();
-        for e in all {
+        for &e in &all {
             let _ = world.insert_one(e, Selected);
-            let _ = world.insert_one(e, Moving);
         }
-        goal = map_px * 0.5 + vec2(-700.0, -700.0);
-        let (tx, ty) = ((goal.x / map::TILE_SIZE) as usize, (goal.y / map::TILE_SIZE) as usize);
-        active_flow = Some(FlowField::to_goal(&nav, (tx, ty)));
-        arrive_radius = (movement::UNIT_RADIUS * (count as f32).sqrt() * 1.2).max(24.0);
+        let goal = map_px * 0.5 + vec2(-700.0, -700.0);
+        issue_move(&mut world, &nav, &all, goal);
     }
 
     loop {
@@ -138,8 +153,7 @@ async fn main() {
                 let (miny, maxy) = (a.y.min(b.y), a.y.max(b.y));
                 let mut to_sel: Vec<Entity> = Vec::new();
                 if (maxx - minx) * (maxy - miny) < 64.0 {
-                    // Click: select the unit whose sprite is actually under the cursor
-                    // (nearest center among those hit), so overlapping units don't mis-pick.
+                    // Click: select the unit whose sprite is under the cursor.
                     let click = b;
                     let mut best = None;
                     let mut bestd = f32::MAX;
@@ -166,33 +180,19 @@ async fn main() {
             }
         }
 
-        // --- Move order (right mouse) ---
+        // --- Move order (right mouse): only the currently-selected units ---
         if is_mouse_button_pressed(MouseButton::Right) {
-            let w = cam2d.screen_to_world(mp);
-            let (tx, ty) = ((w.x / map::TILE_SIZE) as i32, (w.y / map::TILE_SIZE) as i32);
-            if tx >= 0
-                && ty >= 0
-                && (tx as usize) < nav.w
-                && (ty as usize) < nav.h
-                && nav.passable(tx as usize, ty as usize)
-            {
-                active_flow = Some(FlowField::to_goal(&nav, (tx as usize, ty as usize)));
-                goal = w;
-                let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
-                arrive_radius = (movement::UNIT_RADIUS * (sel.len() as f32).sqrt() * 1.2).max(24.0);
-                for e in sel {
-                    let _ = world.insert_one(e, Moving);
-                }
-            }
+            let goal = cam2d.screen_to_world(mp);
+            let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
+            issue_move(&mut world, &nav, &sel, goal);
         }
 
         // --- Fixed-timestep simulation ---
         let t0 = get_time();
         accumulator += get_frame_time();
         while accumulator >= tick_dt {
-            if let Some(flow) = &active_flow {
-                movement::step(&mut world, flow, goal, arrive_radius, map_px, tick_dt);
-            }
+            grid.rebuild(&world);
+            movement::step(&mut world, &grid, map_px, tick_dt);
             movement::resolve_collisions(&mut world, &mut grid, map_px, 2);
             sim.tick();
             accumulator -= tick_dt;

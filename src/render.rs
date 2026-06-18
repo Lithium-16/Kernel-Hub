@@ -110,7 +110,7 @@ fn draw_entities(world: &hecs::World, sprites: &Sprites) {
 
 fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &Sim, tick_ms: f32, sh: f32) {
     let selected = world.query::<&crate::components::Selected>().iter().count();
-    let moving = world.query::<&crate::components::Moving>().iter().count();
+    let moving = world.query::<&crate::components::MoveOrder>().iter().count();
     draw_text(
         "Drag-select units, right-click to move  (WASD/arrows pan, mouse wheel zoom)",
         16.0,
