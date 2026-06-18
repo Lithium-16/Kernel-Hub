@@ -6,7 +6,7 @@ use macroquad::prelude::*;
 
 use crate::assets::Sprites;
 use crate::camera::GameCamera;
-use crate::components::{Position, Renderable, Selected};
+use crate::components::{Heading, Position, Renderable, Selected};
 use crate::map::{self, TileMap};
 use crate::sim::Sim;
 
@@ -91,14 +91,19 @@ fn draw_selection_rings(world: &hecs::World, sprites: &Sprites) {
 }
 
 fn draw_entities(world: &hecs::World, sprites: &Sprites) {
-    for (_e, (pos, r)) in world.query::<(&Position, &Renderable)>().iter() {
+    for (_e, (pos, r, head)) in world.query::<(&Position, &Renderable, &Heading)>().iter() {
         let tex = sprites.unit_texture(r.sprite);
         draw_texture_ex(
             tex,
             pos.0.x - r.size * 0.5,
             pos.0.y - r.size * 0.5,
             r.tint,
-            DrawTextureParams { dest_size: Some(vec2(r.size, r.size)), ..Default::default() },
+            DrawTextureParams {
+                dest_size: Some(vec2(r.size, r.size)),
+                // Sprites are authored pointing "up"; rotate to face travel direction.
+                rotation: head.0 + std::f32::consts::FRAC_PI_2,
+                ..Default::default()
+            },
         );
     }
 }

@@ -22,7 +22,7 @@ mod sim;
 mod spatial;
 
 use assets::Sprites;
-use components::{Faction, Moving, Position, Renderable, Selected};
+use components::{Faction, Heading, Moving, Position, Renderable, Selected, Velocity};
 use data::Definitions;
 use map::TileMap;
 use nav::{FlowField, NavGrid};
@@ -51,6 +51,8 @@ fn spawn_army(world: &mut hecs::World, defs: &Definitions, sprites: &Sprites, ma
         let pos = center + vec2(gx * 16.0, gy * 16.0);
         world.spawn((
             Position(pos),
+            Velocity(Vec2::ZERO),
+            Heading(-std::f32::consts::FRAC_PI_2),
             Renderable { sprite, tint, size: unit.radius * 2.6 },
             Faction(unit.faction.clone()),
         ));
@@ -92,6 +94,7 @@ async fn main() {
     let mut grid = SpatialGrid::new(map_px, 24.0);
     let mut active_flow: Option<FlowField> = None;
     let mut goal = Vec2::ZERO;
+    let mut arrive_radius = 24.0f32;
     let mut drag_start: Option<Vec2> = None;
 
     let mut sim = sim::Sim::new();
@@ -109,6 +112,7 @@ async fn main() {
         goal = map_px * 0.5 + vec2(-700.0, -700.0);
         let (tx, ty) = ((goal.x / map::TILE_SIZE) as usize, (goal.y / map::TILE_SIZE) as usize);
         active_flow = Some(FlowField::to_goal(&nav, (tx, ty)));
+        arrive_radius = (movement::UNIT_RADIUS * (count as f32).sqrt() * 1.2).max(24.0);
     }
 
     loop {
@@ -175,6 +179,7 @@ async fn main() {
                 active_flow = Some(FlowField::to_goal(&nav, (tx as usize, ty as usize)));
                 goal = w;
                 let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
+                arrive_radius = (movement::UNIT_RADIUS * (sel.len() as f32).sqrt() * 1.2).max(24.0);
                 for e in sel {
                     let _ = world.insert_one(e, Moving);
                 }
@@ -185,10 +190,10 @@ async fn main() {
         let t0 = get_time();
         accumulator += get_frame_time();
         while accumulator >= tick_dt {
-            grid.rebuild(&world);
             if let Some(flow) = &active_flow {
-                movement::step(&mut world, &grid, flow, goal, map_px, tick_dt);
+                movement::step(&mut world, flow, goal, arrive_radius, map_px, tick_dt);
             }
+            movement::resolve_collisions(&mut world, &mut grid, map_px, 2);
             sim.tick();
             accumulator -= tick_dt;
         }
