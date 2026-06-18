@@ -145,5 +145,5 @@ fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &S
         map.width,
         map.height,
     );
-    draw_text(&info, 16.0, sh - 16.0, 22.0, Color::new(0.80, 0.80, 0.80, 1.0));
+    draw_text(&info, 16.0, sh - 66.0, 22.0, Color::new(0.80, 0.80, 0.80, 1.0));
 }

@@ -22,6 +22,7 @@ mod nav;
 mod render;
 mod sim;
 mod spatial;
+mod ui;
 
 use assets::Sprites;
 use components::{Faction, Heading, MoveOrder, Position, Renderable, Selected, Velocity};
@@ -95,6 +96,28 @@ fn issue_move(world: &mut hecs::World, nav: &NavGrid, units: &[Entity], goal: Ve
     }
 }
 
+/// Bottom HUD bar actions.
+enum HudAction {
+    None,
+    Stop,
+    ClearSel,
+}
+
+/// Draw the bottom HUD bar (immediate-mode UI) and return any button action.
+fn draw_hud(ui: &mut ui::Ui, world: &hecs::World, sw: f32, sh: f32) -> HudAction {
+    ui.panel(Rect::new(0.0, sh - 56.0, sw, 56.0));
+    let mut action = HudAction::None;
+    if ui.button(Rect::new(10.0, sh - 48.0, 96.0, 40.0), "Stop") {
+        action = HudAction::Stop;
+    }
+    if ui.button(Rect::new(114.0, sh - 48.0, 96.0, 40.0), "Clear") {
+        action = HudAction::ClearSel;
+    }
+    let n = world.query::<&Selected>().iter().count();
+    ui.label(vec2(228.0, sh - 22.0), &format!("Selected: {n}"));
+    action
+}
+
 #[macroquad::main(window_conf)]
 async fn main() {
     let capture_path = std::env::var("COLDWAR_CAPTURE").ok();
@@ -122,6 +145,7 @@ async fn main() {
 
     let mut grid = SpatialGrid::new(map_px, 24.0);
     let mut drag_start: Option<Vec2> = None;
+    let mut ui = ui::Ui::new();
 
     let mut sim = sim::Sim::new();
     let tick_dt = 1.0 / sim::TICK_RATE as f32;
@@ -171,13 +195,15 @@ async fn main() {
         let mp = vec2(mx, my);
         let sw = screen_width();
         let sh = screen_height();
+        ui.begin();
+        let over_ui = mp.y >= sh - 56.0; // bottom HUD bar region
 
         cam.update(map_px);
         let view = cam.view_rect(sw, sh);
         let cam2d = Camera2D::from_display_rect(view);
 
         // --- Selection (left mouse) ---
-        if is_mouse_button_pressed(MouseButton::Left) {
+        if is_mouse_button_pressed(MouseButton::Left) && !over_ui {
             drag_start = Some(mp);
         }
         if is_mouse_button_released(MouseButton::Left) {
@@ -217,7 +243,7 @@ async fn main() {
         }
 
         // --- Move order (right mouse): only the currently-selected units ---
-        if is_mouse_button_pressed(MouseButton::Right) {
+        if is_mouse_button_pressed(MouseButton::Right) && !over_ui {
             let goal = cam2d.screen_to_world(mp);
             let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
             issue_move(&mut world, &nav, &sel, goal);
@@ -238,6 +264,16 @@ async fn main() {
 
         let drag_box = drag_start.map(|s| (s, mp));
         render::present(&world, &map, &cam, &sim, &sprites, drag_box, tick_ms, None);
+        match draw_hud(&mut ui, &world, sw, sh) {
+            HudAction::Stop => {
+                let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
+                for e in sel {
+                    let _ = world.remove_one::<MoveOrder>(e);
+                }
+            }
+            HudAction::ClearSel => clear_selection(&mut world),
+            HudAction::None => {}
+        }
 
         next_frame().await;
 
@@ -246,6 +282,11 @@ async fn main() {
             if frame >= capture_frames {
                 let rt = render_target(screen_width() as u32, screen_height() as u32);
                 render::present(&world, &map, &cam, &sim, &sprites, None, tick_ms, Some(rt.clone()));
+                let mut uicam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh));
+                uicam.render_target = Some(rt.clone());
+                set_camera(&uicam);
+                let _ = draw_hud(&mut ui, &world, sw, sh);
+                set_default_camera();
                 rt.texture.get_texture_data().export_png(path);
                 break;
             }
