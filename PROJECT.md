@@ -357,6 +357,36 @@ First-class map support is a project goal (see §5 Map system).
 - **Validation:** reachability, resource balance, spawn fairness checks.
 - **Procedural hooks:** optional generators emit the same format (not v1-critical, but supported).
 
+### 7.15 UI system (modular & scalable)
+All in-game UI is built on **one reusable toolkit**, not ad-hoc draw calls — so panels are consistent,
+themeable, resolution-scalable, and cheap to add.
+- **Immediate-mode widget core** over the renderer's screen-space pass: composable widgets — Panel,
+  Button, IconButton, Label, Bar, Grid, ScrollList, Tooltip, ContextMenu, Modal.
+- **Layout:** anchors + stack/grid that reflow on resolution/DPI change (scales to any window).
+- **Theming:** data-driven theme (colors, fonts, padding, icon set) — restyle everything in one place.
+- **Input layering:** UI consumes mouse/keys **first**; the world only sees input the UI didn't handle
+  (a click on the command card never leaks a move order to the map). Hotkeys routed through the UI.
+- **Panel registry:** HUD panels register themselves (no central switch) — command card, resource/power
+  bar, selection/portrait panel, build menu, minimap slot, notifications/alerts, match-setup/confirm modals.
+- **Batched + icon atlas:** UI draws batch through an icon atlas (same idea as the sprite atlas).
+- This toolkit is what the **command card** (§7.4), **economy UI** (Phase 4), and **minimap / match
+  setup** (Phase 7) are built on.
+
+### 7.16 Buildings — placement, construction, production (first-class; a building = a Form)
+A building is an entity in an **immobile Form** (§7.4), so it shares the unit ability/command-card model.
+Its lifecycle is its own infrastructure (built in Phase 3 alongside units):
+- **Placement:** ghost/blueprint preview snapped to the grid; validity check (passable terrain, no
+  overlap, within builder/build-radius, on a resource node for extractors); rotation; multi-place
+  blueprint mode (§7.13).
+- **Construction:** a builder takes a **build job**; the building advances through Forms
+  (site → frame → complete) as work is applied; resources drain gradually; cancel (refund) / repair.
+- **Production:** producer buildings (factory / barracks / airbase) have a **production queue** + **rally
+  point** + exit; built units spawn at the exit and move to rally. Production **bills** (§7.2) and
+  **research** (§7.4) run through the same queue. *(Resource costs are wired when the economy lands in
+  Phase 4; the queue / placement / construction systems are built in Phase 3.)*
+- **Deploy / undeploy:** mobile ↔ building via transitions (MCV → HQ), reusing the Form mechanism.
+- **Command card:** buildings use the same auto-generated card (produce, set rally, research, toggle).
+
 ## 8. Roadmap (phased; playable/verifiable at each step)
 - **Phase 1 — Engine skeleton:** core loop, data-oriented ECS, macroquad renderer + camera, large
   tilemap, render placeholder sprites, + data-driven definition loader scaffold (one faction),
@@ -366,8 +396,11 @@ First-class map support is a project goal (see §5 Map system).
   terrain/elevation, place resources/spawns, validate, test-play). The editor grows in later phases.
 - **Phase 2 — Pathfinding at scale:** flow fields (primary), A* fallback, local avoidance, staggered
   ticks. **Stress-test 1,000+ dummy units here.**
-- **Phase 3 — Autonomy core:** registry/event-bus, utility AI, job system, squads; **ability framework
-  + Forms/transitions + command-card UI + auto-cast policies**. The "low micro" engine.
+- **Phase 2.5 — Modular UI system:** reusable widget toolkit (panels, buttons, layout, theming, input
+  layering, icon atlas) that every later panel (command card, build menu, economy, minimap) builds on.
+- **Phase 3 — Units & buildings + autonomy:** registry/event-bus, ability framework, Forms/transitions,
+  command-card UI, auto-cast; **building placement / construction / production**; utility AI, job
+  system, squads. The "low micro" engine for both units and buildings.
 - **Phase 4 — Economy, logistics & infrastructure:** refining chain, supply/network graph,
   self-running haulers, production bills, power grid, **roads/rail/power construction with a
   blueprint/planning mode**, throughput/coverage, **research/upgrade buildings**. (The deep,
@@ -419,6 +452,10 @@ First-class map support is a project goal (see §5 Map system).
   abilities self-trigger by condition (Manual/Auto/Off) — the low-micro ability layer.
 - **2026-06-17** — **Registry + event-bus scaffolding elevated to a Phase-3 prerequisite** — it's the
   dispatch layer for abilities / effects / conditions / transitions.
+- **2026-06-17** — **Added Phase 2.5 — a modular/scalable UI toolkit** (widgets, layout, theming, input
+  layering, icon atlas) before Phase 3, since the command card and later panels build on it (§7.15).
+- **2026-06-17** — **Phase 3 expanded to full unit AND building infrastructure** — placement,
+  construction, production queues/rally, deploy↔undeploy — all on the Forms model (§7.16).
 
 ## 10. Open questions (need owner input)
 Resolved 2026-06-17: theme (Cold-War start, multi-faction architecture), economy depth (refined

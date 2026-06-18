@@ -122,9 +122,32 @@ grid queries.
 
 ---
 
-## Phase 3 — Autonomy core (the "low micro" engine)
-**Goal:** units act on their own via utility AI + a job system; squads command as one unit; minimal
-player input produces sensible behavior.
+## Phase 2.5 — Modular & scalable UI system
+**Goal:** a reusable UI toolkit every later panel is built on (command card, build menu, economy
+readouts, minimap, modals) — consistent, themeable, resolution-scalable, with proper input layering.
+
+**Build:**
+- [ ] **Immediate-mode widget core** — Panel, Button, IconButton, Label, Bar, Grid, ScrollList,
+      Tooltip, ContextMenu, Modal — drawn in the screen-space pass.
+- [ ] **Layout** — anchors + stack/grid; reflows on resolution/DPI change.
+- [ ] **Theming** — data-driven theme (colors, fonts, padding, icon atlas); restyle in one place.
+- [ ] **Input layering** — UI consumes mouse/keys first; world sees only unhandled input (no click
+      leak to the map); hotkey routing.
+- [ ] **Panel registry** — HUD panels register (no central switch); first panels: resource/power bar
+      stub + selection panel.
+- [ ] **UI icon atlas** + batched draw.
+
+**Key types:** `Ui`, `Widget`, `Layout`, `Theme`, `PanelId`, `InputCapture`.
+
+**Acceptance:** a themed HUD with a working button/panel that captures its own clicks (no leak to the
+world); resizes cleanly; screenshot; tests for layout + input-capture logic.
+
+---
+
+## Phase 3 — Units & Buildings infrastructure + autonomy core
+**Goal:** the full **unit AND building** object model + autonomy — Forms/abilities/transitions,
+building placement/construction/production, utility AI + job system + squads — so minimal player input
+produces sensible behavior for both units and buildings.
 
 **Build:**
 - [ ] **Registry + event bus + system traits** — the extensibility scaffolding (Phase-1 debt); the
@@ -149,12 +172,21 @@ player input produces sensible behavior.
       with **Shift to queue waypoints**; **opt-in squad drafting** for direct control.
 - [ ] **Zones** — paint defense/staging/no-go zones that orders and jobs reference.
 - [ ] **Doctrine presets** — save/apply policy bundles (stances + priorities) to a force in one action.
+- [ ] **Building placement** — ghost/blueprint preview, grid snap, validity (terrain / overlap /
+      build-radius / resource node), rotation; multi-place blueprint mode.
+- [ ] **Construction** — builders take build jobs; site → frame → complete Forms; gradual drain;
+      cancel (refund) / repair.
+- [ ] **Production** — producer buildings: queue + rally point + exit; bills; research queue.
+      (Resource *costs* wired in Phase 4; queue / placement / construction *systems* built here.)
+- [ ] **Building command card + deploy/undeploy** — buildings use the same card; MCV↔HQ transitions.
 
-**Key types:** `UtilityAgent`, `StandingOrder`, `Job`, `JobBoard`, `Squad`, `Zone`, `Selection`.
+**Key types:** `Form`, `Ability`/`AbilityDef`, `AutoRule`, `Transition`, `UtilityAgent`, `StandingOrder`,
+`Job`/`JobBoard` (incl. `BuildJob`), `Squad`, `Zone`, `Selection`, `Placement`, `ProductionQueue`.
 
 **Acceptance:** undrafted units idle→claim jobs and defend zones with no per-unit input; a squad
-moves/holds as one; drafting a squad gives direct control; screenshot of squads holding zones; tests
-for utility scoring + job claim/release.
+moves/holds as one; drafting a squad gives direct control; **a builder constructs a placed building
+(site→complete) and a producer building queues + rallies a unit; deploy↔undeploy works**; an auto-cast
+ability fires on its condition; screenshot; tests for utility scoring, job claim/release, and a transition.
 
 ---
 
