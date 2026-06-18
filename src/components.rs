@@ -32,6 +32,13 @@ pub struct Renderable {
 /// Which faction an entity belongs to (faction id from the data definitions).
 pub struct Faction(pub String);
 
+/// The unit type this entity was spawned from (data-definition id + display name).
+/// Drives the selection readout now and the command card / production later.
+pub struct UnitKind {
+    pub id: String,
+    pub name: String,
+}
+
 /// Per-unit arrival bookkeeping: last tick's position + a stall counter (consecutive
 /// near-goal ticks with little real progress → the unit has effectively arrived).
 pub struct MoveState {
