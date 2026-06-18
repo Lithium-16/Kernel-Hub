@@ -4,7 +4,8 @@
 //! anticipates obstacles instead of veering at the last moment.
 
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::sync::Arc;
 
 use macroquad::prelude::*;
 
@@ -139,6 +140,37 @@ impl FlowField {
         } else {
             Vec2::ZERO
         }
+    }
+}
+
+/// Caches flow fields by goal tile so repeated / converging orders reuse the field
+/// instead of recomputing the Dijkstra pass (a standard large-RTS optimization). The
+/// foundation for the hierarchical (HPA*-portal + sector) flow-field upgrade later.
+pub struct FlowCache {
+    fields: HashMap<(usize, usize), Arc<FlowField>>,
+    order: VecDeque<(usize, usize)>,
+    cap: usize,
+}
+
+impl FlowCache {
+    pub fn new(cap: usize) -> Self {
+        Self { fields: HashMap::new(), order: VecDeque::new(), cap }
+    }
+
+    /// Reuse the cached field for `goal`, or build + cache it (evicting the oldest).
+    pub fn get_or_build(&mut self, nav: &NavGrid, goal: (usize, usize)) -> Arc<FlowField> {
+        if let Some(f) = self.fields.get(&goal) {
+            return f.clone();
+        }
+        let f = Arc::new(FlowField::to_goal(nav, goal));
+        self.fields.insert(goal, f.clone());
+        self.order.push_back(goal);
+        if self.order.len() > self.cap {
+            if let Some(old) = self.order.pop_front() {
+                self.fields.remove(&old);
+            }
+        }
+        f
     }
 }
 

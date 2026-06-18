@@ -28,7 +28,7 @@ use assets::Sprites;
 use components::{Faction, Heading, Mobility, MoveOrder, MoveState, Position, Renderable, Selected, Velocity};
 use data::Definitions;
 use map::TileMap;
-use nav::{FlowField, NavGrid};
+use nav::{FlowCache, FlowField, NavGrid};
 use spatial::SpatialGrid;
 
 fn window_conf() -> Conf {
@@ -80,7 +80,7 @@ fn clear_selection(world: &mut hecs::World) {
 
 /// Build one shared flow field for `goal` and assign it to `units` as a move order.
 /// Only the listed units are affected — other units keep their existing orders.
-fn issue_move(world: &mut hecs::World, nav: &NavGrid, units: &[Entity], goal: Vec2) {
+fn issue_move(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache, units: &[Entity], goal: Vec2) {
     let (tx, ty) = ((goal.x / map::TILE_SIZE) as i32, (goal.y / map::TILE_SIZE) as i32);
     if units.is_empty()
         || tx < 0
@@ -91,7 +91,7 @@ fn issue_move(world: &mut hecs::World, nav: &NavGrid, units: &[Entity], goal: Ve
     {
         return;
     }
-    let flow = Arc::new(FlowField::to_goal(nav, (tx as usize, ty as usize)));
+    let flow = cache.get_or_build(nav, (tx as usize, ty as usize));
     let arrive = (movement::UNIT_RADIUS * (units.len() as f32).sqrt() * 1.5).max(24.0);
     for &e in units {
         let _ = world.insert_one(e, MoveOrder { flow: flow.clone(), goal, arrive });
@@ -130,6 +130,7 @@ async fn main() {
     let map = TileMap::generate_test(256, 256);
     let map_px = map.size_px();
     let nav = NavGrid::from_map(&map);
+    let mut flow_cache = FlowCache::new(48);
 
     let mut world = ecs::new_world();
     let count: usize = std::env::var("COLDWAR_UNITS")
@@ -168,7 +169,7 @@ async fn main() {
                 Some(vec2(x * map::TILE_SIZE, y * map::TILE_SIZE))
             })
             .unwrap_or(map_px * 0.5 + vec2(-700.0, -700.0));
-        issue_move(&mut world, &nav, &all, goal);
+        issue_move(&mut world, &nav, &mut flow_cache, &all, goal);
     }
     let capture_frames: u32 = std::env::var("COLDWAR_FRAMES")
         .ok()
@@ -179,7 +180,7 @@ async fn main() {
     if let Ok(b) = std::env::var("COLDWAR_BENCH") {
         let ticks: u32 = b.parse().unwrap_or(300);
         let all: Vec<Entity> = world.query::<&Position>().iter().map(|(e, _)| e).collect();
-        issue_move(&mut world, &nav, &all, map_px * 0.5 + vec2(-2000.0, -2000.0));
+        issue_move(&mut world, &nav, &mut flow_cache, &all, map_px * 0.5 + vec2(-2000.0, -2000.0));
         let start = std::time::Instant::now();
         for _ in 0..ticks {
             grid.rebuild(&world);
@@ -249,7 +250,7 @@ async fn main() {
         if is_mouse_button_pressed(MouseButton::Right) && !over_ui {
             let goal = cam2d.screen_to_world(mp);
             let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
-            issue_move(&mut world, &nav, &sel, goal);
+            issue_move(&mut world, &nav, &mut flow_cache, &sel, goal);
         }
 
         // --- Fixed-timestep simulation ---
