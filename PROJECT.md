@@ -374,10 +374,17 @@ themeable, resolution-scalable, and cheap to add.
 
 ### 7.16 Buildings — placement, construction, production (first-class; a building = a Form)
 A building is an entity in an **immobile Form** (§7.4), so it shares the unit ability/command-card model.
-Its lifecycle is its own infrastructure (built in Phase 3 alongside units):
-- **Placement:** ghost/blueprint preview snapped to the grid; validity check (passable terrain, no
-  overlap, within builder/build-radius, on a resource node for extractors); rotation; multi-place
-  blueprint mode (§7.13).
+Its lifecycle is its own infrastructure (built in Phase 3 alongside units). Authored as a `BuildingDef`
+— the same Form machinery as units, plus a footprint:
+- **Footprint / custom size:** each building declares a tile **footprint** — `W×H` (1×1 gun turret,
+  2×2 factory, 3×3 HQ, 1×N walls) or an irregular **tile mask**. Drives placement, occupied tiles, and
+  nav blocking. (Mobile units use a collision radius; buildings use a footprint.)
+- **Turrets:** buildings use the same weapon **`mount`** as units (§7.4) — defensive turrets rotate to
+  track targets; multiple mounts (different pivot offsets) make a multi-gun fort.
+- **Placement:** ghost/blueprint preview **snapped to the tile grid** (footprint-aligned); validity
+  check (every footprint tile passable & clear, within builder/build-radius, on a resource node for
+  extractors); rotation; multi-place blueprint mode (§7.13). Placed footprints become **impassable** on
+  the nav grid so units path around them.
 - **Construction:** a builder takes a **build job**; the building advances through Forms
   (site → frame → complete) as work is applied; resources drain gradually; cancel (refund) / repair.
 - **Production:** producer buildings (factory / barracks / airbase) have a **production queue** + **rally
@@ -386,6 +393,32 @@ Its lifecycle is its own infrastructure (built in Phase 3 alongside units):
   Phase 4; the queue / placement / construction systems are built in Phase 3.)*
 - **Deploy / undeploy:** mobile ↔ building via transitions (MCV → HQ), reusing the Form mechanism.
 - **Command card:** buildings use the same auto-generated card (produce, set rally, research, toggle).
+
+**Example (building) — illustrative; a turreted 1×1 defense and a 2×2 producer:**
+```ron
+BuildingDef(
+  id: "gun_turret", name: "Gun Turret", faction: "vanguard",
+  footprint: (1, 1),                          // tiles; use a tile mask for irregular shapes
+  default_form: "built",
+  forms: {
+    "site":  Form(chassis: Immobile, durability: (hp: 80,  armor: Structure)),   // under construction
+    "built": Form(
+      chassis: Immobile, durability: (hp: 600, armor: Structure),
+      armament: [ Weapon(damage: 40, damage_type: AP, target_domains: [Ground], range: 200,
+        cooldown: 1.0, mount: Some(Turret(sprite: "turret_gun", traverse_rate: 240, arc: 360))) ],
+    ),
+  },
+  transitions: [ (from: "site", to: "built", trigger: BuildComplete) ],
+  cost: (metal: 250, components: 10), build_time: 12, requires: "command_center",
+)
+
+BuildingDef(
+  id: "vehicle_factory", name: "Vehicle Factory", footprint: (2, 2), default_form: "built",
+  forms: { "built": Form(chassis: Immobile, durability: (hp: 1400, armor: Structure),
+           role: Producer(produces: ["mbt", "aa_vehicle"], rally: true)) },
+  cost: (metal: 800, components: 30), build_time: 25, requires: "command_center",
+)
+```
 
 ## 8. Roadmap (phased; playable/verifiable at each step)
 - **Phase 1 — Engine skeleton:** core loop, data-oriented ECS, macroquad renderer + camera, large
