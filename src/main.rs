@@ -58,7 +58,7 @@ fn spawn_army(world: &mut hecs::World, defs: &Definitions, sprites: &Sprites, ma
         let sprite = sprites.unit_index(&unit.sprite);
         let gx = (i % cols) as f32 - cols as f32 * 0.5;
         let gy = (i / cols) as f32 - cols as f32 * 0.5;
-        let pos = center + vec2(gx * 22.0, gy * 22.0);
+        let pos = center + vec2(gx * 30.0, gy * 30.0);
         world.spawn((
             Position(pos),
             Velocity(Vec2::ZERO),

@@ -6,7 +6,7 @@ use macroquad::prelude::*;
 
 use crate::assets::Sprites;
 use crate::camera::GameCamera;
-use crate::components::{Heading, Position, Renderable, Selected};
+use crate::components::{Heading, MoveOrder, Position, Renderable, Selected};
 use crate::map::{self, TileMap};
 use crate::sim::Sim;
 
@@ -33,6 +33,7 @@ pub fn present(
     set_camera(&world_cam);
     clear_background(BG);
     draw_tiles(map, view, sprites);
+    draw_move_orders(world);
     draw_selection_rings(world, sprites);
     draw_entities(world, sprites);
     draw_hitboxes(world);
@@ -112,6 +113,25 @@ fn draw_entities(world: &hecs::World, sprites: &Sprites) {
                 ..Default::default()
             },
         );
+    }
+}
+
+/// Move-order feedback: a faint line from each moving unit to its goal, and a
+/// destination marker (ring + cross) at each distinct goal.
+fn draw_move_orders(world: &hecs::World) {
+    let line = Color::new(0.45, 1.0, 0.55, 0.18);
+    let mark = Color::new(0.45, 1.0, 0.55, 0.95);
+    let mut goals: Vec<Vec2> = Vec::new();
+    for (_e, (pos, order)) in world.query::<(&Position, &MoveOrder)>().iter() {
+        draw_line(pos.0.x, pos.0.y, order.goal.x, order.goal.y, 1.0, line);
+        if !goals.iter().any(|g| g.distance(order.goal) < 2.0) {
+            goals.push(order.goal);
+        }
+    }
+    for g in goals {
+        draw_circle_lines(g.x, g.y, 11.0, 2.0, mark);
+        draw_line(g.x - 9.0, g.y, g.x + 9.0, g.y, 1.5, mark);
+        draw_line(g.x, g.y - 9.0, g.x, g.y + 9.0, 1.5, mark);
     }
 }
 

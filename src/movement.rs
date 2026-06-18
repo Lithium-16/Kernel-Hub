@@ -13,8 +13,9 @@ use crate::nav::NavGrid;
 use crate::spatial::SpatialGrid;
 
 pub const SPEED: f32 = 72.0;
-/// Collision radius per unit (uniform for now).
-pub const UNIT_RADIUS: f32 = 10.0;
+/// Collision radius per unit (uniform for now). Sized close to the sprite half-width
+/// so units don't visually clip into each other when packed.
+pub const UNIT_RADIUS: f32 = 14.0;
 const COLLISION_DIAM: f32 = UNIT_RADIUS * 2.0;
 /// Velocity smoothing rate (higher = snappier).
 const ACCEL: f32 = 9.0;
