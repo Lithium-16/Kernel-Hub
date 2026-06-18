@@ -7,21 +7,21 @@ use std::collections::HashSet;
 use hecs::{Entity, World};
 use macroquad::prelude::*;
 
-use crate::components::{Heading, MoveOrder, MoveState, Position, Velocity};
+use crate::components::{Heading, Mobility, MoveOrder, MoveState, Position, Velocity};
 use crate::map::TILE_SIZE;
 use crate::nav::NavGrid;
 use crate::spatial::SpatialGrid;
 
-pub const SPEED: f32 = 72.0;
 /// Collision radius per unit (uniform for now). Sized close to the sprite half-width
 /// so units don't visually clip into each other when packed.
 pub const UNIT_RADIUS: f32 = 14.0;
 const COLLISION_DIAM: f32 = UNIT_RADIUS * 2.0;
-/// Velocity smoothing rate (higher = snappier).
+/// Speed smoothing rate (higher = snappier accel/decel).
 const ACCEL: f32 = 9.0;
-/// Local-avoidance look radius and strength (steer around neighbors).
-const AVOID_R: f32 = 28.0;
-const AVOID_STRENGTH: f32 = 45.0;
+/// Local-avoidance look radius; `sep` pushes apart, `around` steers past units ahead.
+const AVOID_R: f32 = 34.0;
+const SEP_WEIGHT: f32 = 0.9;
+const AROUND_WEIGHT: f32 = 1.3;
 /// Overlap below this is tolerated (stops dense crowds from buzzing).
 const COLLISION_SLOP: f32 = 1.5;
 /// Max positional correction applied to a unit per tick.
@@ -54,16 +54,33 @@ fn try_move(nav: &NavGrid, old: Vec2, new: Vec2) -> Vec2 {
     old
 }
 
-/// Steer units with a `MoveOrder` along their flow field, with local avoidance.
-/// (Arrival/settling is handled separately by `settle_arrivals`.)
-pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, dt: f32) {
-    for (e, (pos, vel, head, state, order)) in
-        world.query::<(&mut Position, &mut Velocity, &mut Heading, &mut MoveState, &MoveOrder)>().iter()
-    {
-        state.last = pos.0; // record pre-move position; settle_arrivals compares against it
-        let mut steer = order.flow.dir_at(pos.0) * SPEED;
+fn wrap_angle(a: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    let mut a = a % TAU;
+    if a > PI {
+        a -= TAU;
+    } else if a < -PI {
+        a += TAU;
+    }
+    a
+}
 
+/// Steer units with a `MoveOrder`: pick a desired direction (flow + local avoidance),
+/// turn the hull toward it at the unit's turn rate, then drive forward scaled by how
+/// aligned the hull is — so slow-turning units (tanks) pivot before moving. Arrival is
+/// handled by `settle_arrivals`.
+pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, dt: f32) {
+    for (e, (pos, vel, head, state, mob, order)) in world
+        .query::<(&mut Position, &mut Velocity, &mut Heading, &mut MoveState, &Mobility, &MoveOrder)>()
+        .iter()
+    {
+        state.last = pos.0; // pre-move position; settle_arrivals compares against it
+        let facing = vec2(head.0.cos(), head.0.sin());
+
+        // Desired direction = flow toward goal + local avoidance.
+        let flow = order.flow.dir_at(pos.0);
         let mut sep = Vec2::ZERO;
+        let mut around = Vec2::ZERO;
         grid.for_neighbors(pos.0, AVOID_R, |other, op| {
             if other == e {
                 return;
@@ -71,20 +88,38 @@ pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, 
             let d = pos.0 - op;
             let dist = d.length();
             if dist > 0.001 && dist < AVOID_R {
-                sep += d / dist * ((AVOID_R - dist) / AVOID_R);
+                let w = (AVOID_R - dist) / AVOID_R;
+                sep += d / dist * w;
+                // If the neighbour is ahead of us, steer sideways to go around it.
+                let to_other = -d / dist;
+                let ahead = facing.dot(to_other);
+                if ahead > 0.2 {
+                    let perp = vec2(-facing.y, facing.x);
+                    let side = if perp.dot(to_other) > 0.0 { -1.0 } else { 1.0 };
+                    around += perp * (side * w * ahead);
+                }
             }
         });
-        steer += sep * AVOID_STRENGTH;
+        let desired = flow + sep * SEP_WEIGHT + around * AROUND_WEIGHT;
+        let desired_dir = if desired.length_squared() > 1e-4 {
+            desired.normalize()
+        } else {
+            facing
+        };
 
-        let s = steer.length();
-        if s > SPEED {
-            steer = steer / s * SPEED;
-        }
+        // Turn toward the desired direction at the unit's turn rate (tanks pivot first).
+        let target_angle = desired_dir.y.atan2(desired_dir.x);
+        let diff = wrap_angle(target_angle - head.0);
+        let max_turn = mob.turn_rate * dt;
+        head.0 = wrap_angle(head.0 + diff.clamp(-max_turn, max_turn));
 
-        vel.0 += (steer - vel.0) * (ACCEL * dt).min(1.0);
-        if vel.0.length_squared() > 4.0 {
-            head.0 = vel.0.y.atan2(vel.0.x);
-        }
+        // Drive forward along the (new) facing, scaled by alignment → turn-then-move.
+        let new_facing = vec2(head.0.cos(), head.0.sin());
+        let align = new_facing.dot(desired_dir).max(0.0);
+        let target_speed = mob.speed * align * align;
+        let cur = vel.0.length();
+        let speed = cur + (target_speed - cur) * (ACCEL * dt).min(1.0);
+        vel.0 = new_facing * speed;
 
         let target = (pos.0 + vel.0 * dt).clamp(Vec2::ZERO, map_px);
         pos.0 = try_move(nav, pos.0, target);

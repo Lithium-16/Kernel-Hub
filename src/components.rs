@@ -12,8 +12,15 @@ pub struct Position(pub Vec2);
 /// Current velocity (world px/s) — used for smoothing and facing.
 pub struct Velocity(pub Vec2);
 
-/// Facing angle in radians (velocity-derived); persists when idle.
+/// Facing angle in radians; turned toward the move direction at `Mobility.turn_rate`.
 pub struct Heading(pub f32);
+
+/// Per-unit mobility: max speed (world px/s) and turn rate (rad/s). Slow turn rate =
+/// the unit pivots toward its destination before driving off (tanks).
+pub struct Mobility {
+    pub speed: f32,
+    pub turn_rate: f32,
+}
 
 /// How an entity draws: a sprite index (into `Sprites`), a tint, and a world size.
 pub struct Renderable {

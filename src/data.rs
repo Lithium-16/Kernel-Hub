@@ -30,6 +30,8 @@ pub struct UnitDef {
     pub sprite: String,
     pub color: (u8, u8, u8),
     pub radius: f32,
+    pub speed: f32,
+    pub turn_rate: f32,
 }
 
 /// Load and validate the bundled definitions.
