@@ -4,7 +4,8 @@
 > *actionable build plan*: milestones, the systems each phase delivers, concrete tasks, key
 > data types, and acceptance criteria. Update checkboxes and notes as work progresses.
 >
-> **Last updated:** 2026-06-17 · **Status:** plan complete, implementation not started.
+> **Last updated:** 2026-06-17 · **Status:** M0 + Phase 1 + Phase 2 merged; Phase 3 in progress
+> (movement, collision, perf done); **unit-model + combat design locked** (PROJECT.md §7.3–7.4).
 
 ## How to use this plan
 - Phases are **sequential** and each ends in a **verifiable, runnable build**. Do not start a phase
@@ -65,7 +66,7 @@ camera; unit/building definitions loaded from data.
 - [x] **Tilemap** — 256×256 grid (ground/water/cliff/resource); only visible tiles drawn. ✓
 - [x] **Data layer scaffold** — units/factions loaded from `assets/definitions.ron` (versioned); entities spawned from defs. ✓
 - [ ] **Map format (v1)** — versioned, layered map *file* (procedural test map for now; file format slated for Phase 1.5).
-- [ ] **Extensibility scaffolding** — registries + event bus + swappable-system traits (data-driven defs landed; registries/bus pending).
+- [ ] **Extensibility scaffolding** — registries + event bus + swappable-system traits. *Moved to Phase 3* (now a prerequisite for the ability/transition system).
 - [x] **Debug overlay** — FPS, tick, entity count, camera pos/zoom, map size. ✓
 
 **Key types:** `Tile`, `TileMap`, `Camera2D`, `UnitDef`/`BuildingDef`/`FactionDef`, `World` wrapper.
@@ -126,6 +127,14 @@ grid queries.
 player input produces sensible behavior.
 
 **Build:**
+- [ ] **Registry + event bus + system traits** — the extensibility scaffolding (Phase-1 debt); the
+      dispatch layer abilities/effects/conditions/transitions register into.
+- [ ] **Ability framework** — `AbilityDef` + effect registry; **auto-cast policies** (Manual/Auto/Off
+      + `AutoRule{condition, target, priority}`) scored inside the utility AI.
+- [ ] **Forms & transitions** — unit state machine (mobile / sieged / deploy / construction phases);
+      a building is just an immobile Form; HP carries over as %.
+- [ ] **Command-card UI** — auto-generated from the selection's Form abilities + standard commands;
+      cooldown/disabled/toggle states; click/hotkey → fire or targeting mode.
 - [ ] **Utility AI** — per-unit scorer over candidate actions (idle, take-job, move-to, engage,
       retreat, resupply); pick highest; standing orders bias weights. Runs on staggered schedule.
 - [ ] **Standing orders & stances** — Aggressive / Defensive / Hold-fire / Hold-ground / Cautious;
@@ -173,6 +182,8 @@ power, supply networks) with a blueprint/planning mode, throughput, and coverage
       damaged/destroyed and repaired; cutting enemy roads/power/supply is a strategic objective.
 - [ ] **Supply coverage** — "is tile X supplied?" query (used by combat resupply in Phase 5).
 - [ ] **Resource flow solver** — deterministic per-tick balance pass across the network.
+- [ ] **Research / upgrades** — research buildings produce `UpgradeDef`s (faction-wide, build-gated);
+      effective stat = base + active upgrades; effects can unlock abilities/forms.
 - [ ] **Economy UI** — resource readouts, power balance, bills, network overlay.
 
 **Key types:** `Resource`, `Stockpile`, `ProductionBill`, `SupplyNode`/`SupplyEdge`/`SupplyGraph`,
@@ -193,12 +204,12 @@ signal on the logistics system.
 - [ ] **Health/damage** — HP, death, wreckage; damage application system.
 - [ ] **Weapons & projectiles** — projectile entities (travel time, can miss movers); range, ROF,
       damage; **splash** flag (artillery).
-- [ ] **Anti-air rule** — AA hits only air; non-AA hits only ground (the whole RPS, one rule).
+- [ ] **Damage table** — `armor_mult[damage_type][armor_class]` (subsumes the AA rule; gives counters).
 - [ ] **Targeting** — auto-acquire via spatial grid; threat/priority selection.
 - [ ] **Cover & terrain** — accuracy/range modifiers from elevation/cover tiles; positioning matters.
 - [ ] **Suppression** — incoming fire reduces effectiveness/forces caution (ties to utility AI).
-- [ ] **Ammo & fuel consumption** — burn per volley/move; low units auto-pull resupply from nearest
-      forward dump via job system; starved units can't fire/maneuver.
+- [ ] **Ammo, fuel & upkeep** — burn per volley/move + a continuous upkeep trickle; low units auto-pull
+      resupply from nearest forward dump via job system; starved units can't fire/maneuver.
 - [ ] **Damage/repair** — Engineers repair; wreck salvage (optional).
 - [ ] **Combat feedback** — health bars, hit/explosion FX, suppression indicator.
 
@@ -261,8 +272,9 @@ target with acceptable performance; fog/minimap/UI functional; screenshots of a 
   Phase 1 and maintained as a standing rule for every new system.
 
 ## Parking lot (explicitly deferred)
-Naval/amphibious units · multiplayer/netcode · replays · campaign/story · map editor · player-facing
-modding · additional factions beyond the first · advanced tech/upgrade tree (v1 is build-gated).
+Naval/amphibious units · multiplayer/netcode · replays · campaign/story · player-facing modding ·
+additional factions beyond the first · full free-form tech-tree *screen* · per-unit veterancy (later) ·
+in-game gambit editor for custom auto-cast rules (engine supports it; UI later).
 
 ## Risk register
 - **Rendering throughput at 1,000+ sprites** — mitigate via batching; escalate to custom WebGL/Bevy
