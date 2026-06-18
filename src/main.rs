@@ -126,9 +126,21 @@ async fn main() {
         for &e in &all {
             let _ = world.insert_one(e, Selected);
         }
-        let goal = map_px * 0.5 + vec2(-700.0, -700.0);
+        let goal = std::env::var("COLDWAR_GOAL")
+            .ok()
+            .and_then(|s| {
+                let mut it = s.split(',');
+                let x = it.next()?.trim().parse::<f32>().ok()?;
+                let y = it.next()?.trim().parse::<f32>().ok()?;
+                Some(vec2(x * map::TILE_SIZE, y * map::TILE_SIZE))
+            })
+            .unwrap_or(map_px * 0.5 + vec2(-700.0, -700.0));
         issue_move(&mut world, &nav, &all, goal);
     }
+    let capture_frames: u32 = std::env::var("COLDWAR_FRAMES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(200);
 
     loop {
         let (mx, my) = mouse_position();
@@ -206,7 +218,7 @@ async fn main() {
 
         if let Some(path) = &capture_path {
             frame += 1;
-            if frame >= 200 {
+            if frame >= capture_frames {
                 let rt = render_target(screen_width() as u32, screen_height() as u32);
                 render::present(&world, &map, &cam, &sim, &sprites, None, tick_ms, Some(rt.clone()));
                 rt.texture.get_texture_data().export_png(path);
