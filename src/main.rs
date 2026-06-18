@@ -184,6 +184,7 @@ async fn main() {
             movement::step(&mut world, &grid, &nav, map_px, tick_dt);
             grid.rebuild(&world);
             movement::resolve_collisions(&mut world, &grid, &nav, map_px, 2);
+            movement::settle_arrivals(&mut world);
         }
         let per = start.elapsed().as_secs_f64() * 1000.0 / ticks as f64;
         println!("BENCH {count} units: {per:.3} ms/sim-tick avg over {ticks} ticks");
@@ -257,6 +258,7 @@ async fn main() {
             movement::step(&mut world, &grid, &nav, map_px, tick_dt);
             grid.rebuild(&world);
             movement::resolve_collisions(&mut world, &grid, &nav, map_px, 2);
+            movement::settle_arrivals(&mut world);
             sim.tick();
             accumulator -= tick_dt;
         }

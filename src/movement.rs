@@ -53,10 +53,9 @@ fn try_move(nav: &NavGrid, old: Vec2, new: Vec2) -> Vec2 {
     old
 }
 
-/// Steer units with a `MoveOrder` along their flow field, avoid neighbors, stop on arrival.
+/// Steer units with a `MoveOrder` along their flow field, with local avoidance.
+/// (Arrival/settling is handled separately by `settle_arrivals`.)
 pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, dt: f32) {
-    let mut arrived = Vec::new();
-
     for (e, (pos, vel, head, order)) in
         world.query::<(&mut Position, &mut Velocity, &mut Heading, &MoveOrder)>().iter()
     {
@@ -87,8 +86,37 @@ pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, 
 
         let target = (pos.0 + vel.0 * dt).clamp(Vec2::ZERO, map_px);
         pos.0 = try_move(nav, pos.0, target);
-        if pos.0.distance(order.goal) < order.arrive {
+    }
+}
+
+/// Settle move orders: a unit "arrives" when it reaches the goal core, OR when it's
+/// near the goal AND blocked by an already-settled friend that is closer to the goal.
+/// This packs a filled disk from the center outward instead of ringing the arrival
+/// radius. Call after the collision pass.
+const ARRIVE_CORE: f32 = UNIT_RADIUS * 1.6;
+
+pub fn settle_arrivals(world: &mut World) {
+    let moving: HashSet<Entity> = world.query::<&MoveOrder>().iter().map(|(e, _)| e).collect();
+    let settled: Vec<Vec2> = world
+        .query::<&Position>()
+        .iter()
+        .filter(|(e, _)| !moving.contains(e))
+        .map(|(_, p)| p.0)
+        .collect();
+
+    let mut arrived = Vec::new();
+    for (e, (pos, order)) in world.query::<(&Position, &MoveOrder)>().iter() {
+        let d = pos.0.distance(order.goal);
+        if d < ARRIVE_CORE {
             arrived.push(e);
+        } else if d < order.arrive {
+            let p = pos.0;
+            let blocked = settled
+                .iter()
+                .any(|&s| s.distance(p) < UNIT_RADIUS * 2.3 && s.distance(order.goal) < d - 1.0);
+            if blocked {
+                arrived.push(e);
+            }
         }
     }
 
