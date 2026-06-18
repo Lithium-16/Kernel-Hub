@@ -21,6 +21,10 @@ const ACCEL: f32 = 9.0;
 /// Local-avoidance look radius and strength (steer around neighbors).
 const AVOID_R: f32 = 28.0;
 const AVOID_STRENGTH: f32 = 45.0;
+/// Overlap below this is tolerated (stops dense crowds from buzzing).
+const COLLISION_SLOP: f32 = 1.5;
+/// Max positional correction applied to a unit per tick.
+const MAX_PUSH: f32 = 5.0;
 
 fn passable(nav: &NavGrid, p: Vec2) -> bool {
     let x = (p.x / TILE_SIZE) as i32;
@@ -98,11 +102,9 @@ pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, 
 
 /// Keep unit centers apart. Moving units yield to idle ones; pushes never move a
 /// unit onto impassable terrain.
-pub fn resolve_collisions(world: &mut World, grid: &mut SpatialGrid, nav: &NavGrid, map_px: Vec2, iters: u32) {
-    for _ in 0..iters {
-        grid.rebuild(world);
-        let moving: HashSet<Entity> = world.query::<&MoveOrder>().iter().map(|(e, _)| e).collect();
-
+pub fn resolve_collisions(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, passes: u32) {
+    let moving: HashSet<Entity> = world.query::<&MoveOrder>().iter().map(|(e, _)| e).collect();
+    for _ in 0..passes {
         let mut corrections: Vec<(Entity, Vec2)> = Vec::new();
         for (e, pos) in world.query::<&Position>().iter() {
             let self_moving = moving.contains(&e);
@@ -113,17 +115,18 @@ pub fn resolve_collisions(world: &mut World, grid: &mut SpatialGrid, nav: &NavGr
                 }
                 let d = pos.0 - op;
                 let dist = d.length();
-                if dist > 0.0001 && dist < COLLISION_DIAM {
+                let overlap = COLLISION_DIAM - dist;
+                if dist > 0.0001 && overlap > COLLISION_SLOP {
                     let w = match (self_moving, moving.contains(&other)) {
                         (false, true) => 0.0,
                         (true, false) => 1.0,
                         _ => 0.5,
                     };
-                    push += d / dist * (COLLISION_DIAM - dist) * w;
+                    push += d / dist * (overlap - COLLISION_SLOP) * w;
                 }
             });
             if push != Vec2::ZERO {
-                corrections.push((e, push));
+                corrections.push((e, push.clamp_length_max(MAX_PUSH)));
             }
         }
 

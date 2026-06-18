@@ -31,11 +31,18 @@ use nav::{FlowField, NavGrid};
 use spatial::SpatialGrid;
 
 fn window_conf() -> Conf {
+    // COLDWAR_VSYNC=0 disables vsync (uncaps fps past the monitor refresh).
+    let swap_interval = if std::env::var("COLDWAR_VSYNC").as_deref() == Ok("0") {
+        Some(0)
+    } else {
+        Some(1)
+    };
     Conf {
         window_title: "Cold War RTS (working title) - Phase 3".to_owned(),
         window_width: 1280,
         window_height: 720,
         high_dpi: false,
+        platform: miniquad::conf::Platform { swap_interval, ..Default::default() },
         ..Default::default()
     }
 }
@@ -50,7 +57,7 @@ fn spawn_army(world: &mut hecs::World, defs: &Definitions, sprites: &Sprites, ma
         let sprite = sprites.unit_index(&unit.sprite);
         let gx = (i % cols) as f32 - cols as f32 * 0.5;
         let gy = (i / cols) as f32 - cols as f32 * 0.5;
-        let pos = center + vec2(gx * 16.0, gy * 16.0);
+        let pos = center + vec2(gx * 22.0, gy * 22.0);
         world.spawn((
             Position(pos),
             Velocity(Vec2::ZERO),
@@ -82,7 +89,7 @@ fn issue_move(world: &mut hecs::World, nav: &NavGrid, units: &[Entity], goal: Ve
         return;
     }
     let flow = Arc::new(FlowField::to_goal(nav, (tx as usize, ty as usize)));
-    let arrive = (movement::UNIT_RADIUS * (units.len() as f32).sqrt() * 1.2).max(24.0);
+    let arrive = (movement::UNIT_RADIUS * (units.len() as f32).sqrt() * 1.5).max(24.0);
     for &e in units {
         let _ = world.insert_one(e, MoveOrder { flow: flow.clone(), goal, arrive });
     }
@@ -141,6 +148,23 @@ async fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(200);
+
+    // Headless sim benchmark (native): COLDWAR_BENCH=<ticks>. Prints ms/sim-tick.
+    if let Ok(b) = std::env::var("COLDWAR_BENCH") {
+        let ticks: u32 = b.parse().unwrap_or(300);
+        let all: Vec<Entity> = world.query::<&Position>().iter().map(|(e, _)| e).collect();
+        issue_move(&mut world, &nav, &all, map_px * 0.5 + vec2(-2000.0, -2000.0));
+        let start = std::time::Instant::now();
+        for _ in 0..ticks {
+            grid.rebuild(&world);
+            movement::step(&mut world, &grid, &nav, map_px, tick_dt);
+            grid.rebuild(&world);
+            movement::resolve_collisions(&mut world, &grid, &nav, map_px, 2);
+        }
+        let per = start.elapsed().as_secs_f64() * 1000.0 / ticks as f64;
+        println!("BENCH {count} units: {per:.3} ms/sim-tick avg over {ticks} ticks");
+        std::process::exit(0);
+    }
 
     loop {
         let (mx, my) = mouse_position();
@@ -205,7 +229,8 @@ async fn main() {
         while accumulator >= tick_dt {
             grid.rebuild(&world);
             movement::step(&mut world, &grid, &nav, map_px, tick_dt);
-            movement::resolve_collisions(&mut world, &mut grid, &nav, map_px, 2);
+            grid.rebuild(&world);
+            movement::resolve_collisions(&mut world, &grid, &nav, map_px, 2);
             sim.tick();
             accumulator -= tick_dt;
         }
