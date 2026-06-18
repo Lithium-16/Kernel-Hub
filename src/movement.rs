@@ -77,8 +77,20 @@ pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, 
         state.last = pos.0; // pre-move position; settle_arrivals compares against it
         let facing = vec2(head.0.cos(), head.0.sin());
 
-        // Desired direction = flow toward goal + local avoidance.
-        let flow = order.flow.dir_at(pos.0);
+        // Base direction: follow the shared flow field until we reach the formation
+        // anchor's neighbourhood, then seek our OWN slot directly. The switch is keyed on
+        // distance to the anchor (sized to the formation in `issue_move`), not to the
+        // slot — otherwise outer-slot units funnel into the central pile and never get
+        // close enough to their slot to break away. Distinct slots → the group fans into
+        // a block instead of crushing one point → no packed-group jitter.
+        let to_goal = order.goal - pos.0;
+        let dist_goal = to_goal.length();
+        let near_formation = pos.0.distance(order.anchor) < order.seek;
+        let base_dir = if near_formation && dist_goal > 0.001 {
+            to_goal / dist_goal
+        } else {
+            order.flow.dir_at(pos.0)
+        };
         let mut sep = Vec2::ZERO;
         let mut around = Vec2::ZERO;
         grid.for_neighbors(pos.0, AVOID_R, |other, op| {
@@ -100,7 +112,7 @@ pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, 
                 }
             }
         });
-        let desired = flow + sep * SEP_WEIGHT + around * AROUND_WEIGHT;
+        let desired = base_dir + sep * SEP_WEIGHT + around * AROUND_WEIGHT;
         let desired_dir = if desired.length_squared() > 1e-4 {
             desired.normalize()
         } else {

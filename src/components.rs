@@ -42,11 +42,16 @@ pub struct MoveState {
 /// Marker: entity is currently selected by the player.
 pub struct Selected;
 
-/// A per-unit move order: the flow field to follow, the goal, and the arrival
-/// radius. Each unit carries its own (the `Arc` shares one field across a group),
-/// so issuing a new order to other units never hijacks this one.
+/// A per-unit move order. The shared `flow` field routes the unit to the formation
+/// `anchor` (the click point); once within `seek` distance of the anchor it heads
+/// straight for its own `goal` slot, so the group fans into a block instead of all
+/// piling onto one point. `arrive` is the stall-window radius around the slot. Each
+/// unit carries its own order (the `Arc` shares one field across a group), so issuing
+/// a new order to other units never hijacks this one.
 pub struct MoveOrder {
     pub flow: Arc<FlowField>,
     pub goal: Vec2,
+    pub anchor: Vec2,
+    pub seek: f32,
     pub arrive: f32,
 }

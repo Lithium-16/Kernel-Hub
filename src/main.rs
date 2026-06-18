@@ -78,10 +78,13 @@ fn clear_selection(world: &mut hecs::World) {
     }
 }
 
-/// Build one shared flow field for `goal` and assign it to `units` as a move order.
-/// Only the listed units are affected — other units keep their existing orders.
-fn issue_move(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache, units: &[Entity], goal: Vec2) {
-    let (tx, ty) = ((goal.x / map::TILE_SIZE) as i32, (goal.y / map::TILE_SIZE) as i32);
+/// Issue a group move to `click`. One shared flow field routes everyone to the area,
+/// but each unit is assigned its OWN destination slot in a packed formation around the
+/// click — so the group fans into a block instead of all crushing the same point (the
+/// real cause of packed-group jitter). Each unit then seeks its slot (see movement::step).
+/// Only the listed units are affected — others keep their existing orders.
+fn issue_move(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache, units: &[Entity], click: Vec2) {
+    let (tx, ty) = ((click.x / map::TILE_SIZE) as i32, (click.y / map::TILE_SIZE) as i32);
     if units.is_empty()
         || tx < 0
         || ty < 0
@@ -92,9 +95,52 @@ fn issue_move(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache, uni
         return;
     }
     let flow = cache.get_or_build(nav, (tx as usize, ty as usize));
-    let arrive = (movement::UNIT_RADIUS * (units.len() as f32).sqrt() * 1.5).max(24.0);
+
+    // Packed formation slots centered on the click (spacing > collision diameter so no
+    // two slots fight for the same space).
+    let n = units.len();
+    let cols = (n as f32).sqrt().ceil().max(1.0) as i32;
+    let rows = ((n as i32 + cols - 1) / cols).max(1);
+    let spacing = movement::UNIT_RADIUS * 2.2;
+    let mut slots: Vec<Vec2> = Vec::with_capacity(n);
+    for i in 0..n as i32 {
+        let cx = (i % cols) as f32 - (cols - 1) as f32 * 0.5;
+        let cy = (i / cols) as f32 - (rows - 1) as f32 * 0.5;
+        slots.push(click + vec2(cx * spacing, cy * spacing));
+    }
+    // Units flip from flow-following to slot-seeking once within `seek` of the anchor.
+    // Size it to the formation's half-diagonal (+ margin) so even the outermost slot is
+    // reachable — otherwise far units pile at the anchor and never reach their slot.
+    let half = vec2(cols as f32, rows as f32) * spacing * 0.5;
+    let seek = half.length() + spacing * 2.0;
+
+    // Greedy nearest-slot assignment (each unit takes its closest free slot — keeps the
+    // formation from criss-crossing). Falls back to the click point if slots run out.
+    let mut positions: Vec<(Entity, Vec2)> = Vec::with_capacity(n);
     for &e in units {
-        let _ = world.insert_one(e, MoveOrder { flow: flow.clone(), goal, arrive });
+        if let Ok(p) = world.query_one_mut::<&Position>(e) {
+            positions.push((e, p.0));
+        }
+    }
+    let arrive = movement::UNIT_RADIUS * 3.0;
+    let mut taken = vec![false; slots.len()];
+    for (e, p) in positions {
+        let mut best: Option<usize> = None;
+        let mut best_d = f32::MAX;
+        for (si, s) in slots.iter().enumerate() {
+            if !taken[si] {
+                let d = p.distance(*s);
+                if d < best_d {
+                    best_d = d;
+                    best = Some(si);
+                }
+            }
+        }
+        let goal = best.map(|si| {
+            taken[si] = true;
+            slots[si]
+        }).unwrap_or(click);
+        let _ = world.insert_one(e, MoveOrder { flow: flow.clone(), goal, anchor: click, seek, arrive });
     }
 }
 
@@ -191,6 +237,44 @@ async fn main() {
         }
         let per = start.elapsed().as_secs_f64() * 1000.0 / ticks as f64;
         println!("BENCH {count} units: {per:.3} ms/sim-tick avg over {ticks} ticks");
+        std::process::exit(0);
+    }
+
+    // Headless jitter diagnostic (native): COLDWAR_SETTLE=<ticks>. Orders all units to a
+    // nearby point, runs the sim, and over the final 40 ticks reports how many units are
+    // still moving and the mean per-tick displacement — a direct measure of resting jitter.
+    if let Ok(s) = std::env::var("COLDWAR_SETTLE") {
+        let ticks: u32 = s.parse().unwrap_or(900);
+        let all: Vec<Entity> = world.query::<&Position>().iter().map(|(e, _)| e).collect();
+        issue_move(&mut world, &nav, &mut flow_cache, &all, map_px * 0.5 + vec2(140.0, 140.0));
+        let tail = 40u32;
+        let mut prev: std::collections::HashMap<Entity, Vec2> = std::collections::HashMap::new();
+        let mut samples = 0u32;
+        let mut total_disp = 0.0f64;
+        let mut max_disp = 0.0f32;
+        for t in 0..ticks {
+            grid.rebuild(&world);
+            movement::step(&mut world, &grid, &nav, map_px, tick_dt);
+            grid.rebuild(&world);
+            movement::resolve_collisions(&mut world, &grid, &nav, map_px, 2);
+            movement::settle_arrivals(&mut world);
+            if t >= ticks - tail {
+                for (e, pos) in world.query::<&Position>().iter() {
+                    if let Some(p) = prev.get(&e) {
+                        let d = pos.0.distance(*p);
+                        total_disp += d as f64;
+                        max_disp = max_disp.max(d);
+                        samples += 1;
+                    }
+                    prev.insert(e, pos.0);
+                }
+            }
+        }
+        let moving = world.query::<&MoveOrder>().iter().count();
+        let mean = if samples > 0 { total_disp / samples as f64 } else { 0.0 };
+        println!(
+            "SETTLE {count} units after {ticks} ticks: still_moving={moving}  mean_disp={mean:.4} px/tick  max_disp={max_disp:.3} px/tick (last {tail} ticks)"
+        );
         std::process::exit(0);
     }
 
