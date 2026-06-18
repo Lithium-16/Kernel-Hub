@@ -1,16 +1,18 @@
 // Data-driven game definitions (Cold-War-era starter faction).
 // Authored content lives here, not in code. Schema is versioned (see `version`).
+// Unit colors are white: the placeholder art (Kenney top-down tanks, CC0) is already
+// colored, so we draw it untinted. Faction tinting returns later.
 Definitions(
     version: 1,
     factions: [
         (id: "vanguard", name: "Vanguard Bloc", color: (110, 160, 230)),
     ],
     units: [
-        (id: "engineer", name: "Engineer",        faction: "vanguard", sprite: "engineer",  color: (210, 200, 120), radius: 7.0),
-        (id: "infantry", name: "Infantry",        faction: "vanguard", sprite: "infantry",  color: (180, 190, 170), radius: 6.0),
-        (id: "tank",     name: "Main Battle Tank", faction: "vanguard", sprite: "tank",      color: (140, 200, 150), radius: 11.0),
-        (id: "arty",     name: "Artillery",       faction: "vanguard", sprite: "artillery", color: (220, 150, 120), radius: 9.0),
-        (id: "aa",       name: "AA Vehicle",       faction: "vanguard", sprite: "aa",        color: (160, 170, 220), radius: 9.0),
-        (id: "truck",    name: "Supply Truck",     faction: "vanguard", sprite: "truck",     color: (200, 180, 140), radius: 8.0),
+        (id: "engineer", name: "Engineer",        faction: "vanguard", sprite: "engineer",  color: (255, 255, 255), radius: 9.0),
+        (id: "infantry", name: "Infantry",        faction: "vanguard", sprite: "infantry",  color: (255, 255, 255), radius: 8.0),
+        (id: "tank",     name: "Main Battle Tank", faction: "vanguard", sprite: "tank",      color: (255, 255, 255), radius: 12.0),
+        (id: "arty",     name: "Artillery",       faction: "vanguard", sprite: "artillery", color: (255, 255, 255), radius: 12.0),
+        (id: "aa",       name: "AA Vehicle",       faction: "vanguard", sprite: "aa",        color: (255, 255, 255), radius: 10.0),
+        (id: "truck",    name: "Supply Truck",     faction: "vanguard", sprite: "truck",     color: (255, 255, 255), radius: 11.0),
     ],
 )

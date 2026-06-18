@@ -4,7 +4,10 @@
 > *actionable build plan*: milestones, the systems each phase delivers, concrete tasks, key
 > data types, and acceptance criteria. Update checkboxes and notes as work progresses.
 >
-> **Last updated:** 2026-06-17 · **Status:** plan complete, implementation not started.
+> **Last updated:** 2026-06-18 · **Status:** M0 + Phase 1 + Phase 2 done; movement / perf / art /
+> pathfinding polished. **Roadmap restructured core-first — canonical phase ORDER is now PROJECT.md §8.**
+> Next: **Phase 2.5 (UI toolkit)**. The detailed phase sections below predate the restructure; treat
+> PROJECT.md §8 as the source of truth for order — they're re-sequenced/migrated as each phase begins.
 
 ## How to use this plan
 - Phases are **sequential** and each ends in a **verifiable, runnable build**. Do not start a phase
@@ -65,7 +68,7 @@ camera; unit/building definitions loaded from data.
 - [x] **Tilemap** — 256×256 grid (ground/water/cliff/resource); only visible tiles drawn. ✓
 - [x] **Data layer scaffold** — units/factions loaded from `assets/definitions.ron` (versioned); entities spawned from defs. ✓
 - [ ] **Map format (v1)** — versioned, layered map *file* (procedural test map for now; file format slated for Phase 1.5).
-- [ ] **Extensibility scaffolding** — registries + event bus + swappable-system traits (data-driven defs landed; registries/bus pending).
+- [ ] **Extensibility scaffolding** — registries + event bus + swappable-system traits. *Moved to Phase 3* (now a prerequisite for the ability/transition system).
 - [x] **Debug overlay** — FPS, tick, entity count, camera pos/zoom, map size. ✓
 
 **Key types:** `Tile`, `TileMap`, `Camera2D`, `UnitDef`/`BuildingDef`/`FactionDef`, `World` wrapper.
@@ -121,11 +124,42 @@ grid queries.
 
 ---
 
-## Phase 3 — Autonomy core (the "low micro" engine)
-**Goal:** units act on their own via utility AI + a job system; squads command as one unit; minimal
-player input produces sensible behavior.
+## Phase 2.5 — Modular & scalable UI system
+**Goal:** a reusable UI toolkit every later panel is built on (command card, build menu, economy
+readouts, minimap, modals) — consistent, themeable, resolution-scalable, with proper input layering.
 
 **Build:**
+- [ ] **Immediate-mode widget core** — Panel, Button, IconButton, Label, Bar, Grid, ScrollList,
+      Tooltip, ContextMenu, Modal — drawn in the screen-space pass.
+- [ ] **Layout** — anchors + stack/grid; reflows on resolution/DPI change.
+- [ ] **Theming** — data-driven theme (colors, fonts, padding, icon atlas); restyle in one place.
+- [ ] **Input layering** — UI consumes mouse/keys first; world sees only unhandled input (no click
+      leak to the map); hotkey routing.
+- [ ] **Panel registry** — HUD panels register (no central switch); first panels: resource/power bar
+      stub + selection panel.
+- [ ] **UI icon atlas** + batched draw.
+
+**Key types:** `Ui`, `Widget`, `Layout`, `Theme`, `PanelId`, `InputCapture`.
+
+**Acceptance:** a themed HUD with a working button/panel that captures its own clicks (no leak to the
+world); resizes cleanly; screenshot; tests for layout + input-capture logic.
+
+---
+
+## Phase 3 — Units & Buildings infrastructure + autonomy core
+**Goal:** the full **unit AND building** object model + autonomy — Forms/abilities/transitions,
+building placement/construction/production, utility AI + job system + squads — so minimal player input
+produces sensible behavior for both units and buildings.
+
+**Build:**
+- [ ] **Registry + event bus + system traits** — the extensibility scaffolding (Phase-1 debt); the
+      dispatch layer abilities/effects/conditions/transitions register into.
+- [ ] **Ability framework** — `AbilityDef` + effect registry; **auto-cast policies** (Manual/Auto/Off
+      + `AutoRule{condition, target, priority}`) scored inside the utility AI.
+- [ ] **Forms & transitions** — unit state machine (mobile / sieged / deploy / construction phases);
+      a building is just an immobile Form; HP carries over as %.
+- [ ] **Command-card UI** — auto-generated from the selection's Form abilities + standard commands;
+      cooldown/disabled/toggle states; click/hotkey → fire or targeting mode.
 - [ ] **Utility AI** — per-unit scorer over candidate actions (idle, take-job, move-to, engage,
       retreat, resupply); pick highest; standing orders bias weights. Runs on staggered schedule.
 - [ ] **Standing orders & stances** — Aggressive / Defensive / Hold-fire / Hold-ground / Cautious;
@@ -140,12 +174,21 @@ player input produces sensible behavior.
       with **Shift to queue waypoints**; **opt-in squad drafting** for direct control.
 - [ ] **Zones** — paint defense/staging/no-go zones that orders and jobs reference.
 - [ ] **Doctrine presets** — save/apply policy bundles (stances + priorities) to a force in one action.
+- [ ] **Building placement** — ghost/blueprint preview, grid snap, validity (terrain / overlap /
+      build-radius / resource node), rotation; multi-place blueprint mode.
+- [ ] **Construction** — builders take build jobs; site → frame → complete Forms; gradual drain;
+      cancel (refund) / repair.
+- [ ] **Production** — producer buildings: queue + rally point + exit; bills; research queue.
+      (Resource *costs* wired in Phase 4; queue / placement / construction *systems* built here.)
+- [ ] **Building command card + deploy/undeploy** — buildings use the same card; MCV↔HQ transitions.
 
-**Key types:** `UtilityAgent`, `StandingOrder`, `Job`, `JobBoard`, `Squad`, `Zone`, `Selection`.
+**Key types:** `Form`, `Ability`/`AbilityDef`, `AutoRule`, `Transition`, `UtilityAgent`, `StandingOrder`,
+`Job`/`JobBoard` (incl. `BuildJob`), `Squad`, `Zone`, `Selection`, `Placement`, `ProductionQueue`.
 
 **Acceptance:** undrafted units idle→claim jobs and defend zones with no per-unit input; a squad
-moves/holds as one; drafting a squad gives direct control; screenshot of squads holding zones; tests
-for utility scoring + job claim/release.
+moves/holds as one; drafting a squad gives direct control; **a builder constructs a placed building
+(site→complete) and a producer building queues + rallies a unit; deploy↔undeploy works**; an auto-cast
+ability fires on its condition; screenshot; tests for utility scoring, job claim/release, and a transition.
 
 ---
 
@@ -173,6 +216,8 @@ power, supply networks) with a blueprint/planning mode, throughput, and coverage
       damaged/destroyed and repaired; cutting enemy roads/power/supply is a strategic objective.
 - [ ] **Supply coverage** — "is tile X supplied?" query (used by combat resupply in Phase 5).
 - [ ] **Resource flow solver** — deterministic per-tick balance pass across the network.
+- [ ] **Research / upgrades** — research buildings produce `UpgradeDef`s (faction-wide, build-gated);
+      effective stat = base + active upgrades; effects can unlock abilities/forms.
 - [ ] **Economy UI** — resource readouts, power balance, bills, network overlay.
 
 **Key types:** `Resource`, `Stockpile`, `ProductionBill`, `SupplyNode`/`SupplyEdge`/`SupplyGraph`,
@@ -193,12 +238,12 @@ signal on the logistics system.
 - [ ] **Health/damage** — HP, death, wreckage; damage application system.
 - [ ] **Weapons & projectiles** — projectile entities (travel time, can miss movers); range, ROF,
       damage; **splash** flag (artillery).
-- [ ] **Anti-air rule** — AA hits only air; non-AA hits only ground (the whole RPS, one rule).
+- [ ] **Damage table** — `armor_mult[damage_type][armor_class]` (subsumes the AA rule; gives counters).
 - [ ] **Targeting** — auto-acquire via spatial grid; threat/priority selection.
 - [ ] **Cover & terrain** — accuracy/range modifiers from elevation/cover tiles; positioning matters.
 - [ ] **Suppression** — incoming fire reduces effectiveness/forces caution (ties to utility AI).
-- [ ] **Ammo & fuel consumption** — burn per volley/move; low units auto-pull resupply from nearest
-      forward dump via job system; starved units can't fire/maneuver.
+- [ ] **Ammo, fuel & upkeep** — burn per volley/move + a continuous upkeep trickle; low units auto-pull
+      resupply from nearest forward dump via job system; starved units can't fire/maneuver.
 - [ ] **Damage/repair** — Engineers repair; wreck salvage (optional).
 - [ ] **Combat feedback** — health bars, hit/explosion FX, suppression indicator.
 
@@ -261,8 +306,9 @@ target with acceptable performance; fog/minimap/UI functional; screenshots of a 
   Phase 1 and maintained as a standing rule for every new system.
 
 ## Parking lot (explicitly deferred)
-Naval/amphibious units · multiplayer/netcode · replays · campaign/story · map editor · player-facing
-modding · additional factions beyond the first · advanced tech/upgrade tree (v1 is build-gated).
+Naval/amphibious units · multiplayer/netcode · replays · campaign/story · player-facing modding ·
+additional factions beyond the first · full free-form tech-tree *screen* · per-unit veterancy (later) ·
+in-game gambit editor for custom auto-cast rules (engine supports it; UI later).
 
 ## Risk register
 - **Rendering throughput at 1,000+ sprites** — mitigate via batching; escalate to custom WebGL/Bevy

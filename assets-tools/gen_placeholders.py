@@ -140,6 +140,24 @@ def selection_ring():
     return img
 
 
+# Fixed atlas slot order — MUST match src/assets.rs.
+ATLAS_ORDER = [
+    "infantry", "engineer", "tank", "artillery", "aa", "truck",
+    "tile_ground", "tile_water", "tile_cliff", "tile_resource", "selection",
+]
+ATLAS_COLS = 4
+
+
+def build_atlas():
+    rows = (len(ATLAS_ORDER) + ATLAS_COLS - 1) // ATLAS_COLS
+    atlas = Image.new("RGBA", (ATLAS_COLS * S, rows * S), (0, 0, 0, 0))
+    for i, name in enumerate(ATLAS_ORDER):
+        img = Image.open(os.path.join(OUT, name + ".png")).convert("RGBA")
+        atlas.alpha_composite(img, ((i % ATLAS_COLS) * S, (i // ATLAS_COLS) * S))
+    atlas.save(os.path.join(OUT, "atlas.png"))
+    print("wrote atlas.png", atlas.size)
+
+
 def main():
     random.seed(42)
     for name, fn in UNIT_SPRITES.items():
@@ -147,6 +165,7 @@ def main():
     for name, (color, kind) in TILES.items():
         save(tile(color, kind), "tile_" + name)
     save(selection_ring(), "selection")
+    build_atlas()
     print("done")
 
 

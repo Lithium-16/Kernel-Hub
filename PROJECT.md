@@ -162,21 +162,115 @@ Depth mechanics:
 - **Stockpile zones & production bills** (RimWorld layer) — designate storage zones w/ priorities &
   capacity; standing production orders ("keep 200 shells, then pause"). Manage policy, not items.
 
-### 7.3 Combat (abstracted, plugs into logistics)
-- HP + cover (terrain) + suppression + range. Auto-fire on targets in range; auto-seek cover.
-- **Anti-air rule:** AA units/turrets hit only air; everything else hits only ground. Single rule,
-  whole rock-paper-scissors, no armor matrix.
-- **Projectiles are real entities** (travel time, can miss movers). Some weapons have splash.
-- Units **burn ammo per volley, fuel per move**; low units auto-pull from nearest forward dump.
-  Well-supplied front = full effectiveness; starved front can't fire/maneuver. **Combat = readout of logistics.**
-- Standing orders: aggressive / defensive / hold-fire / retreat-at-X%-HP.
+### 7.3 Combat — flow, damage model, suppression (abstracted, logistics-fed)
+Combat **auto-resolves** from positioning, supply, and stats; the player commands intent, not shots.
 
-### 7.4 Units (v1 placeholder roster — Cold-War-era theming, data-driven)
-Units are **defined as composable data** (chassis/movement + weapon(s) + armor + abilities) so any
-kind is authorable and factions can share or differ. Starter roster (Cold-War flavor, names per
-faction): Engineer (builder/repair) · Infantry · Main Battle Tank · Artillery (splash, fragile) ·
-AA Vehicle (anti-air only) · Jet/Helicopter (air) · Supply Truck (logistics transport).
-Naval deferred (framework supports movement layers).
+**Per-tick pipeline** (throttled on the staggered think-tick):
+1. **Acquire** — an armed unit with no valid target scans the spatial grid within `range + margin`
+   for enemies it can damage (domain check); picks best by `target_priority` + threat + distance.
+2. **Decide** (stance/utility AI) — Aggressive: chase & fire · Defensive: fire in range, don't chase ·
+   Hold-ground: fire, never move · Hold-fire: never fire · plus retreat-at-X%-HP.
+3. **Fire** — if in range, off cooldown, **has ammo**, arc/LoS ok → spawn projectile (travel time) or
+   hitscan; consume ammo; reset cooldown; roll accuracy (cover / elevation / target-motion / suppression).
+4. **Resolve** — on hit: `damage = base × armor_mult[damage_type][armor_class]` (+ splash); emit `DamageEvent`.
+5. **Apply** — subtract HP; add suppression; HP ≤ 0 → death (wreck + event + freed upkeep).
+6. **Suppression** — incoming fire lowers accuracy/speed; high suppression forces caution/retreat; decays.
+7. **Logistics** — firing drains onboard **ammo**, moving drains **fuel**; empty → can't act → auto-requests
+   resupply (job). **Combat effectiveness is a readout of supply.**
+
+**Damage model (locked):** one small `armor_mult[damage_type][armor_class]` table — not per-unit matrices.
+- damage types: `small_arms | AP | HE | AA` · armor classes: `infantry | light | heavy | air | structure`
+- This **subsumes the anti-air rule** (AA weapons: high vs `air`, ~0 vs ground; ground weapons: 0 vs `air`)
+  and gives counters (AP vs heavy, small-arms vs infantry, HE splash) — the rock-paper-scissors from one table.
+
+**Suppression (locked in):** units accumulate suppression under fire → reduced accuracy + speed; high →
+forced caution/retreat; decays when not under fire. (HP-only fallback if it proves fiddly in playtest.)
+
+**Upkeep (locked in):** units consume a trickle of ammo/fuel/supply over time (not just build cost), so a
+big army you can't supply degrades — reinforcing the logistics identity.
+
+### 7.4 Unit model — Forms, Abilities, Transitions, Upgrades, Auto-cast
+A **unit is a persistent, faction-owned entity whose capabilities come from its active _Form_.** A
+`UnitDef` is a small **state machine**: a set of Forms + Transitions. **A building is just a Form**
+(immobile + structure/producer components), so unit↔building conversion and construction phases use
+the same mechanism — no separate building system.
+
+- **Form (mode / phase):** what the entity is right now — `chassis(Mobile{speed,turn_rate,collision,
+  terrain_mask} | Immobile) + durability(hp, armor_class) + armament[Weapon(+turret mount)] +
+  abilities[id…] + sprite/turret layers + role components (Builder | Producer | Storage | Cargo …)`.
+  One Form = simple unit; multiple Forms = siege/deploy/morph/construction phases.
+- **Turret / mount:** a weapon may carry `mount{turret_sprite, traverse_rate, arc (360=full, 0=fixed),
+  pivot}`, rendered as an independently-rotating layer that tracks the target while the hull moves.
+- **Ability (verbs a Form grants, from a registry of effect types):** `trigger(active|passive|auto) +
+  target_mode(self|unit|point|area|none|toggle) + cost(ammo|energy|resources|hp) + cooldown +
+  effect[…](fire_special, transform, build, repair, haul, deploy, cloak, toggle_stance, spawn,
+  area_effect, self_destruct, capture …) + ui(icon, hotkey, name, tooltip, slot, confirm?)`. Compose
+  existing effects in data; a new effect type is one small registered handler (no scripting language).
+- **Transition (change Form):** `from→to, trigger(ability|build_complete|timer|hp_threshold|condition),
+  duration, cost, reversible?, interruptible?`. HP carries over as a **percentage**.
+- **Upgrades / research (faction-wide, build-gated):** `UpgradeDef{ cost, research_time,
+  prerequisites(building/upgrade), affects(unit tags), effects[stat_delta | unlock_ability |
+  unlock_form | unlock_unit | cost_reduction] }`. A unit's **effective stat = base + Σ active faction
+  upgrades matching its tags** (present + future units). Unit *access* stays build-gated; upgrades
+  layer on top. (Per-unit **veterancy** = same mechanism, later.)
+- **Auto-cast policies (the low-micro layer):** each ability runs **Manual | Auto | Off** (toggle on
+  the command card). An auto ability has `AutoRule{ condition, target_selector, priority }`; on the
+  staggered think-tick the unit fires its highest-priority rule whose **condition** holds (resources/
+  cooldown/target permitting). Conditions from a registry: `self.hp<X · ammo==0 · enemy_in_range ·
+  enemy_count_within(r)>=N · ally_wounded_within(r) · suppression>X · stationary_for(t) · …`. Sensible
+  per-ability defaults + doctrine presets + stance gating = **set policy once, no per-cast micro**.
+  Auto-cast is scored inside the utility AI, not a separate loop.
+- **Command-card UI:** auto-generated from the selection's active-Form abilities + standard commands
+  (Move / Stop / Hold / Attack-move). Buttons reflect cooldown / disabled (no ammo·energy·res) / toggle
+  state; click or hotkey → instant fire or targeting mode; multi-select shows shared abilities, applies
+  to all. New unit/ability/upgrade → its button appears automatically. Icons live in an icon atlas.
+
+**v1 roster (Cold-War flavor, data-driven, names per faction):** Engineer (builder/repair) · Infantry ·
+Main Battle Tank (turret) · Artillery (deploy Form, splash) · AA Vehicle · Jet/Helicopter (air) ·
+Supply Truck (hauler). Naval deferred (movement layer supports it).
+
+**Example data — illustrative; pins the shape, not final field names:**
+```ron
+UnitDef(
+  id: "mbt", name: "Main Battle Tank", faction: "vanguard", default_form: "mobile",
+  forms: {
+    "mobile": Form(
+      chassis: Mobile(speed: 70, turn_rate: 180, collision: 11, terrain: [Ground]),
+      durability: (hp: 400, armor: Heavy),
+      armament: [ Weapon(
+        damage: 90, damage_type: AP, target_domains: [Ground], range: 220, cooldown: 2.2,
+        projectile_speed: 600, splash: 0, accuracy: 0.9, ammo_per_shot: 1,
+        mount: Some(Turret(sprite: "mbt_turret", traverse_rate: 120, arc: 360)) ) ],
+      abilities: ["siege", "detonate"],
+    ),
+    "sieged": Form(
+      chassis: Immobile, durability: (hp: 400, armor: Heavy),
+      armament: [ Weapon( damage: 160, damage_type: HE, range: 420, cooldown: 5.0,
+        splash: 48, accuracy: 0.95, ammo_per_shot: 2 ) ],
+      abilities: ["unsiege"],
+    ),
+  },
+  transitions: [
+    (from: "mobile", to: "sieged", trigger: Ability("siege"), duration: 1.5, reversible: true),
+    (from: "sieged", to: "mobile", trigger: Ability("unsiege"), duration: 1.2),
+  ],
+  logistics: (ammo_capacity: 24, fuel_capacity: 100, fuel_per_tile: 0.2, upkeep: (fuel: 0.05)),
+  cost: (metal: 600, components: 40), build_time: 18, requires: "factory",
+)
+
+AbilityDef(
+  id: "detonate", trigger: Active, target_mode: SelfArea, cooldown: 0,
+  effect: [SelfDestruct(damage: 250, damage_type: HE, radius: 64)],
+  default_autocast: Off,                          // dangerous -> manual by default
+  ui: (icon: "ic_detonate", hotkey: "T", name: "Detonate", confirm: true),
+)
+
+UpgradeDef(
+  id: "composite_armor", name: "Composite Armor", requires: "research_bay",
+  cost: (metal: 400, components: 80), research_time: 40,
+  affects: ["tank", "heavy_vehicle"], effects: [StatDelta(armor_bonus: 1, hp_mult: 1.15)],
+)
+```
 
 ### 7.5 Buildings (v1 placeholder)
 Command Center · Extractor (on node) · Refinery · Barracks (infantry) · Factory (vehicles) ·
@@ -184,8 +278,10 @@ Airbase (aircraft) · Depot/Warehouse (storage) · Forward Supply Dump · Turret
 Generator (power). Infrastructure: Roads/Rail.
 
 ### 7.6 Tech progression
-**Build-gated, not research-gated** (v1): access gated by what you've built (need a Factory to
-make Tanks, etc.). No tech-tree screen yet. Intuitive, self-pacing. Real upgrade tree = later.
+**Build-gated access + upgrade research.** Unit/building *access* is gated by what you've built (need
+a Factory to make Tanks). On top of that, **upgrades/research** (see §7.4) improve produced units
+faction-wide and can unlock abilities/forms. No full free-form tech-tree *screen* in v1, but the
+upgrade system is in scope (no longer deferred).
 
 ### 7.7 Vision / fog of war
 Two-state fog (unexplored → explored/dimmed showing last-seen → visible). Per-unit sight radius
@@ -261,23 +357,97 @@ First-class map support is a project goal (see §5 Map system).
 - **Validation:** reachability, resource balance, spawn fairness checks.
 - **Procedural hooks:** optional generators emit the same format (not v1-critical, but supported).
 
-## 8. Roadmap (phased; playable/verifiable at each step)
-- **Phase 1 — Engine skeleton:** core loop, data-oriented ECS, macroquad renderer + camera, large
-  tilemap, render placeholder sprites, + data-driven definition loader scaffold (one faction),
-  versioned map format, and extensibility scaffolding (registries, event bus, traits).
-  Goal: something on screen (native + WASM screenshot).
-- **Phase 1.5 — Map system & editor:** versioned layered map format + in-engine editor (paint
-  terrain/elevation, place resources/spawns, validate, test-play). The editor grows in later phases.
-- **Phase 2 — Pathfinding at scale:** flow fields (primary), A* fallback, local avoidance, staggered
-  ticks. **Stress-test 1,000+ dummy units here.**
-- **Phase 3 — Autonomy core:** utility AI, job system, squad/formation layer. The "low micro" engine.
-- **Phase 4 — Economy, logistics & infrastructure:** refining chain, supply/network graph,
-  self-running haulers, production bills, power grid, **roads/rail/power construction with a
-  blueprint/planning mode**, throughput/coverage. (The deep, identity-defining phase.)
-- **Phase 5 — Combat:** auto-fire, cover, suppression, AA rule, splash, ammo/fuel consumption + resupply.
-- **Phase 6 — Enemy AI:** commander-level macro AI managing a logistics economy.
-- **Phase 7 — Polish:** fog of war, minimap, command/policy UI, configurable victory conditions,
-  sound, a real playable map.
+### 7.15 UI system (modular & scalable)
+All in-game UI is built on **one reusable toolkit**, not ad-hoc draw calls — so panels are consistent,
+themeable, resolution-scalable, and cheap to add.
+- **Immediate-mode widget core** over the renderer's screen-space pass: composable widgets — Panel,
+  Button, IconButton, Label, Bar, Grid, ScrollList, Tooltip, ContextMenu, Modal.
+- **Layout:** anchors + stack/grid that reflow on resolution/DPI change (scales to any window).
+- **Theming:** data-driven theme (colors, fonts, padding, icon set) — restyle everything in one place.
+- **Input layering:** UI consumes mouse/keys **first**; the world only sees input the UI didn't handle
+  (a click on the command card never leaks a move order to the map). Hotkeys routed through the UI.
+- **Panel registry:** HUD panels register themselves (no central switch) — command card, resource/power
+  bar, selection/portrait panel, build menu, minimap slot, notifications/alerts, match-setup/confirm modals.
+- **Batched + icon atlas:** UI draws batch through an icon atlas (same idea as the sprite atlas).
+- This toolkit is what the **command card** (§7.4), **economy UI** (Phase 4), and **minimap / match
+  setup** (Phase 7) are built on.
+
+### 7.16 Buildings — placement, construction, production (first-class; a building = a Form)
+A building is an entity in an **immobile Form** (§7.4), so it shares the unit ability/command-card model.
+Its lifecycle is its own infrastructure (built in Phase 3 alongside units). Authored as a `BuildingDef`
+— the same Form machinery as units, plus a footprint:
+- **Footprint / custom size:** each building declares a tile **footprint** — `W×H` (1×1 gun turret,
+  2×2 factory, 3×3 HQ, 1×N walls) or an irregular **tile mask**. Drives placement, occupied tiles, and
+  nav blocking. (Mobile units use a collision radius; buildings use a footprint.)
+- **Turrets:** buildings use the same weapon **`mount`** as units (§7.4) — defensive turrets rotate to
+  track targets; multiple mounts (different pivot offsets) make a multi-gun fort.
+- **Placement:** ghost/blueprint preview **snapped to the tile grid** (footprint-aligned); validity
+  check (every footprint tile passable & clear, within builder/build-radius, on a resource node for
+  extractors); rotation; multi-place blueprint mode (§7.13). Placed footprints become **impassable** on
+  the nav grid so units path around them.
+- **Construction:** a builder takes a **build job**; the building advances through Forms
+  (site → frame → complete) as work is applied; resources drain gradually; cancel (refund) / repair.
+- **Production:** producer buildings (factory / barracks / airbase) have a **production queue** + **rally
+  point** + exit; built units spawn at the exit and move to rally. Production **bills** (§7.2) and
+  **research** (§7.4) run through the same queue. *(Resource costs are wired when the economy lands in
+  Phase 4; the queue / placement / construction systems are built in Phase 3.)*
+- **Deploy / undeploy:** mobile ↔ building via transitions (MCV → HQ), reusing the Form mechanism.
+- **Command card:** buildings use the same auto-generated card (produce, set rally, research, toggle).
+
+**Example (building) — illustrative; a turreted 1×1 defense and a 2×2 producer:**
+```ron
+BuildingDef(
+  id: "gun_turret", name: "Gun Turret", faction: "vanguard",
+  footprint: (1, 1),                          // tiles; use a tile mask for irregular shapes
+  default_form: "built",
+  forms: {
+    "site":  Form(chassis: Immobile, durability: (hp: 80,  armor: Structure)),   // under construction
+    "built": Form(
+      chassis: Immobile, durability: (hp: 600, armor: Structure),
+      armament: [ Weapon(damage: 40, damage_type: AP, target_domains: [Ground], range: 200,
+        cooldown: 1.0, mount: Some(Turret(sprite: "turret_gun", traverse_rate: 240, arc: 360))) ],
+    ),
+  },
+  transitions: [ (from: "site", to: "built", trigger: BuildComplete) ],
+  cost: (metal: 250, components: 10), build_time: 12, requires: "command_center",
+)
+
+BuildingDef(
+  id: "vehicle_factory", name: "Vehicle Factory", footprint: (2, 2), default_form: "built",
+  forms: { "built": Form(chassis: Immobile, durability: (hp: 1400, armor: Structure),
+           role: Producer(produces: ["mbt", "aa_vehicle"], rally: true)) },
+  cost: (metal: 800, components: 30), build_time: 25, requires: "command_center",
+)
+```
+
+## 8. Roadmap (core-first, then content; playable/verifiable at each step)
+> **Restructured 2026-06-18 — core-first.** Front-load UI + core unit/building gameplay + combat +
+> a polish pass into a *complete, polished vertical slice*, THEN add major features/content. The deep
+> logistics/infrastructure (our identity) moves to Phase 6; a **minimal** economy stays in Phase 3 to
+> make the core loop playable. (Map editor → Phase 8.) This §8 list is the canonical phase order.
+
+**Done:** Milestone 0 · Phase 1 (engine skeleton) · Phase 2 (pathfinding at scale).
+
+**Core & polish — finish a polished game first:**
+- **Phase 2.5 — Modular UI system:** reusable widget toolkit (panels, buttons, layout, theming, input
+  layering, icon atlas) every later panel builds on.
+- **Phase 3 — Core units & buildings:** registry/event-bus, ability framework, Forms/transitions,
+  command-card UI, selection + control groups; building placement / construction / production +
+  build/repair jobs; a **minimal economy** (simple resource(s) to gate building/production). → build-and-produce loop.
+- **Phase 4 — Combat & a fightable opponent:** damage table (subsumes AA), projectiles, suppression,
+  death, health bars/FX, ammo basics + a basic skirmish enemy. → a playable battle.
+- **Phase 5 — Polish / "game-ready":** full HUD, fog of war, minimap, audio, win/lose + match setup,
+  controls & feel polish, performance pass. → a complete, polished core game (vertical slice).
+
+**Major features & content — built on the polished core:**
+- **Phase 6 — Deep logistics & infrastructure (the identity depth):** refined chain (Ore/Crude →
+  Metal/Fuel → Components), supply/network graph, self-running haulers, production bills, power grid,
+  roads/rail/power construction + blueprint mode, throughput/coverage, upkeep.
+- **Phase 7 — Research/upgrades + advanced autonomy:** upgrade/research buildings, auto-cast policies,
+  doctrines, deeper utility AI, formations.
+- **Phase 8 — Content & factions:** full unit/building rosters, multiple factions, the in-engine map
+  editor (content tool), maps, scenarios/campaign.
+- **Phase 9 — Balance & final polish.**
 
 ## 9. Decision log
 - **2026-06-17** — Genre set: macro-scale, low-micro logistics RTS (not a direct RW clone).
@@ -309,6 +479,27 @@ First-class map support is a project goal (see §5 Map system).
   fixed-timestep sim loop + placeholder render verified. WASM needs a `--import-undefined` linker flag
   (`.cargo/config.toml`); visual verification is via native offscreen render-target capture
   (`COLDWAR_CAPTURE` env var) since the preview tool can't screenshot a live animation loop.
+- **2026-06-17** — **Unit model = Forms + Abilities + Transitions** (a state machine); a building is
+  just a Form. Enables siege/deploy modes, unit↔building conversion, and construction phases from one
+  mechanism (see §7.4).
+- **2026-06-17** — **Combat: small `armor_mult[type][class]` damage table** (supersedes the bare
+  AA-only rule); **suppression** and **continuous upkeep** locked in. Stays abstracted, gains counters.
+- **2026-06-17** — **Upgrades/research promoted from parking lot to a real system** (faction-wide,
+  build-gated); buffs stats and unlocks abilities/forms. Unit *access* stays build-gated.
+- **2026-06-17** — **Command-card UI + auto-cast policies**: UI auto-generated from a Form's abilities;
+  abilities self-trigger by condition (Manual/Auto/Off) — the low-micro ability layer.
+- **2026-06-17** — **Registry + event-bus scaffolding elevated to a Phase-3 prerequisite** — it's the
+  dispatch layer for abilities / effects / conditions / transitions.
+- **2026-06-17** — **Added Phase 2.5 — a modular/scalable UI toolkit** (widgets, layout, theming, input
+  layering, icon atlas) before Phase 3, since the command card and later panels build on it (§7.15).
+- **2026-06-17** — **Phase 3 expanded to full unit AND building infrastructure** — placement,
+  construction, production queues/rally, deploy↔undeploy — all on the Forms model (§7.16).
+- **2026-06-18** — **Roadmap restructured to core-first** (see §8): UI + core unit/building gameplay +
+  combat + a polish pass (a complete, polished vertical slice) come BEFORE major features. Deep
+  logistics/infrastructure (the identity) → Phase 6; a minimal economy stays in Phase 3; map editor → Phase 8.
+- **2026-06-18** — **Pathfinding upgraded** to 8-neighbour Dijkstra + gradient flow + bilinear sampling
+  (natural, anticipatory routing). **Placeholder art** swapped to Kenney "Top-down Tanks Redux" (CC0).
+  **Camera Y-pan** fixed (world is Y-up via from_display_rect; derive screen-relative dirs from the camera).
 
 ## 10. Open questions (need owner input)
 Resolved 2026-06-17: theme (Cold-War start, multi-faction architecture), economy depth (refined

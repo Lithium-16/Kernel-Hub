@@ -1,10 +1,12 @@
 //! Cold War RTS (working title) — entry point.
 //!
-//! Phase 2: tilemap, camera, ECS, placeholder sprites, plus the movement stack —
-//! spatial grid, flow-field pathfinding, local avoidance, selection & move orders.
+//! Phase 2-3: tilemap, camera, ECS, placeholder sprites, flow-field movement with
+//! avoidance + collision + facing, selection, and per-unit move orders.
 
 // Some scaffolding is intentionally unused while systems are wired up phase by phase.
 #![allow(dead_code, unused_imports)]
+
+use std::sync::Arc;
 
 use hecs::Entity;
 use macroquad::prelude::*;
@@ -22,18 +24,25 @@ mod sim;
 mod spatial;
 
 use assets::Sprites;
-use components::{Faction, Moving, Position, Renderable, Selected};
+use components::{Faction, Heading, MoveOrder, Position, Renderable, Selected, Velocity};
 use data::Definitions;
 use map::TileMap;
 use nav::{FlowField, NavGrid};
 use spatial::SpatialGrid;
 
 fn window_conf() -> Conf {
+    // COLDWAR_VSYNC=0 disables vsync (uncaps fps past the monitor refresh).
+    let swap_interval = if std::env::var("COLDWAR_VSYNC").as_deref() == Ok("0") {
+        Some(0)
+    } else {
+        Some(1)
+    };
     Conf {
-        window_title: "Cold War RTS (working title) - Phase 2".to_owned(),
+        window_title: "Cold War RTS (working title) - Phase 3".to_owned(),
         window_width: 1280,
         window_height: 720,
         high_dpi: false,
+        platform: miniquad::conf::Platform { swap_interval, ..Default::default() },
         ..Default::default()
     }
 }
@@ -48,9 +57,11 @@ fn spawn_army(world: &mut hecs::World, defs: &Definitions, sprites: &Sprites, ma
         let sprite = sprites.unit_index(&unit.sprite);
         let gx = (i % cols) as f32 - cols as f32 * 0.5;
         let gy = (i / cols) as f32 - cols as f32 * 0.5;
-        let pos = center + vec2(gx * 16.0, gy * 16.0);
+        let pos = center + vec2(gx * 22.0, gy * 22.0);
         world.spawn((
             Position(pos),
+            Velocity(Vec2::ZERO),
+            Heading(-std::f32::consts::FRAC_PI_2),
             Renderable { sprite, tint, size: unit.radius * 2.6 },
             Faction(unit.faction.clone()),
         ));
@@ -61,6 +72,26 @@ fn clear_selection(world: &mut hecs::World) {
     let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
     for e in sel {
         let _ = world.remove_one::<Selected>(e);
+    }
+}
+
+/// Build one shared flow field for `goal` and assign it to `units` as a move order.
+/// Only the listed units are affected — other units keep their existing orders.
+fn issue_move(world: &mut hecs::World, nav: &NavGrid, units: &[Entity], goal: Vec2) {
+    let (tx, ty) = ((goal.x / map::TILE_SIZE) as i32, (goal.y / map::TILE_SIZE) as i32);
+    if units.is_empty()
+        || tx < 0
+        || ty < 0
+        || tx as usize >= nav.w
+        || ty as usize >= nav.h
+        || !nav.passable(tx as usize, ty as usize)
+    {
+        return;
+    }
+    let flow = Arc::new(FlowField::to_goal(nav, (tx as usize, ty as usize)));
+    let arrive = (movement::UNIT_RADIUS * (units.len() as f32).sqrt() * 1.5).max(24.0);
+    for &e in units {
+        let _ = world.insert_one(e, MoveOrder { flow: flow.clone(), goal, arrive });
     }
 }
 
@@ -90,25 +121,49 @@ async fn main() {
     }
 
     let mut grid = SpatialGrid::new(map_px, 24.0);
-    let mut active_flow: Option<FlowField> = None;
-    let mut goal = Vec2::ZERO;
     let mut drag_start: Option<Vec2> = None;
 
     let mut sim = sim::Sim::new();
     let tick_dt = 1.0 / sim::TICK_RATE as f32;
     let mut accumulator = 0.0f32;
 
-    // Capture mode: auto-select everything and issue a move so the screenshot shows
-    // flow-field movement + avoidance, then grab a frame and exit.
+    // Capture mode: select all and order a move so the screenshot shows movement.
     if capture_path.is_some() {
         let all: Vec<Entity> = world.query::<&Position>().iter().map(|(e, _)| e).collect();
-        for e in all {
+        for &e in &all {
             let _ = world.insert_one(e, Selected);
-            let _ = world.insert_one(e, Moving);
         }
-        goal = map_px * 0.5 + vec2(-700.0, -700.0);
-        let (tx, ty) = ((goal.x / map::TILE_SIZE) as usize, (goal.y / map::TILE_SIZE) as usize);
-        active_flow = Some(FlowField::to_goal(&nav, (tx, ty)));
+        let goal = std::env::var("COLDWAR_GOAL")
+            .ok()
+            .and_then(|s| {
+                let mut it = s.split(',');
+                let x = it.next()?.trim().parse::<f32>().ok()?;
+                let y = it.next()?.trim().parse::<f32>().ok()?;
+                Some(vec2(x * map::TILE_SIZE, y * map::TILE_SIZE))
+            })
+            .unwrap_or(map_px * 0.5 + vec2(-700.0, -700.0));
+        issue_move(&mut world, &nav, &all, goal);
+    }
+    let capture_frames: u32 = std::env::var("COLDWAR_FRAMES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(200);
+
+    // Headless sim benchmark (native): COLDWAR_BENCH=<ticks>. Prints ms/sim-tick.
+    if let Ok(b) = std::env::var("COLDWAR_BENCH") {
+        let ticks: u32 = b.parse().unwrap_or(300);
+        let all: Vec<Entity> = world.query::<&Position>().iter().map(|(e, _)| e).collect();
+        issue_move(&mut world, &nav, &all, map_px * 0.5 + vec2(-2000.0, -2000.0));
+        let start = std::time::Instant::now();
+        for _ in 0..ticks {
+            grid.rebuild(&world);
+            movement::step(&mut world, &grid, &nav, map_px, tick_dt);
+            grid.rebuild(&world);
+            movement::resolve_collisions(&mut world, &grid, &nav, map_px, 2);
+        }
+        let per = start.elapsed().as_secs_f64() * 1000.0 / ticks as f64;
+        println!("BENCH {count} units: {per:.3} ms/sim-tick avg over {ticks} ticks");
+        std::process::exit(0);
     }
 
     loop {
@@ -134,8 +189,7 @@ async fn main() {
                 let (miny, maxy) = (a.y.min(b.y), a.y.max(b.y));
                 let mut to_sel: Vec<Entity> = Vec::new();
                 if (maxx - minx) * (maxy - miny) < 64.0 {
-                    // Click: select the unit whose sprite is actually under the cursor
-                    // (nearest center among those hit), so overlapping units don't mis-pick.
+                    // Click: select the unit whose sprite is under the cursor.
                     let click = b;
                     let mut best = None;
                     let mut bestd = f32::MAX;
@@ -162,23 +216,11 @@ async fn main() {
             }
         }
 
-        // --- Move order (right mouse) ---
+        // --- Move order (right mouse): only the currently-selected units ---
         if is_mouse_button_pressed(MouseButton::Right) {
-            let w = cam2d.screen_to_world(mp);
-            let (tx, ty) = ((w.x / map::TILE_SIZE) as i32, (w.y / map::TILE_SIZE) as i32);
-            if tx >= 0
-                && ty >= 0
-                && (tx as usize) < nav.w
-                && (ty as usize) < nav.h
-                && nav.passable(tx as usize, ty as usize)
-            {
-                active_flow = Some(FlowField::to_goal(&nav, (tx as usize, ty as usize)));
-                goal = w;
-                let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
-                for e in sel {
-                    let _ = world.insert_one(e, Moving);
-                }
-            }
+            let goal = cam2d.screen_to_world(mp);
+            let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
+            issue_move(&mut world, &nav, &sel, goal);
         }
 
         // --- Fixed-timestep simulation ---
@@ -186,9 +228,9 @@ async fn main() {
         accumulator += get_frame_time();
         while accumulator >= tick_dt {
             grid.rebuild(&world);
-            if let Some(flow) = &active_flow {
-                movement::step(&mut world, &grid, flow, goal, map_px, tick_dt);
-            }
+            movement::step(&mut world, &grid, &nav, map_px, tick_dt);
+            grid.rebuild(&world);
+            movement::resolve_collisions(&mut world, &grid, &nav, map_px, 2);
             sim.tick();
             accumulator -= tick_dt;
         }
@@ -201,7 +243,7 @@ async fn main() {
 
         if let Some(path) = &capture_path {
             frame += 1;
-            if frame >= 200 {
+            if frame >= capture_frames {
                 let rt = render_target(screen_width() as u32, screen_height() as u32);
                 render::present(&world, &map, &cam, &sim, &sprites, None, tick_ms, Some(rt.clone()));
                 rt.texture.get_texture_data().export_png(path);

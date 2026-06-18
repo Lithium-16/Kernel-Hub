@@ -26,17 +26,21 @@ impl GameCamera {
         let dt = get_frame_time();
         let pan = 700.0 / self.scale * dt;
 
+        // Y convention: the world camera (Camera2D::from_display_rect) flips Y, so
+        // "screen up" = larger world Y. Pan must match that (same convention the mouse
+        // uses via Camera2D::screen_to_world). W/up = +Y, S/down = -Y. Never hand-assume
+        // screen-down == +Y here; derive screen-relative directions from this convention.
         if is_key_down(KeyCode::W) || is_key_down(KeyCode::Up) {
-            self.center.y -= pan;
+            self.center.y += pan; // up
         }
         if is_key_down(KeyCode::S) || is_key_down(KeyCode::Down) {
-            self.center.y += pan;
+            self.center.y -= pan; // down
         }
         if is_key_down(KeyCode::A) || is_key_down(KeyCode::Left) {
-            self.center.x -= pan;
+            self.center.x -= pan; // left (X is not flipped)
         }
         if is_key_down(KeyCode::D) || is_key_down(KeyCode::Right) {
-            self.center.x += pan;
+            self.center.x += pan; // right
         }
 
         let (_, wheel_y) = mouse_wheel();

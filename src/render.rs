@@ -1,19 +1,18 @@
-//! Rendering layer (macroquad): view-culled tilemap, sprite entities, selection
-//! rings, and a screen-space overlay, drawn through the game camera. `present`
-//! optionally targets an offscreen render target for autonomous screenshot capture.
+//! Rendering layer (macroquad). Everything sprite-based draws from one atlas texture
+//! so draws batch into a few GPU calls. Order: tiles -> selection rings -> units ->
+//! hitboxes (shapes) -> screen overlay.
 
 use macroquad::prelude::*;
 
 use crate::assets::Sprites;
 use crate::camera::GameCamera;
-use crate::components::{Position, Renderable, Selected};
+use crate::components::{Heading, Position, Renderable, Selected};
 use crate::map::{self, TileMap};
 use crate::sim::Sim;
 
 const BG: Color = Color::new(0.07, 0.085, 0.11, 1.0);
 
 /// Render one frame. `target = None` draws to the screen; `Some(rt)` draws offscreen.
-/// `drag` is an optional screen-space selection box (start, end).
 #[allow(clippy::too_many_arguments)]
 pub fn present(
     world: &hecs::World,
@@ -29,7 +28,6 @@ pub fn present(
     let sh = screen_height();
     let view = camera.view_rect(sw, sh);
 
-    // World pass.
     let mut world_cam = Camera2D::from_display_rect(view);
     world_cam.render_target = target.clone();
     set_camera(&world_cam);
@@ -37,8 +35,8 @@ pub fn present(
     draw_tiles(map, view, sprites);
     draw_selection_rings(world, sprites);
     draw_entities(world, sprites);
+    draw_hitboxes(world);
 
-    // Overlay pass (screen-space).
     match &target {
         None => set_default_camera(),
         Some(_) => {
@@ -64,13 +62,17 @@ fn draw_tiles(map: &TileMap, view: Rect, sprites: &Sprites) {
 
     for ty in min_ty..max_ty {
         for tx in min_tx..max_tx {
-            let tex = sprites.tile(map.get(tx, ty));
+            let src = sprites.tile_rect(map.get(tx, ty));
             draw_texture_ex(
-                tex,
+                &sprites.atlas,
                 tx as f32 * ts,
                 ty as f32 * ts,
                 WHITE,
-                DrawTextureParams { dest_size: Some(vec2(ts, ts)), ..Default::default() },
+                DrawTextureParams {
+                    dest_size: Some(vec2(ts, ts)),
+                    source: Some(src),
+                    ..Default::default()
+                },
             );
         }
     }
@@ -78,34 +80,53 @@ fn draw_tiles(map: &TileMap, view: Rect, sprites: &Sprites) {
 
 fn draw_selection_rings(world: &hecs::World, sprites: &Sprites) {
     let tint = Color::new(0.45, 1.0, 0.55, 0.9);
+    let src = sprites.selection_rect();
     for (_e, (pos, r, _)) in world.query::<(&Position, &Renderable, &Selected)>().iter() {
         let s = r.size * 1.9;
         draw_texture_ex(
-            &sprites.selection,
+            &sprites.atlas,
             pos.0.x - s * 0.5,
             pos.0.y - s * 0.5,
             tint,
-            DrawTextureParams { dest_size: Some(vec2(s, s)), ..Default::default() },
+            DrawTextureParams {
+                dest_size: Some(vec2(s, s)),
+                source: Some(src),
+                ..Default::default()
+            },
         );
     }
 }
 
 fn draw_entities(world: &hecs::World, sprites: &Sprites) {
-    for (_e, (pos, r)) in world.query::<(&Position, &Renderable)>().iter() {
-        let tex = sprites.unit_texture(r.sprite);
+    for (_e, (pos, r, head)) in world.query::<(&Position, &Renderable, &Heading)>().iter() {
+        let src = sprites.unit_rect(r.sprite);
         draw_texture_ex(
-            tex,
+            &sprites.atlas,
             pos.0.x - r.size * 0.5,
             pos.0.y - r.size * 0.5,
             r.tint,
-            DrawTextureParams { dest_size: Some(vec2(r.size, r.size)), ..Default::default() },
+            DrawTextureParams {
+                dest_size: Some(vec2(r.size, r.size)),
+                source: Some(src),
+                rotation: head.0 + std::f32::consts::FRAC_PI_2,
+                ..Default::default()
+            },
         );
     }
 }
 
+/// Faint neon-green collision circle for selected units (drawn on top).
+fn draw_hitboxes(world: &hecs::World) {
+    let c = Color::new(0.2, 1.0, 0.3, 0.55);
+    for (_e, (pos, _)) in world.query::<(&Position, &Selected)>().iter() {
+        draw_circle_lines(pos.0.x, pos.0.y, crate::movement::UNIT_RADIUS, 1.0, c);
+    }
+}
+
 fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &Sim, tick_ms: f32, sh: f32) {
-    let selected = world.query::<&crate::components::Selected>().iter().count();
-    let moving = world.query::<&crate::components::Moving>().iter().count();
+    let selected = world.query::<&Selected>().iter().count();
+    let moving = world.query::<&crate::components::MoveOrder>().iter().count();
+    let _ = sim;
     draw_text(
         "Drag-select units, right-click to move  (WASD/arrows pan, mouse wheel zoom)",
         16.0,
@@ -124,6 +145,5 @@ fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &S
         map.width,
         map.height,
     );
-    let _ = sim;
     draw_text(&info, 16.0, sh - 16.0, 22.0, Color::new(0.80, 0.80, 0.80, 1.0));
 }
