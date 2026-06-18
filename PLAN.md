@@ -109,10 +109,12 @@ proven under a 1,000+-unit stress test.
 **Build:**
 - [x] **Spatial grid** — uniform bucket grid; radius neighbor queries; rebuilt per tick. ✓
 - [x] **Navigation grid** — passability derived from the tilemap (cost uniform for now). ✓
-- [x] **Flow fields** — BFS integration field → per-tile direction; recomputed per move order; the primary mover. ✓
+- [x] **Flow fields** — 8-neighbour Dijkstra cost field → gradient (wall-aware) per-tile direction, bilinearly sampled; the primary mover. ✓
+- [x] **Flow-field cache** — `FlowCache` reuses fields by goal tile (LRU), so converging/repeated orders skip recompute. Decision: stay on flow fields (best for large-RTS groups); HPA*-portal + sector-flow hybrid deferred until map size demands it. ✓ 2026-06-18
 - [ ] **A\*** — single-unit fallback for stragglers/special cases (deferred; flow field covers group moves).
-- [x] **Local avoidance** — separation steering via the spatial grid; units don't stack. ✓
-- [x] **Movement system** — steering = flow dir + avoidance; arrival stops the unit. ✓
+- [x] **Local avoidance** — separation + "around" steering via the spatial grid; units don't stack. ✓
+- [x] **Movement system** — turn-then-move steering (flow/slot dir + avoidance); positional collision pass; stall-based arrival. ✓
+- [x] **Formation slots** — group moves assign each unit its own slot in a packed block (greedy nearest) and seek it once near the formation anchor, instead of all crushing one point. Killed the long-standing packed-group jitter: 600-unit residual motion 2.30 → 0.06 px/tick. `COLDWAR_SETTLE` headless jitter metric. ✓ 2026-06-18
 - [ ] **Staggered ticks** — not needed yet (1,200-unit tick ≈ 2.3 ms); available lever if sim/render grows.
 - [x] **Stress harness** — `COLDWAR_UNITS` spawns N; overlay reports tick ms + counts (1,200 verified). ✓
 
@@ -129,14 +131,12 @@ grid queries.
 readouts, minimap, modals) — consistent, themeable, resolution-scalable, with proper input layering.
 
 **Build:**
-- [ ] **Immediate-mode widget core** — Panel, Button, IconButton, Label, Bar, Grid, ScrollList,
-      Tooltip, ContextMenu, Modal — drawn in the screen-space pass.
-- [ ] **Layout** — anchors + stack/grid; reflows on resolution/DPI change.
-- [ ] **Theming** — data-driven theme (colors, fonts, padding, icon atlas); restyle in one place.
-- [ ] **Input layering** — UI consumes mouse/keys first; world sees only unhandled input (no click
-      leak to the map); hotkey routing.
-- [ ] **Panel registry** — HUD panels register (no central switch); first panels: resource/power bar
-      stub + selection panel.
+- [~] **Immediate-mode widget core** — Panel, Button, Label, Bar done; IconButton, Grid, ScrollList,
+      Tooltip, ContextMenu, Modal still to add. Drawn in the screen-space pass.
+- [~] **Layout** — panels anchor to window size (reflow on resize) off `HUD_H`; full stack/grid helpers + DPI handling still to add.
+- [~] **Theming** — `Theme` struct (colors/font) exists and is applied everywhere; not yet data-driven or icon-atlas backed.
+- [x] **Input layering** — world input gated on computed panel rects (no click leak to the map). ✓ 2026-06-18
+- [~] **Panel registry** — selection panel (tally by unit type, anchored bottom-right) done; resource/power bar stub + real register-don't-switch registry still to add.
 - [ ] **UI icon atlas** + batched draw.
 
 **Key types:** `Ui`, `Widget`, `Layout`, `Theme`, `PanelId`, `InputCapture`.
