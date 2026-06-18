@@ -192,8 +192,8 @@ async fn main() {
         accumulator += get_frame_time();
         while accumulator >= tick_dt {
             grid.rebuild(&world);
-            movement::step(&mut world, &grid, map_px, tick_dt);
-            movement::resolve_collisions(&mut world, &mut grid, map_px, 2);
+            movement::step(&mut world, &grid, &nav, map_px, tick_dt);
+            movement::resolve_collisions(&mut world, &mut grid, &nav, map_px, 2);
             sim.tick();
             accumulator -= tick_dt;
         }

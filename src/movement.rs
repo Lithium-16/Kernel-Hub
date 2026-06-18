@@ -1,5 +1,6 @@
 //! Movement: per-unit flow-field steering with gentle local avoidance + velocity
-//! smoothing + facing, plus a positional collision pass so units occupy space.
+//! smoothing + facing, plus a positional collision pass. All position changes are
+//! filtered through the nav grid so units can't be pushed onto impassable terrain.
 
 use std::collections::HashSet;
 
@@ -7,6 +8,8 @@ use hecs::{Entity, World};
 use macroquad::prelude::*;
 
 use crate::components::{Heading, MoveOrder, Position, Velocity};
+use crate::map::TILE_SIZE;
+use crate::nav::NavGrid;
 use crate::spatial::SpatialGrid;
 
 pub const SPEED: f32 = 72.0;
@@ -19,9 +22,35 @@ const ACCEL: f32 = 9.0;
 const AVOID_R: f32 = 28.0;
 const AVOID_STRENGTH: f32 = 45.0;
 
-/// Steer units that have a `MoveOrder` along their own flow field, with gentle
-/// avoidance so they route around each other; stop on arrival.
-pub fn step(world: &mut World, grid: &SpatialGrid, map_px: Vec2, dt: f32) {
+fn passable(nav: &NavGrid, p: Vec2) -> bool {
+    let x = (p.x / TILE_SIZE) as i32;
+    let y = (p.y / TILE_SIZE) as i32;
+    x >= 0 && y >= 0 && (x as usize) < nav.w && (y as usize) < nav.h && nav.passable(x as usize, y as usize)
+}
+
+/// Move from `old` toward `new`, but never onto an impassable tile — slide along
+/// one axis if the diagonal is blocked, else stay put.
+fn try_move(nav: &NavGrid, old: Vec2, new: Vec2) -> Vec2 {
+    if !passable(nav, old) {
+        // Already off the mesh (shouldn't happen): allow any move to escape.
+        return new;
+    }
+    if passable(nav, new) {
+        return new;
+    }
+    let slide_x = vec2(new.x, old.y);
+    if passable(nav, slide_x) {
+        return slide_x;
+    }
+    let slide_y = vec2(old.x, new.y);
+    if passable(nav, slide_y) {
+        return slide_y;
+    }
+    old
+}
+
+/// Steer units with a `MoveOrder` along their flow field, avoid neighbors, stop on arrival.
+pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, dt: f32) {
     let mut arrived = Vec::new();
 
     for (e, (pos, vel, head, order)) in
@@ -29,7 +58,6 @@ pub fn step(world: &mut World, grid: &SpatialGrid, map_px: Vec2, dt: f32) {
     {
         let mut steer = order.flow.dir_at(pos.0) * SPEED;
 
-        // Gentle separation so units flow around neighbors instead of into them.
         let mut sep = Vec2::ZERO;
         grid.for_neighbors(pos.0, AVOID_R, |other, op| {
             if other == e {
@@ -53,7 +81,8 @@ pub fn step(world: &mut World, grid: &SpatialGrid, map_px: Vec2, dt: f32) {
             head.0 = vel.0.y.atan2(vel.0.x);
         }
 
-        pos.0 = (pos.0 + vel.0 * dt).clamp(Vec2::ZERO, map_px);
+        let target = (pos.0 + vel.0 * dt).clamp(Vec2::ZERO, map_px);
+        pos.0 = try_move(nav, pos.0, target);
         if pos.0.distance(order.goal) < order.arrive {
             arrived.push(e);
         }
@@ -67,9 +96,9 @@ pub fn step(world: &mut World, grid: &SpatialGrid, map_px: Vec2, dt: f32) {
     }
 }
 
-/// Keep unit centers at least `COLLISION_DIAM` apart. Moving units yield to idle
-/// ones (idle hold their ground) so groups don't bulldoze bystanders.
-pub fn resolve_collisions(world: &mut World, grid: &mut SpatialGrid, map_px: Vec2, iters: u32) {
+/// Keep unit centers apart. Moving units yield to idle ones; pushes never move a
+/// unit onto impassable terrain.
+pub fn resolve_collisions(world: &mut World, grid: &mut SpatialGrid, nav: &NavGrid, map_px: Vec2, iters: u32) {
     for _ in 0..iters {
         grid.rebuild(world);
         let moving: HashSet<Entity> = world.query::<&MoveOrder>().iter().map(|(e, _)| e).collect();
@@ -86,8 +115,8 @@ pub fn resolve_collisions(world: &mut World, grid: &mut SpatialGrid, map_px: Vec
                 let dist = d.length();
                 if dist > 0.0001 && dist < COLLISION_DIAM {
                     let w = match (self_moving, moving.contains(&other)) {
-                        (false, true) => 0.0, // idle holds against a mover
-                        (true, false) => 1.0, // mover steps fully around idle
+                        (false, true) => 0.0,
+                        (true, false) => 1.0,
                         _ => 0.5,
                     };
                     push += d / dist * (COLLISION_DIAM - dist) * w;
@@ -100,7 +129,8 @@ pub fn resolve_collisions(world: &mut World, grid: &mut SpatialGrid, map_px: Vec
 
         for (e, push) in corrections {
             if let Ok(p) = world.query_one_mut::<&mut Position>(e) {
-                p.0 = (p.0 + push).clamp(Vec2::ZERO, map_px);
+                let target = (p.0 + push).clamp(Vec2::ZERO, map_px);
+                p.0 = try_move(nav, p.0, target);
             }
         }
     }
