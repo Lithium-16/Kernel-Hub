@@ -6,7 +6,7 @@
 > update the relevant section AND add a line to the Decision Log.
 >
 > **Last updated:** 2026-06-17
-> **Status:** Phase 1 in progress — tilemap + camera + ECS + data loader running; map-file format & registries remain
+> **Status:** Phase 2 in progress — flow-field pathfinding + avoidance + placeholder sprites; 1,200 units at ~2.3ms/tick
 > **Repository:** https://github.com/B0RE16/laughing-waffle (private) · local folder: `coldwar-rts/`
 
 ---

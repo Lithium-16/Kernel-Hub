@@ -27,6 +27,7 @@ pub struct UnitDef {
     pub id: String,
     pub name: String,
     pub faction: String,
+    pub sprite: String,
     pub color: (u8, u8, u8),
     pub radius: f32,
 }
