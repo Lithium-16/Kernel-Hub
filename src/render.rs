@@ -147,10 +147,11 @@ fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &S
     let selected = world.query::<&Selected>().iter().count();
     let moving = world.query::<&crate::components::MoveOrder>().iter().count();
     let _ = sim;
+    // Below the top resource bar so the two don't overlap.
     draw_text(
         "Drag-select units, right-click to move  (WASD/arrows pan, mouse wheel zoom)",
         16.0,
-        28.0,
+        crate::hud::TOP_H + 24.0,
         24.0,
         WHITE,
     );

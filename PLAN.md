@@ -131,12 +131,12 @@ grid queries.
 readouts, minimap, modals) — consistent, themeable, resolution-scalable, with proper input layering.
 
 **Build:**
-- [~] **Immediate-mode widget core** — Panel, Button, Label, Bar done; IconButton, Grid, ScrollList,
-      Tooltip, ContextMenu, Modal still to add. Drawn in the screen-space pass.
-- [~] **Layout** — panels anchor to window size (reflow on resize) off `HUD_H`; full stack/grid helpers + DPI handling still to add.
-- [~] **Theming** — `Theme` struct (colors/font) exists and is applied everywhere; not yet data-driven or icon-atlas backed.
-- [x] **Input layering** — world input gated on computed panel rects (no click leak to the map). ✓ 2026-06-18
-- [~] **Panel registry** — selection panel (tally by unit type, anchored bottom-right) done; resource/power bar stub + real register-don't-switch registry still to add.
+- [~] **Immediate-mode widget core** — Panel, Button, Label, Bar, Tooltip done; IconButton, Grid,
+      ScrollList, ContextMenu, Modal still to add. Drawn in the screen-space pass.
+- [~] **Layout** — panels anchor to window size (reflow on resize) off `hud::TOP_H`/`BAR_H`; full stack/grid helpers + DPI handling still to add.
+- [~] **Theming** — `Theme` struct (colors/font) applied everywhere incl. colored labels; not yet data-driven or icon-atlas backed.
+- [x] **Input layering** — world input gated on computed `HudLayout` rects (no click leak to the map). ✓ 2026-06-18
+- [~] **Panel registry** — all panels consolidated in `hud.rs` (top resource bar w/ hover tooltips + overdraw warning, bottom command bar, selection panel by type); `economy::Economy` stub backs the bar. Real register-don't-switch registry deferred to Phase 3 (command card). ✓ panels 2026-06-20
 - [ ] **UI icon atlas** + batched draw.
 
 **Key types:** `Ui`, `Widget`, `Layout`, `Theme`, `PanelId`, `InputCapture`.

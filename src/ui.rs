@@ -98,10 +98,29 @@ impl Ui {
         draw_text(text, pos.x, pos.y, self.theme.font_size, self.theme.text);
     }
 
+    /// A label in an explicit color (the default `label` uses the theme text color).
+    pub fn label_colored(&self, pos: Vec2, text: &str, color: Color) {
+        draw_text(text, pos.x, pos.y, self.theme.font_size, color);
+    }
+
     /// A filled bar (frac 0..1) — for resource/health readouts later.
     pub fn bar(&self, r: Rect, frac: f32, fill: Color) {
         draw_rectangle(r.x, r.y, r.w, r.h, self.theme.button);
         draw_rectangle(r.x, r.y, r.w * frac.clamp(0.0, 1.0), r.h, fill);
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, self.theme.panel_border);
+    }
+
+    /// A floating tooltip box anchored near `at`, clamped to stay on screen. Drawn
+    /// immediately, so call it last (after the widgets it annotates) to keep it on top.
+    pub fn tooltip(&self, text: &str, at: Vec2) {
+        let fs = self.theme.font_size;
+        let d = measure_text(text, None, fs as u16, 1.0);
+        let pad = 8.0;
+        let (w, h) = (d.width + pad * 2.0, d.height + pad * 2.0);
+        let x = (at.x).min(screen_width() - w - 4.0).max(4.0);
+        let y = (at.y).min(screen_height() - h - 4.0).max(4.0);
+        draw_rectangle(x, y, w, h, self.theme.panel_bg);
+        draw_rectangle_lines(x, y, w, h, 1.5, self.theme.panel_border);
+        draw_text(text, x + pad, y + pad + d.offset_y, fs, self.theme.text);
     }
 }

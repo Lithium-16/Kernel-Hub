@@ -16,6 +16,8 @@ mod camera;
 mod components;
 mod data;
 mod ecs;
+mod economy;
+mod hud;
 mod map;
 mod movement;
 mod nav;
@@ -148,71 +150,6 @@ fn issue_move(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache, uni
     }
 }
 
-/// Height of the bottom HUD bar (everything anchors to window size off this).
-const HUD_H: f32 = 56.0;
-const SEL_PANEL_W: f32 = 230.0;
-
-/// Tally the current selection by unit type (display name), preserving first-seen
-/// order, plus the total. Cheap — only iterates selected entities.
-fn selection_summary(world: &hecs::World) -> (Vec<(String, u32)>, u32) {
-    let mut tally: Vec<(String, u32)> = Vec::new();
-    let mut total = 0u32;
-    for (_e, (_s, k)) in world.query::<(&Selected, &components::UnitKind)>().iter() {
-        total += 1;
-        if let Some(row) = tally.iter_mut().find(|(n, _)| *n == k.name) {
-            row.1 += 1;
-        } else {
-            tally.push((k.name.clone(), 1));
-        }
-    }
-    (tally, total)
-}
-
-/// Anchored rect for the selection panel (bottom-right, above the HUD bar). Sized to
-/// the number of type rows. Returns None when nothing is selected.
-fn selection_panel_rect(sw: f32, sh: f32, rows: usize) -> Option<Rect> {
-    if rows == 0 {
-        return None;
-    }
-    let h = 34.0 + rows as f32 * 24.0;
-    Some(Rect::new(sw - SEL_PANEL_W - 8.0, sh - HUD_H - 8.0 - h, SEL_PANEL_W, h))
-}
-
-/// Draw the selection panel: a header with the total and one row per unit type.
-fn draw_selection_panel(ui: &mut ui::Ui, tally: &[(String, u32)], total: u32, r: Rect) {
-    ui.panel(r);
-    ui.label(vec2(r.x + 10.0, r.y + 22.0), &format!("Selection ({total})"));
-    for (i, (name, n)) in tally.iter().enumerate() {
-        let y = r.y + 46.0 + i as f32 * 24.0;
-        ui.label(vec2(r.x + 14.0, y), name);
-        let count = format!("x{n}");
-        let d = measure_text(&count, None, ui.theme.font_size as u16, 1.0);
-        ui.label(vec2(r.x + r.w - 14.0 - d.width, y), &count);
-    }
-}
-
-/// Bottom HUD bar actions.
-enum HudAction {
-    None,
-    Stop,
-    ClearSel,
-}
-
-/// Draw the bottom HUD bar (immediate-mode UI) and return any button action.
-fn draw_hud(ui: &mut ui::Ui, world: &hecs::World, sw: f32, sh: f32) -> HudAction {
-    ui.panel(Rect::new(0.0, sh - 56.0, sw, 56.0));
-    let mut action = HudAction::None;
-    if ui.button(Rect::new(10.0, sh - 48.0, 96.0, 40.0), "Stop") {
-        action = HudAction::Stop;
-    }
-    if ui.button(Rect::new(114.0, sh - 48.0, 96.0, 40.0), "Clear") {
-        action = HudAction::ClearSel;
-    }
-    let n = world.query::<&Selected>().iter().count();
-    ui.label(vec2(228.0, sh - 22.0), &format!("Selected: {n}"));
-    action
-}
-
 #[macroquad::main(window_conf)]
 async fn main() {
     let capture_path = std::env::var("COLDWAR_CAPTURE").ok();
@@ -242,6 +179,7 @@ async fn main() {
     let mut grid = SpatialGrid::new(map_px, 24.0);
     let mut drag_start: Option<Vec2> = None;
     let mut ui = ui::Ui::new();
+    let economy = economy::Economy::default();
 
     let mut sim = sim::Sim::new();
     let tick_dt = 1.0 / sim::TICK_RATE as f32;
@@ -331,11 +269,9 @@ async fn main() {
         let sw = screen_width();
         let sh = screen_height();
         ui.begin();
-        // Input layering: compute UI panel rects up front (anchored to window size) and
+        // Input layering: compute HUD panel rects up front (anchored to window size) and
         // gate world input on them, so clicks on any panel never fall through to the world.
-        let (sel_tally, _) = selection_summary(&world);
-        let sel_rect = selection_panel_rect(sw, sh, sel_tally.len());
-        let over_ui = mp.y >= sh - HUD_H || sel_rect.is_some_and(|r| r.contains(mp));
+        let over_ui = hud::HudLayout::compute(&world, sw, sh).contains(mp);
 
         cam.update(map_px);
         let view = cam.view_rect(sw, sh);
@@ -404,20 +340,17 @@ async fn main() {
 
         let drag_box = drag_start.map(|s| (s, mp));
         render::present(&world, &map, &cam, &sim, &sprites, drag_box, tick_ms, None);
-        match draw_hud(&mut ui, &world, sw, sh) {
-            HudAction::Stop => {
+        // Recompute layout after this frame's input so panels reflect current selection.
+        let hud_layout = hud::HudLayout::compute(&world, sw, sh);
+        match hud::draw(&mut ui, &world, &economy, &hud_layout) {
+            hud::HudAction::Stop => {
                 let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
                 for e in sel {
                     let _ = world.remove_one::<MoveOrder>(e);
                 }
             }
-            HudAction::ClearSel => clear_selection(&mut world),
-            HudAction::None => {}
-        }
-        // Recompute after this frame's input so the panel reflects the current selection.
-        let (sel_tally, sel_total) = selection_summary(&world);
-        if let Some(r) = selection_panel_rect(sw, sh, sel_tally.len()) {
-            draw_selection_panel(&mut ui, &sel_tally, sel_total, r);
+            hud::HudAction::ClearSel => clear_selection(&mut world),
+            hud::HudAction::None => {}
         }
 
         next_frame().await;
@@ -430,11 +363,8 @@ async fn main() {
                 let mut uicam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh));
                 uicam.render_target = Some(rt.clone());
                 set_camera(&uicam);
-                let _ = draw_hud(&mut ui, &world, sw, sh);
-                let (cap_tally, cap_total) = selection_summary(&world);
-                if let Some(r) = selection_panel_rect(sw, sh, cap_tally.len()) {
-                    draw_selection_panel(&mut ui, &cap_tally, cap_total, r);
-                }
+                let cap_layout = hud::HudLayout::compute(&world, sw, sh);
+                let _ = hud::draw(&mut ui, &world, &economy, &cap_layout);
                 set_default_camera();
                 rt.texture.get_texture_data().export_png(path);
                 break;
