@@ -72,8 +72,8 @@ pub struct Tracer {
     pub ttl: f32,
 }
 
-/// Initial lifetime of a tracer in seconds (also used to compute its fade alpha).
-pub const TRACER_TTL: f32 = 0.12;
+/// Bullet flight time in seconds (shooter→target); also used for trail/progress.
+pub const TRACER_TTL: f32 = 0.20;
 
 /// Per-unit arrival bookkeeping: last tick's position + a stall counter (consecutive
 /// near-goal ticks with little real progress → the unit has effectively arrived).

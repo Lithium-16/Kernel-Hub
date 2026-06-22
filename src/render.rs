@@ -79,11 +79,15 @@ fn draw_tiles(map: &TileMap, view: Rect, sprites: &Sprites) {
     for ty in min_ty..max_ty {
         for tx in min_tx..max_tx {
             let src = sprites.tile_rect(map.get(tx, ty));
+            // Per-tile brightness jitter so terrain isn't a flat slab of one color.
+            let j = map::tile_jitter(tx, ty) * 0.09;
+            let s = (1.0 + j).clamp(0.0, 1.4);
+            let shade = Color::new(s, s, s, 1.0);
             draw_texture_ex(
                 &sprites.atlas,
                 tx as f32 * ts,
                 ty as f32 * ts,
-                WHITE,
+                shade,
                 DrawTextureParams {
                     dest_size: Some(vec2(ts, ts)),
                     source: Some(src),
@@ -94,13 +98,17 @@ fn draw_tiles(map: &TileMap, view: Rect, sprites: &Sprites) {
     }
 }
 
-/// Shot tracers (faded by remaining lifetime), colored by the shooter's side.
+/// Flying bullets: a bright projectile travels shooter→target over its lifetime, with a
+/// short colored trail (cyan = friendly fire, orange = enemy). Purely visual.
 fn draw_tracers(world: &hecs::World) {
     use crate::components::{Tracer, TRACER_TTL};
     for (_e, t) in world.query::<&Tracer>().iter() {
-        let a = (t.ttl / TRACER_TTL).clamp(0.0, 1.0);
-        let c = Color::new(t.color.r, t.color.g, t.color.b, a);
-        draw_line(t.from.x, t.from.y, t.to.x, t.to.y, 1.5, c);
+        let prog = (1.0 - t.ttl / TRACER_TTL).clamp(0.0, 1.0);
+        let p = t.from.lerp(t.to, prog);
+        let tail = t.from.lerp(t.to, (prog - 0.18).max(0.0));
+        let c = t.color;
+        draw_line(tail.x, tail.y, p.x, p.y, 2.0, Color::new(c.r, c.g, c.b, 0.85));
+        draw_circle(p.x, p.y, 2.4, Color::new(1.0, 0.95, 0.75, 1.0));
     }
 }
 

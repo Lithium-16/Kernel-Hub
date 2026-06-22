@@ -325,7 +325,9 @@ iteration. Keep this list fresh — add as we learn, check off as we ship.
 **Have (matches genre standard):** flow-field group movement (SupCom/PA) · formation slots with
 push-through · control groups 1–9 + double-click-type + shift-add (SC2) · command card + stances ·
 waypoint queueing (shift) · minimap click/drag-pan · building placement w/ ghost+grid-snap (C&C) ·
-power as a gated resource (C&C) · health bars + direct-fire combat · win/lose + restart.
+power as a gated resource (C&C) · health bars + direct-fire combat · win/lose + restart ·
+flying bullet projectiles · noise-detailed terrain (lakes/cliffs/ore) w/ per-tile variation ·
+randomized multi-prong enemy start.
 
 **High-impact gaps vs reference games (prioritized):**
 1. **Attack-move / patrol / guard / stop-and-fight** (SC2/SupCom) — units currently only fire when an

@@ -97,6 +97,29 @@ fn spawn_army(
     }
 }
 
+/// Set up a fresh battle: the player force left of center, and the enemy split into 2–3
+/// prongs at random angles in the right hemisphere (radius < the map's clear battlefield),
+/// so the opening attack comes from different directions each game/restart.
+fn spawn_scenario(
+    world: &mut hecs::World,
+    defs: &Definitions,
+    sprites: &Sprites,
+    map_px: Vec2,
+    count: usize,
+    player_tint: Color,
+    enemy_tint: Color,
+) {
+    spawn_army(world, defs, sprites, PLAYER_FACTION, map_px * 0.5 + vec2(-600.0, 0.0), player_tint, count);
+
+    let groups = macroquad::rand::gen_range(2, 4); // 2 or 3 prongs
+    let per = (count / groups).max(1);
+    for _ in 0..groups {
+        let ang = macroquad::rand::gen_range(-1.4f32, 1.4f32); // right hemisphere, away from player
+        let pos = map_px * 0.5 + vec2(ang.cos(), ang.sin()) * 680.0;
+        spawn_army(world, defs, sprites, ENEMY_FACTION, pos, enemy_tint, per);
+    }
+}
+
 fn clear_selection(world: &mut hecs::World) {
     let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
     for e in sel {
@@ -227,12 +250,11 @@ async fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(200);
-    // Two opposing armies: player (vanguard, white) left of center, enemy (crimson, red
-    // tint) right of center, so they can clash when ordered together.
+    // Seed RNG from wall-clock so the enemy's approach differs each launch/restart.
+    macroquad::rand::srand(miniquad::date::now().to_bits());
     let player_tint = Color::new(0.85, 0.92, 1.0, 1.0);
     let enemy_tint = Color::new(1.0, 0.55, 0.55, 1.0);
-    spawn_army(&mut world, &defs, &sprites, PLAYER_FACTION, map_px * 0.5 + vec2(-600.0, 0.0), player_tint, count);
-    spawn_army(&mut world, &defs, &sprites, ENEMY_FACTION, map_px * 0.5 + vec2(600.0, 0.0), enemy_tint, count);
+    spawn_scenario(&mut world, &defs, &sprites, map_px, count, player_tint, enemy_tint);
 
     let mut cam = camera::GameCamera::centered(map_px);
     if let Ok(z) = std::env::var("COLDWAR_ZOOM") {
@@ -530,8 +552,7 @@ async fn main() {
             nav = NavGrid::from_map(&map);
             flow_cache.clear();
             placing = None;
-            spawn_army(&mut world, &defs, &sprites, PLAYER_FACTION, map_px * 0.5 + vec2(-600.0, 0.0), player_tint, count);
-            spawn_army(&mut world, &defs, &sprites, ENEMY_FACTION, map_px * 0.5 + vec2(600.0, 0.0), enemy_tint, count);
+            spawn_scenario(&mut world, &defs, &sprites, map_px, count, player_tint, enemy_tint);
         }
 
         // --- Enemy AI: periodically order the whole enemy force to advance on the

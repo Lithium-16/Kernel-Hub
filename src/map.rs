@@ -1,6 +1,7 @@
-//! Tilemap. Phase 1: a large grid of terrain tiles with a deterministic test map.
-//! Tile *types* will move to data-driven definitions in a later pass; the colors
-//! here are placeholders.
+//! Tilemap. Organic terrain from value-noise fbm (lakes, cliff ridges, ore clusters),
+//! with a guaranteed-clear central battlefield so spawns and the opening fight stay on
+//! solid ground while the map edges get detail. Deterministic (no per-run randomness),
+//! so tests and the noise stay stable.
 
 use macroquad::prelude::*;
 
@@ -21,30 +22,78 @@ pub struct TileMap {
     tiles: Vec<Tile>,
 }
 
+/// Deterministic 2D integer hash → 0..1.
+fn hash01(x: i32, y: i32) -> f32 {
+    let mut h = (x as u32).wrapping_mul(374761393) ^ (y as u32).wrapping_mul(2246822519);
+    h = h.wrapping_add(3266489917);
+    h = (h ^ (h >> 15)).wrapping_mul(2246822519);
+    h = (h ^ (h >> 13)).wrapping_mul(3266489917);
+    ((h ^ (h >> 16)) & 0xffff) as f32 / 65535.0
+}
+
+/// Smoothed value noise at a continuous point.
+fn value_noise(x: f32, y: f32) -> f32 {
+    let (xi, yi) = (x.floor(), y.floor());
+    let (xf, yf) = (x - xi, y - yi);
+    let (x0, y0) = (xi as i32, yi as i32);
+    let sx = xf * xf * (3.0 - 2.0 * xf);
+    let sy = yf * yf * (3.0 - 2.0 * yf);
+    let v00 = hash01(x0, y0);
+    let v10 = hash01(x0 + 1, y0);
+    let v01 = hash01(x0, y0 + 1);
+    let v11 = hash01(x0 + 1, y0 + 1);
+    let a = v00 + (v10 - v00) * sx;
+    let b = v01 + (v11 - v01) * sx;
+    a + (b - a) * sy
+}
+
+/// 3-octave fractal noise, ~0..1.
+fn fbm(x: f32, y: f32) -> f32 {
+    value_noise(x, y) * 0.6 + value_noise(x * 2.1 + 5.0, y * 2.1 + 5.0) * 0.3 + value_noise(x * 4.3 + 9.0, y * 4.3 + 9.0) * 0.1
+}
+
+/// Small deterministic per-tile brightness jitter (-1..1) — used by the renderer to
+/// break up flat terrain so it doesn't look like one solid color.
+pub fn tile_jitter(x: usize, y: usize) -> f32 {
+    hash01(x as i32 ^ 0x5bd1, y as i32 ^ 0x9e37) * 2.0 - 1.0
+}
+
 impl TileMap {
-    /// Deterministic test map: ground, a lake, a cliff border, scattered nodes.
+    /// Noise terrain with a clear central battlefield (radius in tiles) so units always
+    /// spawn and open the fight on passable ground.
     pub fn generate_test(width: usize, height: usize) -> Self {
         let mut tiles = vec![Tile::Ground; width * height];
         let idx = |x: usize, y: usize| y * width + x;
+        let (cx, cy) = (width as f32 * 0.5, height as f32 * 0.5);
+        let clearing = 28.0;
 
         for y in 0..height {
             for x in 0..width {
-                let mut t = Tile::Ground;
+                let e = fbm(x as f32 * 0.045, y as f32 * 0.045);
+                let mut t = if e < 0.36 {
+                    Tile::Water
+                } else if e > 0.72 {
+                    Tile::Cliff
+                } else {
+                    Tile::Ground
+                };
+                if t == Tile::Ground {
+                    let r = value_noise(x as f32 * 0.08 + 100.0, y as f32 * 0.08 + 70.0);
+                    if r > 0.80 {
+                        t = Tile::Resource;
+                    }
+                }
+                // Solid cliff border.
                 if x < 2 || y < 2 || x >= width - 2 || y >= height - 2 {
                     t = Tile::Cliff;
                 }
-                let dx = x as f32 - width as f32 * 0.32;
-                let dy = y as f32 - height as f32 * 0.62;
-                if (dx * dx + dy * dy).sqrt() < 16.0 {
-                    t = Tile::Water;
+                // Keep the central battlefield free of water/cliff.
+                let in_border = x < 2 || y < 2 || x >= width - 2 || y >= height - 2;
+                let dist = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt();
+                if dist < clearing && !in_border && (t == Tile::Water || t == Tile::Cliff) {
+                    t = Tile::Ground;
                 }
                 tiles[idx(x, y)] = t;
-            }
-        }
-
-        for (x, y) in [(40, 40), (210, 50), (60, 200), (200, 210), (128, 128), (90, 150), (170, 90)] {
-            if x < width && y < height {
-                tiles[idx(x, y)] = Tile::Resource;
             }
         }
 
