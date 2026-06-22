@@ -517,6 +517,57 @@ Remaining:
 - Prefer prose planning the owner can steer in chat over heavy questionnaires.
 - This is on **Windows** (PowerShell primary; Bash available). Game repo dir:
   `C:\Users\patri\Downloads\ClaudeCode\coldwar-rts` (the parent folder holds unrelated projects).
+- **Always use the debug suite before reading code to diagnose a problem** (see §13).
+  One command → one short output → act. Never read source files to understand runtime behaviour
+  when a debug command can answer the question in one line.
+
+## 13. Debug suite (AI-first, one command → one line output)
+Built in `src/debug.rs`. Every check is a single env-var command that runs headlessly, prints one
+short structured result, and exits. **Always prefer these over reading source files or screenshots.**
+
+### COLDWAR_ASSERT=\<scenario\> — pass/fail invariant checks (exits 0/1)
+```
+COLDWAR_ASSERT=combat_discrete     # 1 shot = 1 tracer (no DPS spray)
+COLDWAR_ASSERT=no_friendly_fire    # 0 damage to same-faction units
+COLDWAR_ASSERT=turret_delays       # turret must aim before firing
+COLDWAR_ASSERT=formation_fills     # 25-unit group move → 0 stuck after 1200 ticks
+```
+Add new scenarios to `debug::run_assert` whenever a new system needs regression coverage.
+
+### COLDWAR_QUERY=\<fields\> — one JSON line of world state after N ticks
+```
+COLDWAR_UNITS=40 COLDWAR_QUERY="shots_fired,kills,alive,mean_hp,moving,tick_ms" COLDWAR_QTICKS=600
+→ {"shots_fired":168,"kills":{"any":28},"alive":{"vanguard":33,"crimson":18},...}
+```
+Fields: `shots_fired` `kills` `alive` `mean_hp` `moving` `tracers` `tick_ms` `entities`
+`COLDWAR_QTICKS` sets the number of ticks to run (default 300).
+
+### COLDWAR_EVENTLOG=1 — write debug/events.jsonl during a normal run
+Each significant event (shot, kill, move order, building placed, game over) is appended as a JSON
+line. Grep/tail it to answer "what happened to unit X" without reading code.
+```
+grep '"type":"kill"' debug/events.jsonl | tail -5
+```
+
+### Existing headless commands (same pattern)
+```
+COLDWAR_BENCH=400                  # sim perf: ms/tick at N ticks
+COLDWAR_SETTLE=1000                # jitter metric: still_moving + mean_disp px/tick
+COLDWAR_UNITS=N                    # spawn N units per side
+COLDWAR_CAPTURE=out.png            # headless screenshot after N frames
+```
+
+### When to use which
+| Question | Command |
+|---|---|
+| Did combat fire correctly? | `COLDWAR_QUERY="shots_fired,kills"` |
+| Is there friendly fire? | `COLDWAR_ASSERT=no_friendly_fire` |
+| Are bullets discrete (not DPS spray)? | `COLDWAR_ASSERT=combat_discrete` |
+| Does turret gate fire? | `COLDWAR_ASSERT=turret_delays` |
+| Do formations fill? | `COLDWAR_ASSERT=formation_fills` |
+| Is there jitter after a group move? | `COLDWAR_SETTLE=1000` |
+| What's the sim perf at 1200 units? | `COLDWAR_UNITS=1200 COLDWAR_BENCH=400` |
+| Why did units die unexpectedly? | `COLDWAR_EVENTLOG=1` then grep kills |
 
 ## 12. RTS benchmarking & competitive analysis (standing practice)
 **Standing instruction (owner, 2026-06-21):** continuously test and compare our features and

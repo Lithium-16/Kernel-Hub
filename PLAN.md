@@ -305,6 +305,24 @@ target with acceptable performance; fog/minimap/UI functional; screenshots of a 
 
 ---
 
+## Debug suite (use this, not source reading — see PROJECT.md §13)
+All commands are headless native-only, one env-var → one short output → exit.
+**This is the primary verification tool for any agent working on this codebase.**
+
+| Command | Output | Use for |
+|---|---|---|
+| `COLDWAR_ASSERT=combat_discrete` | `PASS/FAIL` | Bullets discrete (not continuous DPS) |
+| `COLDWAR_ASSERT=no_friendly_fire` | `PASS/FAIL` | No faction-check regressions |
+| `COLDWAR_ASSERT=turret_delays` | `PASS/FAIL` | Turret gates fire correctly |
+| `COLDWAR_ASSERT=formation_fills` | `PASS/FAIL` | Formation slots all fill |
+| `COLDWAR_QUERY="shots_fired,kills,alive,mean_hp"` | 1 JSON line | Runtime combat sanity |
+| `COLDWAR_SETTLE=1000` | 1 line | Jitter metric after group moves |
+| `COLDWAR_BENCH=400` | 1 line | Sim perf ms/tick |
+| `COLDWAR_EVENTLOG=1` + run | `debug/events.jsonl` | Trace unexpected deaths/moves |
+| `cargo test` | `N passed` | Logic unit tests (19 currently) |
+
+Add a new `COLDWAR_ASSERT` scenario whenever a new system could silently regress.
+
 ## Cross-cutting systems (where they live)
 - **Data-driven definitions & factions** — scaffold in Phase 1; populated through Phases 4–6;
   second faction is a later content pass once one faction is fully playable.
