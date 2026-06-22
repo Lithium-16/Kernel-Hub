@@ -33,6 +33,16 @@ pub struct Renderable {
 /// Which faction an entity belongs to (faction id from the data definitions).
 pub struct Faction(pub String);
 
+/// A placed building: footprint tile origin `(tx, ty)` and size in tiles, plus a draw
+/// color. Its tiles are marked impassable in the nav grid when placed.
+pub struct Building {
+    pub tx: usize,
+    pub ty: usize,
+    pub w: usize,
+    pub h: usize,
+    pub color: Color,
+}
+
 /// The unit type this entity was spawned from (data-definition id + display name).
 /// Drives the selection readout now and the command card / production later.
 pub struct UnitKind {

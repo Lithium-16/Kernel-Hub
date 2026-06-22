@@ -21,6 +21,7 @@ pub fn present(
     sim: &Sim,
     sprites: &Sprites,
     drag: Option<(Vec2, Vec2)>,
+    ghost: Option<(Rect, bool)>,
     tick_ms: f32,
     target: Option<RenderTarget>,
 ) {
@@ -33,10 +34,22 @@ pub fn present(
     set_camera(&world_cam);
     clear_background(BG);
     draw_tiles(map, view, sprites);
+    draw_buildings(world);
     draw_move_orders(world);
     draw_selection_rings(world, sprites);
     draw_entities(world, sprites);
     draw_hitboxes(world);
+
+    // Placement ghost (world space): green = valid, red = blocked.
+    if let Some((r, valid)) = ghost {
+        let (fill, edge) = if valid {
+            (Color::new(0.45, 1.0, 0.55, 0.25), Color::new(0.45, 1.0, 0.55, 0.95))
+        } else {
+            (Color::new(1.0, 0.35, 0.35, 0.25), Color::new(1.0, 0.35, 0.35, 0.95))
+        };
+        draw_rectangle(r.x, r.y, r.w, r.h, fill);
+        draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, edge);
+    }
 
     match &target {
         None => set_default_camera(),
@@ -76,6 +89,17 @@ fn draw_tiles(map: &TileMap, view: Rect, sprites: &Sprites) {
                 },
             );
         }
+    }
+}
+
+fn draw_buildings(world: &hecs::World) {
+    let ts = map::TILE_SIZE;
+    let edge = Color::new(0.05, 0.06, 0.08, 1.0);
+    for (_e, b) in world.query::<&crate::components::Building>().iter() {
+        let (x, y) = (b.tx as f32 * ts, b.ty as f32 * ts);
+        let (w, h) = (b.w as f32 * ts, b.h as f32 * ts);
+        draw_rectangle(x, y, w, h, b.color);
+        draw_rectangle_lines(x, y, w, h, 2.0, edge);
     }
 }
 
@@ -163,7 +187,7 @@ fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &S
     let _ = sim;
     // Below the top resource bar so the two don't overlap.
     draw_text(
-        "Drag/Shift-select, dbl-click=type, RMB move (Shift=queue), Ctrl+1-9 group, 1-9 recall  (WASD pan)",
+        "Drag/Shift-select, dbl-click=type, RMB move (Shift=queue), Ctrl+1-9 group, B=build  (WASD pan)",
         16.0,
         crate::hud::TOP_H + 24.0,
         24.0,

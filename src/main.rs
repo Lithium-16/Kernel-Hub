@@ -12,6 +12,7 @@ use hecs::Entity;
 use macroquad::prelude::*;
 
 mod assets;
+mod building;
 mod camera;
 mod components;
 mod data;
@@ -200,7 +201,7 @@ async fn main() {
     let defs = data::load_definitions();
     let map = TileMap::generate_test(256, 256);
     let map_px = map.size_px();
-    let nav = NavGrid::from_map(&map);
+    let mut nav = NavGrid::from_map(&map);
     let mut flow_cache = FlowCache::new(48);
     let minimap = minimap::Minimap::build(&map);
 
@@ -221,6 +222,7 @@ async fn main() {
     let mut grid = SpatialGrid::new(map_px, 24.0);
     let mut drag_start: Option<Vec2> = None;
     let mut last_click: (f64, Option<Entity>) = (0.0, None); // (time, entity) for double-click
+    let mut placing: Option<usize> = None; // index into defs.buildings while in placement mode
     let mut ui = ui::Ui::new();
     let economy = economy::Economy::default();
     let mut control_groups = groups::ControlGroups::new();
@@ -231,6 +233,19 @@ async fn main() {
 
     // Capture mode: select all and order a move so the screenshot shows movement.
     if capture_path.is_some() {
+        // Demo building near map center so captures show the building render + nav block.
+        if let Some(def) = defs.buildings.first() {
+            let (tx, ty) = (126usize, 126usize);
+            if building::can_place(&nav, tx as i32, ty as i32, def.w, def.h) {
+                let color = Color::from_rgba(def.color.0, def.color.1, def.color.2, 255);
+                world.spawn((components::Building { tx, ty, w: def.w, h: def.h, color },));
+                for dy in 0..def.h {
+                    for dx in 0..def.w {
+                        nav.set_blocked(tx + dx, ty + dy);
+                    }
+                }
+            }
+        }
         let all: Vec<Entity> = world.query::<&Position>().iter().map(|(e, _)| e).collect();
         for &e in &all {
             let _ = world.insert_one(e, Selected);
@@ -329,11 +344,59 @@ async fn main() {
         let view = cam.view_rect(sw, sh);
         let cam2d = Camera2D::from_display_rect(view);
 
+        // --- Building placement mode ---
+        // B cycles through building types (then off); Esc / right-click exits. While
+        // placing, a ghost previews the snapped footprint and left-click commits it.
+        if is_key_pressed(KeyCode::B) {
+            placing = match placing {
+                None => (!defs.buildings.is_empty()).then_some(0),
+                Some(i) if i + 1 < defs.buildings.len() => Some(i + 1),
+                _ => None,
+            };
+        }
+        let mut ghost: Option<(Rect, bool)> = None;
+        if let Some(idx) = placing {
+            let def = &defs.buildings[idx];
+            let world_mp = cam2d.screen_to_world(mp);
+            let (tx, ty) = building::snap_origin(world_mp, def.w, def.h, map::TILE_SIZE);
+            let foot = Rect::new(
+                tx as f32 * map::TILE_SIZE,
+                ty as f32 * map::TILE_SIZE,
+                def.w as f32 * map::TILE_SIZE,
+                def.h as f32 * map::TILE_SIZE,
+            );
+            let nav_ok = building::can_place(&nav, tx, ty, def.w, def.h);
+            let unit_clear = !world.query::<&Position>().iter().any(|(_, p)| foot.contains(p.0));
+            let valid = nav_ok && unit_clear;
+            ghost = Some((foot, valid));
+
+            if is_mouse_button_pressed(MouseButton::Left) && !over_ui && valid {
+                let color = Color::from_rgba(def.color.0, def.color.1, def.color.2, 255);
+                world.spawn((components::Building {
+                    tx: tx as usize,
+                    ty: ty as usize,
+                    w: def.w,
+                    h: def.h,
+                    color,
+                },));
+                for dy in 0..def.h {
+                    for dx in 0..def.w {
+                        nav.set_blocked(tx as usize + dx, ty as usize + dy);
+                    }
+                }
+                flow_cache.clear(); // nav changed: stale routes must not be reused
+            }
+            if is_mouse_button_pressed(MouseButton::Right) || is_key_pressed(KeyCode::Escape) {
+                placing = None;
+            }
+        }
+        let placing_active = placing.is_some();
+
         // --- Selection (left mouse) ---
-        if is_mouse_button_pressed(MouseButton::Left) && !over_ui {
+        if is_mouse_button_pressed(MouseButton::Left) && !over_ui && !placing_active {
             drag_start = Some(mp);
         }
-        if is_mouse_button_released(MouseButton::Left) {
+        if is_mouse_button_released(MouseButton::Left) && !placing_active {
             if let Some(start) = drag_start.take() {
                 // Shift adds to the current selection instead of replacing it.
                 let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
@@ -386,7 +449,7 @@ async fn main() {
         // --- Move order (right mouse): only the currently-selected units ---
         // Plain RMB = fresh formation move; Shift+RMB = queue a waypoint (if the group
         // already has a plan to append to, else it's just a fresh move).
-        if is_mouse_button_pressed(MouseButton::Right) && !over_ui {
+        if is_mouse_button_pressed(MouseButton::Right) && !over_ui && !placing_active {
             let click = cam2d.screen_to_world(mp);
             let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
             let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
@@ -448,7 +511,7 @@ async fn main() {
         let tick_ms = ((get_time() - t0) * 1000.0) as f32;
 
         let drag_box = drag_start.map(|s| (s, mp));
-        render::present(&world, &map, &cam, &sim, &sprites, drag_box, tick_ms, None);
+        render::present(&world, &map, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
         // Recompute layout after this frame's input so panels reflect current selection.
         let hud_layout = hud::HudLayout::compute(&world, sw, sh);
         match hud::draw(&mut ui, &world, &economy, &hud_layout) {
@@ -481,7 +544,7 @@ async fn main() {
             frame += 1;
             if frame >= capture_frames {
                 let rt = render_target(screen_width() as u32, screen_height() as u32);
-                render::present(&world, &map, &cam, &sim, &sprites, None, tick_ms, Some(rt.clone()));
+                render::present(&world, &map, &cam, &sim, &sprites, None, None, tick_ms, Some(rt.clone()));
                 let mut uicam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh));
                 uicam.render_target = Some(rt.clone());
                 set_camera(&uicam);

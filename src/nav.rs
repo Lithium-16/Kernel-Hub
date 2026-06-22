@@ -31,6 +31,14 @@ impl NavGrid {
     pub fn passable(&self, x: usize, y: usize) -> bool {
         self.passable[y * self.w + x]
     }
+
+    /// Mark a tile impassable (e.g. a placed building). Callers must invalidate any
+    /// cached flow fields afterwards (see `FlowCache::clear`).
+    pub fn set_blocked(&mut self, x: usize, y: usize) {
+        if x < self.w && y < self.h {
+            self.passable[y * self.w + x] = false;
+        }
+    }
 }
 
 const ORTHO: u32 = 10;
@@ -155,6 +163,13 @@ pub struct FlowCache {
 impl FlowCache {
     pub fn new(cap: usize) -> Self {
         Self { fields: HashMap::new(), order: VecDeque::new(), cap }
+    }
+
+    /// Drop all cached fields — call after the nav grid changes (e.g. a placed building)
+    /// so stale routes aren't reused.
+    pub fn clear(&mut self) {
+        self.fields.clear();
+        self.order.clear();
     }
 
     /// Reuse the cached field for `goal`, or build + cache it (evicting the oldest).

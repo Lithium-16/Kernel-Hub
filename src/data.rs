@@ -13,6 +13,17 @@ pub struct Definitions {
     pub version: u32,
     pub factions: Vec<FactionDef>,
     pub units: Vec<UnitDef>,
+    pub buildings: Vec<BuildingDef>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BuildingDef {
+    pub id: String,
+    pub name: String,
+    pub color: (u8, u8, u8),
+    /// Footprint size in tiles.
+    pub w: usize,
+    pub h: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]

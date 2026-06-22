@@ -179,8 +179,10 @@ produces sensible behavior for both units and buildings.
       retreat / rally / ability order types and **opt-in squad drafting** still to add.
 - [ ] **Zones** — paint defense/staging/no-go zones that orders and jobs reference.
 - [ ] **Doctrine presets** — save/apply policy bundles (stances + priorities) to a force in one action.
-- [ ] **Building placement** — ghost/blueprint preview, grid snap, validity (terrain / overlap /
-      build-radius / resource node), rotation; multi-place blueprint mode.
+- [~] **Building placement** — B cycles building types; ghost preview with grid snap + validity
+      (terrain + footprint + unit overlap, green/red), left-click commits, footprint tiles blocked in
+      nav (flow cache cleared so units path around), multi-place mode, Esc/RMB cancels. Done 2026-06-21,
+      validity unit-tested (`building.rs`). Build-radius / resource-node rules + rotation still to add.
 - [ ] **Construction** — builders take build jobs; site → frame → complete Forms; gradual drain;
       cancel (refund) / repair.
 - [ ] **Production** — producer buildings: queue + rally point + exit; bills; research queue.
