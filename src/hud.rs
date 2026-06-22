@@ -85,14 +85,22 @@ pub fn selection_summary(world: &World) -> (Vec<(String, u32)>, u32) {
 }
 
 /// Draw the whole HUD and return any interaction (command card overrides bottom bar).
-pub fn draw(ui: &mut Ui, world: &World, eco: &Economy, layout: &HudLayout) -> HudAction {
-    draw_top_bar(ui, eco, layout.top);
+pub fn draw(
+    ui: &mut Ui,
+    world: &World,
+    eco: &Economy,
+    ai: &crate::ai_brain::AiBrain,
+    groups: &crate::combat_group::GroupRegistry,
+    layout: &HudLayout,
+) -> HudAction {
+    draw_top_bar(ui, eco, ai, layout.top);
     let mut action = draw_bottom_bar(ui, world, layout.bottom);
     if let Some(r) = layout.command {
         if let Some(a) = draw_command_card(ui, world, r) {
             action = a;
         }
     }
+    draw_group_panel(ui, groups, world, layout.bottom);
     if let Some(r) = layout.selection {
         draw_selection_panel(ui, world, r);
     }
@@ -128,23 +136,58 @@ fn draw_command_card(ui: &mut Ui, world: &World, r: Rect) -> Option<HudAction> {
     action
 }
 
-/// Top bar: resource readouts with hover tooltips. Power turns amber when overdrawn.
-fn draw_top_bar(ui: &mut Ui, eco: &Economy, r: Rect) {
+/// Group summary panel: shows player combat groups across the bottom bar.
+fn draw_group_panel(ui: &mut Ui, groups: &crate::combat_group::GroupRegistry, _world: &World, bottom: Rect) {
+    let mut x = bottom.x + 250.0; // start after Stop/Clear buttons
+    let player_faction = crate::PLAYER_FACTION;
+    for g in groups.all() {
+        if g.faction != player_faction { continue; }
+        let w = 140.0;
+        let r = Rect::new(x, bottom.y + 4.0, w, 48.0);
+        ui.panel(r);
+        ui.label(vec2(r.x + 6.0, r.y + 16.0), &g.name);
+        let strength = g.strength();
+        let orig = g.original_strength.max(1);
+        let frac = strength as f32 / orig as f32;
+        let bar_r = Rect::new(r.x + 6.0, r.y + 24.0, r.w - 12.0, 8.0);
+        let fill = if frac > 0.6 { Color::new(0.4, 0.9, 0.4, 1.0) }
+                   else if frac > 0.3 { Color::new(0.9, 0.8, 0.3, 1.0) }
+                   else { Color::new(0.9, 0.3, 0.3, 1.0) };
+        ui.bar(bar_r, frac, fill);
+        let label = format!("{}/{}", strength, orig);
+        let fs = ui.theme.font_size as u16;
+        let d = measure_text(&label, None, fs, 1.0);
+        ui.label(vec2(r.x + r.w - 6.0 - d.width, r.y + 44.0), &label);
+        x += w + 6.0;
+    }
+}
+
+/// Top bar: resource readouts with hover tooltips + AI prep timer.
+fn draw_top_bar(ui: &mut Ui, _eco: &Economy, ai: &crate::ai_brain::AiBrain, r: Rect) {
     ui.panel(r);
     let mp: Vec2 = mouse_position().into();
     let fs = ui.theme.font_size as u16;
     let amber = Color::new(1.0, 0.72, 0.25, 1.0);
 
+    // AI prep countdown — shown right-aligned in the top bar.
+    if ai.is_preparing() {
+        let secs = ai.prep_seconds_left();
+        let mins = (secs / 60.0) as u32;
+        let s = (secs as u32) % 60;
+        let text = format!("ENEMY IN  {:02}:{:02}", mins, s);
+        let warn = Color::new(1.0, 0.55, 0.3, 1.0);
+        let d = measure_text(&text, None, fs, 1.0);
+        ui.label_colored(vec2(r.x + r.w - d.width - 14.0, r.y + 23.0), &text, warn);
+    } else {
+        let d = measure_text("ENEMY ADVANCING", None, fs, 1.0);
+        ui.label_colored(vec2(r.x + r.w - d.width - 14.0, r.y + 23.0), "ENEMY ADVANCING", Color::new(1.0, 0.35, 0.35, 1.0));
+    }
+
     let segments = [
-        ("Metal", eco.metal.to_string(), false, "Metal — refined stock for structures and vehicles."),
-        ("Fuel", eco.fuel.to_string(), false, "Fuel — drawn by vehicles and some production."),
-        ("Comp", eco.components.to_string(), false, "Components — advanced manufacturing input."),
-        (
-            "Power",
-            format!("{}/{}", eco.power_used, eco.power_cap),
-            eco.overdrawn(),
-            "Power draw vs capacity. Over capacity throttles production.",
-        ),
+        ("Ammo", "—", false, "Ammo — consumed by combat. Flows from depots (Phase 4)."),
+        ("Fuel", "—", false, "Fuel — consumed by vehicles. Flows from refineries (Phase 4)."),
+        ("Supplies", "—", false, "Building Supplies — used for construction and repairs (Phase 4)."),
+        ("Parts", "—", false, "Weapon Parts — enables production and reinforcement (Phase 4)."),
     ];
 
     let mut x = r.x + 14.0;

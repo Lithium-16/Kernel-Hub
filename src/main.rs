@@ -758,7 +758,7 @@ async fn main() {
         render::present(&world, &map, &fog, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
         // Recompute layout after this frame's input so panels reflect current selection.
         let hud_layout = hud::HudLayout::compute(&world, sw, sh);
-        match hud::draw(&mut ui, &world, &economy, &hud_layout) {
+        match hud::draw(&mut ui, &world, &economy, &ai, &groups, &hud_layout) {
             hud::HudAction::Stop => {
                 let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
                 for e in sel {
@@ -826,7 +826,7 @@ async fn main() {
                 uicam.render_target = Some(rt.clone());
                 set_camera(&uicam);
                 let cap_layout = hud::HudLayout::compute(&world, sw, sh);
-                let _ = hud::draw(&mut ui, &world, &economy, &cap_layout);
+                let _ = hud::draw(&mut ui, &world, &economy, &ai, &groups, &cap_layout);
                 minimap.draw(&world, cam.view_rect(sw, sh), cap_layout.minimap);
                 set_default_camera();
                 rt.texture.get_texture_data().export_png(path);

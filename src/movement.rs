@@ -150,6 +150,14 @@ const STALL_TICKS: u8 = 3;
 pub fn settle_arrivals(world: &mut World) {
     let mut arrived = Vec::new();
     for (e, (pos, state, order)) in world.query::<(&Position, &mut MoveState, &MoveOrder)>().iter() {
+        // Attack-move orders never stall-settle — the unit should push through to the goal
+        // even while engaging enemies en route, not stop at the first packed formation.
+        if order.attack_move {
+            let d = pos.0.distance(order.goal);
+            if d < ARRIVE_CORE { arrived.push(e); }
+            state.stall = 0;
+            continue;
+        }
         let d = pos.0.distance(order.goal);
         if d < ARRIVE_CORE {
             arrived.push(e);
