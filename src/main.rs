@@ -23,6 +23,7 @@ mod map;
 mod movement;
 mod nav;
 mod render;
+mod selection;
 mod sim;
 mod spatial;
 mod ui;
@@ -179,6 +180,7 @@ async fn main() {
 
     let mut grid = SpatialGrid::new(map_px, 24.0);
     let mut drag_start: Option<Vec2> = None;
+    let mut last_click: (f64, Option<Entity>) = (0.0, None); // (time, entity) for double-click
     let mut ui = ui::Ui::new();
     let economy = economy::Economy::default();
     let mut control_groups = groups::ControlGroups::new();
@@ -285,7 +287,11 @@ async fn main() {
         }
         if is_mouse_button_released(MouseButton::Left) {
             if let Some(start) = drag_start.take() {
-                clear_selection(&mut world);
+                // Shift adds to the current selection instead of replacing it.
+                let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+                if !shift {
+                    clear_selection(&mut world);
+                }
                 let a = cam2d.screen_to_world(start);
                 let b = cam2d.screen_to_world(mp);
                 let (minx, maxx) = (a.x.min(b.x), a.x.max(b.x));
@@ -303,15 +309,25 @@ async fn main() {
                             best = Some(e);
                         }
                     }
+                    let now = get_time();
                     if let Some(e) = best {
-                        to_sel.push(e);
-                    }
-                } else {
-                    for (e, pos) in world.query::<&Position>().iter() {
-                        if pos.0.x >= minx && pos.0.x <= maxx && pos.0.y >= miny && pos.0.y <= maxy {
+                        // Double-click the same unit → select all of its type on screen.
+                        let dbl = last_click.1 == Some(e) && now - last_click.0 < 0.35;
+                        if dbl {
+                            if let Ok(k) = world.get::<&components::UnitKind>(e) {
+                                let kind = k.id.clone();
+                                drop(k);
+                                to_sel = selection::same_kind_in_rect(&world, &kind, view);
+                            }
+                        } else {
                             to_sel.push(e);
                         }
+                        last_click = (now, Some(e));
+                    } else {
+                        last_click = (now, None);
                     }
+                } else {
+                    to_sel = selection::in_rect(&world, Rect::new(minx, miny, maxx - minx, maxy - miny));
                 }
                 for e in to_sel {
                     let _ = world.insert_one(e, Selected);
