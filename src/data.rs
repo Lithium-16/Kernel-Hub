@@ -43,6 +43,11 @@ pub struct UnitDef {
     pub radius: f32,
     pub speed: f32,
     pub turn_rate: f32,
+    pub hp: f32,
+    /// Weapon range in world px (0 = unarmed).
+    pub range: f32,
+    /// Weapon damage per second (0 = unarmed).
+    pub dps: f32,
 }
 
 /// Load and validate the bundled definitions.

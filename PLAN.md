@@ -161,6 +161,10 @@ produces sensible behavior for both units and buildings.
 - [~] **Command-card UI** — `hud.rs` command card (bottom-left, appears on selection) with Stop +
       stance buttons (active stance outlined) done 2026-06-21; ability buttons (auto-generated from
       Form abilities), cooldown/disabled/toggle states, and targeting modes still to add.
+- [~] **Combat core** — `Health` + `Weapon` (data-driven hp/range/dps per unit type), two factions
+      (player vanguard + enemy crimson, tinted), direct-fire `combat::step` (nearest enemy in range each
+      tick, hitscan), death/despawn, health bars, player-faction-only selection. Done 2026-06-21,
+      unit-tested. Projectiles, armor table, stance-driven advance, and enemy AI still to add.
 - [ ] **Utility AI** — per-unit scorer over candidate actions (idle, take-job, move-to, engage,
       retreat, resupply); pick highest; standing orders bias weights. Runs on staggered schedule.
 - [~] **Standing orders & stances** — `Stance` component (Aggressive / Defensive / Hold-Ground) set

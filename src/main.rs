@@ -14,6 +14,7 @@ use macroquad::prelude::*;
 mod assets;
 mod building;
 mod camera;
+mod combat;
 mod components;
 mod data;
 mod ecs;
@@ -55,28 +56,44 @@ fn window_conf() -> Conf {
     }
 }
 
-/// Spawn `count` units in a loose block near the map center, cycling unit types.
-fn spawn_army(world: &mut hecs::World, defs: &Definitions, sprites: &Sprites, map: &TileMap, count: usize) {
-    let center = map.size_px() * 0.5;
-    let cols = (count as f32).sqrt().ceil() as usize;
+/// The player's faction; only these units are selectable/commandable.
+const PLAYER_FACTION: &str = "vanguard";
+/// The enemy faction.
+const ENEMY_FACTION: &str = "crimson";
+
+/// Spawn `count` units in a loose block centered on `center`, cycling unit types, all
+/// assigned to `faction` and drawn with `tint`. Armed types also get a `Weapon`.
+fn spawn_army(
+    world: &mut hecs::World,
+    defs: &Definitions,
+    sprites: &Sprites,
+    faction: &str,
+    center: Vec2,
+    tint: Color,
+    count: usize,
+) {
+    let cols = (count as f32).sqrt().ceil().max(1.0) as usize;
     for i in 0..count {
         let unit = &defs.units[i % defs.units.len()];
-        let tint = Color::from_rgba(unit.color.0, unit.color.1, unit.color.2, 255);
         let sprite = sprites.unit_index(&unit.sprite);
         let gx = (i % cols) as f32 - cols as f32 * 0.5;
         let gy = (i / cols) as f32 - cols as f32 * 0.5;
         let pos = center + vec2(gx * 30.0, gy * 30.0);
-        world.spawn((
+        let e = world.spawn((
             Position(pos),
             Velocity(Vec2::ZERO),
             Heading(-std::f32::consts::FRAC_PI_2),
             MoveState { last: pos, stall: 0 },
             Mobility { speed: unit.speed, turn_rate: unit.turn_rate },
             Renderable { sprite, tint, size: unit.radius * 2.6 },
-            Faction(unit.faction.clone()),
+            Faction(faction.to_string()),
             components::UnitKind { id: unit.id.clone(), name: unit.name.clone() },
             stance::Stance::Aggressive,
+            components::Health { cur: unit.hp, max: unit.hp },
         ));
+        if unit.dps > 0.0 {
+            let _ = world.insert_one(e, components::Weapon { range: unit.range, dps: unit.dps });
+        }
     }
 }
 
@@ -210,7 +227,12 @@ async fn main() {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(200);
-    spawn_army(&mut world, &defs, &sprites, &map, count);
+    // Two opposing armies: player (vanguard, white) left of center, enemy (crimson, red
+    // tint) right of center, so they can clash when ordered together.
+    let player_tint = Color::new(0.85, 0.92, 1.0, 1.0);
+    let enemy_tint = Color::new(1.0, 0.55, 0.55, 1.0);
+    spawn_army(&mut world, &defs, &sprites, PLAYER_FACTION, map_px * 0.5 + vec2(-600.0, 0.0), player_tint, count);
+    spawn_army(&mut world, &defs, &sprites, ENEMY_FACTION, map_px * 0.5 + vec2(600.0, 0.0), enemy_tint, count);
 
     let mut cam = camera::GameCamera::centered(map_px);
     if let Ok(z) = std::env::var("COLDWAR_ZOOM") {
@@ -440,6 +462,10 @@ async fn main() {
                 } else {
                     to_sel = selection::in_rect(&world, Rect::new(minx, miny, maxx - minx, maxy - miny));
                 }
+                // Only the player's own units are selectable.
+                to_sel.retain(|&e| {
+                    world.get::<&Faction>(e).map(|f| f.0 == PLAYER_FACTION).unwrap_or(false)
+                });
                 for e in to_sel {
                     let _ = world.insert_one(e, Selected);
                 }
@@ -503,6 +529,8 @@ async fn main() {
             grid.rebuild(&world);
             movement::resolve_collisions(&mut world, &grid, &nav, map_px, 2);
             movement::settle_arrivals(&mut world);
+            grid.rebuild(&world);
+            combat::step(&mut world, &grid, tick_dt);
             sim.tick();
             accumulator -= tick_dt;
         }

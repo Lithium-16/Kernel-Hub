@@ -50,6 +50,19 @@ pub struct UnitKind {
     pub name: String,
 }
 
+/// Hit points. Entities die (despawn) when `cur` reaches 0.
+pub struct Health {
+    pub cur: f32,
+    pub max: f32,
+}
+
+/// A direct-fire weapon: damage per second applied to the nearest enemy within `range`
+/// (world px). Units with no weapon (engineers, trucks) don't get this component.
+pub struct Weapon {
+    pub range: f32,
+    pub dps: f32,
+}
+
 /// Per-unit arrival bookkeeping: last tick's position + a stall counter (consecutive
 /// near-goal ticks with little real progress → the unit has effectively arrived).
 pub struct MoveState {

@@ -38,6 +38,7 @@ pub fn present(
     draw_move_orders(world);
     draw_selection_rings(world, sprites);
     draw_entities(world, sprites);
+    draw_health_bars(world);
     draw_hitboxes(world);
 
     // Placement ghost (world space): green = valid, red = blocked.
@@ -89,6 +90,29 @@ fn draw_tiles(map: &TileMap, view: Rect, sprites: &Sprites) {
                 },
             );
         }
+    }
+}
+
+/// Health bar above damaged units (hidden at full HP to reduce clutter).
+fn draw_health_bars(world: &hecs::World) {
+    use crate::components::Health;
+    for (_e, (pos, r, h)) in world.query::<(&Position, &Renderable, &Health)>().iter() {
+        if h.cur >= h.max || h.max <= 0.0 {
+            continue;
+        }
+        let frac = (h.cur / h.max).clamp(0.0, 1.0);
+        let w = r.size * 0.8;
+        let x = pos.0.x - w * 0.5;
+        let y = pos.0.y - r.size * 0.62;
+        let fill = if frac > 0.5 {
+            Color::new(0.35, 0.9, 0.4, 0.95)
+        } else if frac > 0.25 {
+            Color::new(0.95, 0.85, 0.3, 0.95)
+        } else {
+            Color::new(0.95, 0.35, 0.3, 0.95)
+        };
+        draw_rectangle(x, y, w, 3.5, Color::new(0.0, 0.0, 0.0, 0.7));
+        draw_rectangle(x, y, w * frac, 3.5, fill);
     }
 }
 

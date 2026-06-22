@@ -9,12 +9,12 @@ Definitions(
         (id: "vanguard", name: "Vanguard Bloc", color: (110, 160, 230)),
     ],
     units: [
-        (id: "engineer", name: "Engineer",        faction: "vanguard", sprite: "engineer",  color: (255, 255, 255), radius: 9.0,  speed: 70.0, turn_rate: 6.0),
-        (id: "infantry", name: "Infantry",        faction: "vanguard", sprite: "infantry",  color: (255, 255, 255), radius: 8.0,  speed: 82.0, turn_rate: 9.0),
-        (id: "tank",     name: "Main Battle Tank", faction: "vanguard", sprite: "tank",      color: (255, 255, 255), radius: 12.0, speed: 60.0, turn_rate: 3.2),
-        (id: "arty",     name: "Artillery",       faction: "vanguard", sprite: "artillery", color: (255, 255, 255), radius: 12.0, speed: 46.0, turn_rate: 2.4),
-        (id: "aa",       name: "AA Vehicle",       faction: "vanguard", sprite: "aa",        color: (255, 255, 255), radius: 10.0, speed: 66.0, turn_rate: 4.0),
-        (id: "truck",    name: "Supply Truck",     faction: "vanguard", sprite: "truck",     color: (255, 255, 255), radius: 11.0, speed: 78.0, turn_rate: 4.5),
+        (id: "engineer", name: "Engineer",        faction: "vanguard", sprite: "engineer",  color: (255, 255, 255), radius: 9.0,  speed: 70.0, turn_rate: 6.0, hp: 60.0,  range: 0.0,   dps: 0.0),
+        (id: "infantry", name: "Infantry",        faction: "vanguard", sprite: "infantry",  color: (255, 255, 255), radius: 8.0,  speed: 82.0, turn_rate: 9.0, hp: 50.0,  range: 95.0,  dps: 12.0),
+        (id: "tank",     name: "Main Battle Tank", faction: "vanguard", sprite: "tank",      color: (255, 255, 255), radius: 12.0, speed: 60.0, turn_rate: 3.2, hp: 240.0, range: 130.0, dps: 30.0),
+        (id: "arty",     name: "Artillery",       faction: "vanguard", sprite: "artillery", color: (255, 255, 255), radius: 12.0, speed: 46.0, turn_rate: 2.4, hp: 90.0,  range: 240.0, dps: 42.0),
+        (id: "aa",       name: "AA Vehicle",       faction: "vanguard", sprite: "aa",        color: (255, 255, 255), radius: 10.0, speed: 66.0, turn_rate: 4.0, hp: 80.0,  range: 140.0, dps: 18.0),
+        (id: "truck",    name: "Supply Truck",     faction: "vanguard", sprite: "truck",     color: (255, 255, 255), radius: 11.0, speed: 78.0, turn_rate: 4.5, hp: 70.0,  range: 0.0,   dps: 0.0),
     ],
     // Placeholder buildings (footprint in tiles). Drawn as colored footprints for now;
     // sprites + production/logistics roles arrive with the building systems.
