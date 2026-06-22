@@ -151,6 +151,42 @@ fn issue_move(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache, uni
             slots[si]
         }).unwrap_or(click);
         let _ = world.insert_one(e, MoveOrder { flow: flow.clone(), goal, anchor: click, seek, arrive });
+        // Remember the formation offset (so queued legs keep the shape) and drop any
+        // pending waypoints — a fresh move order replaces the whole plan.
+        let _ = world.insert_one(e, components::Formation { offset: goal - click });
+        let _ = world.remove_one::<components::OrderQueue>(e);
+    }
+}
+
+/// Issue a single move leg for one unit toward `anchor`, holding its formation `offset`
+/// so the group's shape translates along the path (goal = anchor + offset). Used to
+/// advance queued waypoints.
+fn issue_leg(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache, e: Entity, anchor: Vec2, offset: Vec2) {
+    let (tx, ty) = ((anchor.x / map::TILE_SIZE) as i32, (anchor.y / map::TILE_SIZE) as i32);
+    if tx < 0 || ty < 0 || tx as usize >= nav.w || ty as usize >= nav.h || !nav.passable(tx as usize, ty as usize) {
+        return;
+    }
+    let flow = cache.get_or_build(nav, (tx as usize, ty as usize));
+    let spacing = movement::UNIT_RADIUS * 2.2;
+    let seek = offset.length() + spacing * 2.0;
+    let arrive = spacing * 2.0;
+    let _ = world.insert_one(e, MoveOrder { flow, goal: anchor + offset, anchor, seek, arrive });
+}
+
+/// Advance waypoint queues: any unit with no active `MoveOrder` but a non-empty
+/// `OrderQueue` pops its next anchor and starts that leg. Run once per frame.
+fn advance_queues(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache) {
+    let ready: Vec<(Entity, Vec2, Vec2)> = world
+        .query::<(&components::OrderQueue, Option<&components::Formation>)>()
+        .without::<&MoveOrder>()
+        .iter()
+        .filter_map(|(e, (q, f))| q.anchors.front().map(|&a| (e, a, f.map_or(Vec2::ZERO, |f| f.offset))))
+        .collect();
+    for (e, anchor, offset) in ready {
+        if let Ok(q) = world.query_one_mut::<&mut components::OrderQueue>(e) {
+            q.anchors.pop_front();
+        }
+        issue_leg(world, nav, cache, e, anchor, offset);
     }
 }
 
@@ -338,10 +374,29 @@ async fn main() {
         }
 
         // --- Move order (right mouse): only the currently-selected units ---
+        // Plain RMB = fresh formation move; Shift+RMB = queue a waypoint (if the group
+        // already has a plan to append to, else it's just a fresh move).
         if is_mouse_button_pressed(MouseButton::Right) && !over_ui {
-            let goal = cam2d.screen_to_world(mp);
+            let click = cam2d.screen_to_world(mp);
+            let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
             let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
-            issue_move(&mut world, &nav, &mut flow_cache, &sel, goal);
+            let has_active = sel.iter().any(|&e| {
+                world.get::<&MoveOrder>(e).is_ok()
+                    || world.get::<&components::OrderQueue>(e).map(|q| !q.anchors.is_empty()).unwrap_or(false)
+            });
+            if shift && has_active {
+                for &e in &sel {
+                    if let Ok(q) = world.query_one_mut::<&mut components::OrderQueue>(e) {
+                        q.anchors.push_back(click);
+                    } else {
+                        let mut anchors = std::collections::VecDeque::new();
+                        anchors.push_back(click);
+                        let _ = world.insert_one(e, components::OrderQueue { anchors });
+                    }
+                }
+            } else {
+                issue_move(&mut world, &nav, &mut flow_cache, &sel, click);
+            }
         }
 
         // --- Control groups (1-9): Ctrl+N assigns the selection, N recalls it ---
@@ -378,6 +433,8 @@ async fn main() {
             sim.tick();
             accumulator -= tick_dt;
         }
+        // Units that just arrived and still have queued waypoints start their next leg.
+        advance_queues(&mut world, &nav, &mut flow_cache);
         let tick_ms = ((get_time() - t0) * 1000.0) as f32;
 
         let drag_box = drag_start.map(|s| (s, mp));
@@ -389,16 +446,18 @@ async fn main() {
                 let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
                 for e in sel {
                     let _ = world.remove_one::<MoveOrder>(e);
+                    let _ = world.remove_one::<components::OrderQueue>(e);
                 }
             }
             hud::HudAction::ClearSel => clear_selection(&mut world),
             hud::HudAction::SetStance(s) => {
                 stance::set_selected(&mut world, s);
-                // Hold-Ground also halts current movement.
+                // Hold-Ground also halts current movement and cancels queued waypoints.
                 if s == stance::Stance::HoldGround {
                     let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
                     for e in sel {
                         let _ = world.remove_one::<MoveOrder>(e);
+                        let _ = world.remove_one::<components::OrderQueue>(e);
                     }
                 }
             }

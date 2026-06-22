@@ -133,6 +133,20 @@ fn draw_move_orders(world: &hecs::World) {
         draw_line(g.x - 9.0, g.y, g.x + 9.0, g.y, 1.5, mark);
         draw_line(g.x, g.y - 9.0, g.x, g.y + 9.0, 1.5, mark);
     }
+
+    // Queued waypoints (Shift+RMB): fainter rings at each distinct upcoming anchor.
+    let wp = Color::new(0.45, 1.0, 0.55, 0.5);
+    let mut waypoints: Vec<Vec2> = Vec::new();
+    for (_e, q) in world.query::<&crate::components::OrderQueue>().iter() {
+        for &a in &q.anchors {
+            if !waypoints.iter().any(|p| p.distance(a) < 2.0) {
+                waypoints.push(a);
+            }
+        }
+    }
+    for a in waypoints {
+        draw_circle_lines(a.x, a.y, 7.0, 1.5, wp);
+    }
 }
 
 /// Faint neon-green collision circle for selected units (drawn on top).
@@ -149,7 +163,7 @@ fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &S
     let _ = sim;
     // Below the top resource bar so the two don't overlap.
     draw_text(
-        "Drag/Shift-select, dbl-click=type, right-click move, Ctrl+1-9 group, 1-9 recall  (WASD pan, wheel zoom)",
+        "Drag/Shift-select, dbl-click=type, RMB move (Shift=queue), Ctrl+1-9 group, 1-9 recall  (WASD pan)",
         16.0,
         crate::hud::TOP_H + 24.0,
         24.0,

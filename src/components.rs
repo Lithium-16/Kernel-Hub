@@ -1,5 +1,6 @@
 //! ECS components (plain data). Grows each phase.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use macroquad::prelude::{Color, Vec2};
@@ -61,4 +62,18 @@ pub struct MoveOrder {
     pub anchor: Vec2,
     pub seek: f32,
     pub arrive: f32,
+}
+
+/// A unit's fixed offset from the group's formation anchor. Held across a whole order
+/// chain so the formation shape translates along queued waypoints (each leg's goal is
+/// `anchor + offset`).
+pub struct Formation {
+    pub offset: Vec2,
+}
+
+/// Pending move waypoints (group anchor points). When a unit's current `MoveOrder`
+/// completes and this queue is non-empty, the next anchor becomes the next leg. Built
+/// by Shift+right-click.
+pub struct OrderQueue {
+    pub anchors: VecDeque<Vec2>,
 }
