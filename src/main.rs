@@ -94,6 +94,12 @@ fn spawn_army(
         if unit.dps > 0.0 {
             let _ = world.insert_one(e, components::Weapon { range: unit.range, dps: unit.dps });
         }
+        if unit.turret_turn_rate > 0.0 {
+            let _ = world.insert_one(e, components::Turret {
+                angle: -std::f32::consts::FRAC_PI_2,
+                turn_rate: unit.turret_turn_rate,
+            });
+        }
     }
 }
 
@@ -599,6 +605,9 @@ async fn main() {
         // Units that just arrived and still have queued waypoints start their next leg.
         advance_queues(&mut world, &nav, &mut flow_cache);
         let tick_ms = ((get_time() - t0) * 1000.0) as f32;
+
+        // Turrets track enemies every render frame for smooth rotation.
+        combat::update_turrets(&mut world, &grid, get_frame_time());
 
         let drag_box = drag_start.map(|s| (s, mp));
         render::present(&world, &map, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);

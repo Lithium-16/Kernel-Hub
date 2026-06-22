@@ -63,6 +63,14 @@ pub struct Weapon {
     pub dps: f32,
 }
 
+/// A rotating turret (vehicles). `angle` is the current barrel direction (radians); the
+/// unit only fires once the turret has swung to within the fire arc of its target. Units
+/// without a turret (e.g. infantry) fire as soon as a target is in range.
+pub struct Turret {
+    pub angle: f32,
+    pub turn_rate: f32,
+}
+
 /// A short-lived shot tracer (shooter→target), colored by the shooter's side and faded
 /// over `ttl`. Purely visual; carries no Position/Faction so other systems ignore it.
 pub struct Tracer {

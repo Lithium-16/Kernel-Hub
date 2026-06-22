@@ -6,11 +6,54 @@
 use hecs::{Entity, World};
 use macroquad::prelude::{Color, Vec2};
 
-use crate::components::{Faction, Health, Position, Tracer, Weapon, TRACER_TTL};
+use crate::components::{Faction, Health, Position, Tracer, Turret, Weapon, TRACER_TTL};
 use crate::spatial::SpatialGrid;
 
+fn wrap_angle(a: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    let a = a % TAU;
+    if a > PI { a - TAU } else if a < -PI { a + TAU } else { a }
+}
+
+/// Per-frame: rotate every turret toward its nearest enemy so the barrel tracks
+/// smoothly. Called every render frame (not just sim ticks) for smooth animation.
+pub fn update_turrets(world: &mut World, grid: &SpatialGrid, dt: f32) {
+    let mut rotations: Vec<(Entity, f32)> = Vec::new();
+    for (e, (pos, wpn, fac, turret)) in world
+        .query::<(&Position, &Weapon, &Faction, &Turret)>()
+        .iter()
+    {
+        let mut best_pos: Option<Vec2> = None;
+        let mut best_d = wpn.range * wpn.range;
+        grid.for_neighbors(pos.0, wpn.range, |other, op| {
+            if other == e { return; }
+            let d2 = pos.0.distance_squared(op);
+            if d2 > best_d { return; }
+            let is_enemy = world.get::<&Faction>(other).map(|f| f.0 != fac.0).unwrap_or(false)
+                && world.get::<&Health>(other).is_ok();
+            if is_enemy { best_d = d2; best_pos = Some(op); }
+        });
+        let target_angle = if let Some(tp) = best_pos {
+            let d = tp - pos.0;
+            d.y.atan2(d.x)
+        } else {
+            turret.angle // no target: hold current
+        };
+        let diff = wrap_angle(target_angle - turret.angle);
+        let max_turn = turret.turn_rate * dt;
+        let new_angle = wrap_angle(turret.angle + diff.clamp(-max_turn, max_turn));
+        rotations.push((e, new_angle));
+    }
+    for (e, angle) in rotations {
+        if let Ok(t) = world.query_one_mut::<&mut Turret>(e) {
+            t.angle = angle;
+        }
+    }
+}
+
 /// One combat tick: age old tracers, acquire targets, apply damage, spawn tracers,
-/// remove the dead. `player_faction` only picks the tracer color (friendly vs hostile).
+/// remove the dead. Units with a `Turret` only fire once aimed within the fire cone.
+/// `player_faction` only picks the tracer color (friendly vs hostile).
 pub fn step(world: &mut World, grid: &SpatialGrid, dt: f32, player_faction: &str) {
     // Age and retire tracers from previous ticks.
     let mut expired: Vec<Entity> = Vec::new();
@@ -56,9 +99,18 @@ pub fn step(world: &mut World, grid: &SpatialGrid, dt: f32, player_faction: &str
             }
         });
         if let Some(t) = best {
-            damage.push((t, wpn.dps * dt));
-            let color = if fac.0 == player_faction { friendly } else { hostile };
-            shots.push((pos.0, best_pos, color));
+            // Units with a turret must be aimed within 12° before firing.
+            let aimed = if let Ok(turret) = world.get::<&Turret>(e) {
+                let desired = (best_pos - pos.0).y.atan2((best_pos - pos.0).x);
+                wrap_angle(desired - turret.angle).abs() < 0.21 // ~12 degrees
+            } else {
+                true // no turret (infantry) = always ready
+            };
+            if aimed {
+                damage.push((t, wpn.dps * dt));
+                let color = if fac.0 == player_faction { friendly } else { hostile };
+                shots.push((pos.0, best_pos, color));
+            }
         }
     }
 

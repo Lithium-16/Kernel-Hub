@@ -48,6 +48,8 @@ pub struct UnitDef {
     pub range: f32,
     /// Weapon damage per second (0 = unarmed).
     pub dps: f32,
+    /// Turret rotation speed (rad/s). 0 = no turret (infantry fire direction = hull).
+    pub turret_turn_rate: f32,
 }
 
 /// Load and validate the bundled definitions.
