@@ -20,6 +20,7 @@ mod economy;
 mod groups;
 mod hud;
 mod map;
+mod minimap;
 mod movement;
 mod nav;
 mod render;
@@ -201,6 +202,7 @@ async fn main() {
     let map_px = map.size_px();
     let nav = NavGrid::from_map(&map);
     let mut flow_cache = FlowCache::new(48);
+    let minimap = minimap::Minimap::build(&map);
 
     let mut world = ecs::new_world();
     let count: usize = std::env::var("COLDWAR_UNITS")
@@ -313,7 +315,15 @@ async fn main() {
         ui.begin();
         // Input layering: compute HUD panel rects up front (anchored to window size) and
         // gate world input on them, so clicks on any panel never fall through to the world.
-        let over_ui = hud::HudLayout::compute(&world, sw, sh).contains(mp);
+        let input_layout = hud::HudLayout::compute(&world, sw, sh);
+        let over_ui = input_layout.contains(mp);
+
+        // Minimap click / drag recenters the camera (handled before cam.update clamps).
+        if is_mouse_button_down(MouseButton::Left) && input_layout.minimap.contains(mp) {
+            cam.center = minimap
+                .world_at(input_layout.minimap, mp)
+                .clamp(Vec2::ZERO, map_px);
+        }
 
         cam.update(map_px);
         let view = cam.view_rect(sw, sh);
@@ -463,6 +473,7 @@ async fn main() {
             }
             hud::HudAction::None => {}
         }
+        minimap.draw(&world, view, hud_layout.minimap);
 
         next_frame().await;
 
@@ -476,6 +487,7 @@ async fn main() {
                 set_camera(&uicam);
                 let cap_layout = hud::HudLayout::compute(&world, sw, sh);
                 let _ = hud::draw(&mut ui, &world, &economy, &cap_layout);
+                minimap.draw(&world, cam.view_rect(sw, sh), cap_layout.minimap);
                 set_default_camera();
                 rt.texture.get_texture_data().export_png(path);
                 break;

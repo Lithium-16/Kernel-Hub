@@ -33,7 +33,11 @@ pub struct HudLayout {
     pub bottom: Rect,
     pub selection: Option<Rect>,
     pub command: Option<Rect>,
+    pub minimap: Rect,
 }
+
+/// Minimap panel size (square), anchored top-right under the resource bar.
+pub const MINIMAP_SIZE: f32 = 180.0;
 
 impl HudLayout {
     pub fn compute(world: &World, sw: f32, sh: f32) -> Self {
@@ -45,11 +49,13 @@ impl HudLayout {
         });
         // Command card: bottom-left, above the command bar, only with a selection.
         let command = (total > 0).then(|| Rect::new(8.0, sh - BAR_H - 8.0 - 104.0, 330.0, 104.0));
+        let minimap = Rect::new(sw - MINIMAP_SIZE - 8.0, TOP_H + 8.0, MINIMAP_SIZE, MINIMAP_SIZE);
         Self {
             top: Rect::new(0.0, 0.0, sw, TOP_H),
             bottom: Rect::new(0.0, sh - BAR_H, sw, BAR_H),
             selection,
             command,
+            minimap,
         }
     }
 
@@ -57,6 +63,7 @@ impl HudLayout {
     pub fn contains(&self, p: Vec2) -> bool {
         self.top.contains(p)
             || self.bottom.contains(p)
+            || self.minimap.contains(p)
             || self.selection.is_some_and(|r| r.contains(p))
             || self.command.is_some_and(|r| r.contains(p))
     }
