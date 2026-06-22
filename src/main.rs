@@ -17,6 +17,7 @@ mod components;
 mod data;
 mod ecs;
 mod economy;
+mod groups;
 mod hud;
 mod map;
 mod movement;
@@ -180,6 +181,7 @@ async fn main() {
     let mut drag_start: Option<Vec2> = None;
     let mut ui = ui::Ui::new();
     let economy = economy::Economy::default();
+    let mut control_groups = groups::ControlGroups::new();
 
     let mut sim = sim::Sim::new();
     let tick_dt = 1.0 / sim::TICK_RATE as f32;
@@ -322,6 +324,28 @@ async fn main() {
             let goal = cam2d.screen_to_world(mp);
             let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
             issue_move(&mut world, &nav, &mut flow_cache, &sel, goal);
+        }
+
+        // --- Control groups (1-9): Ctrl+N assigns the selection, N recalls it ---
+        let ctrl = is_key_down(KeyCode::LeftControl) || is_key_down(KeyCode::RightControl);
+        for (key, n) in [
+            (KeyCode::Key1, 1usize),
+            (KeyCode::Key2, 2),
+            (KeyCode::Key3, 3),
+            (KeyCode::Key4, 4),
+            (KeyCode::Key5, 5),
+            (KeyCode::Key6, 6),
+            (KeyCode::Key7, 7),
+            (KeyCode::Key8, 8),
+            (KeyCode::Key9, 9),
+        ] {
+            if is_key_pressed(key) {
+                if ctrl {
+                    control_groups.assign(n, &world);
+                } else {
+                    control_groups.select(n, &mut world);
+                }
+            }
         }
 
         // --- Fixed-timestep simulation ---

@@ -169,9 +169,10 @@ produces sensible behavior for both units and buildings.
 - [ ] **Squad/formation layer** — named squads; **formations** (line/column/wedge/spread); squad-level
       orders fan out; shared flow-field target; **squad templates** define desired composition;
       auto-reinforce hook (stubbed until production exists).
-- [ ] **Selection & command UI** — click, drag-box, double-click select-type, control groups 1–9;
-      order types (move / attack-move / patrol / hold / guard / garrison / retreat / rally / ability)
-      with **Shift to queue waypoints**; **opt-in squad drafting** for direct control.
+- [~] **Selection & command UI** — click, drag-box select done; **control groups 1–9** (Ctrl+N assign,
+      N recall, dead-member pruning, unit-tested) done 2026-06-20; double-click select-type, order types
+      (move / attack-move / patrol / hold / guard / garrison / retreat / rally / ability) with **Shift to
+      queue waypoints** and **opt-in squad drafting** still to add.
 - [ ] **Zones** — paint defense/staging/no-go zones that orders and jobs reference.
 - [ ] **Doctrine presets** — save/apply policy bundles (stances + priorities) to a force in one action.
 - [ ] **Building placement** — ghost/blueprint preview, grid snap, validity (terrain / overlap /
