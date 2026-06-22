@@ -4,10 +4,15 @@
 > *actionable build plan*: milestones, the systems each phase delivers, concrete tasks, key
 > data types, and acceptance criteria. Update checkboxes and notes as work progresses.
 >
-> **Last updated:** 2026-06-18 · **Status:** M0 + Phase 1 + Phase 2 done; movement / perf / art /
-> pathfinding polished. **Roadmap restructured core-first — canonical phase ORDER is now PROJECT.md §8.**
-> Next: **Phase 2.5 (UI toolkit)**. The detailed phase sections below predate the restructure; treat
-> PROJECT.md §8 as the source of truth for order — they're re-sequenced/migrated as each phase begins.
+> **Last updated:** 2026-06-22 · **Status:** M0 + Phase 1 + Phase 2 done; Phase 2.5 UI substantially
+> done; Phase 3 core (combat groups, buildings, combat, minimap, debug suite) in progress.
+>
+> **DIRECTION UPDATE 2026-06-22** — Game is now a tile-based operational RTS. Primary interface is
+> Combat Groups, not individual units. Logistics is intent-based (player defines routes/depots,
+> system executes). Expansion is the core progression loop. See PROJECT.md §2, §3, §7.17-7.19, and
+> Decision Log entry 2026-06-22 for the full update. Existing code (movement, combat, ECS, buildings)
+> is compatible — new build priorities are the Combat Group layer, logistics intent UI, expansion flow,
+> and geographic terrain. See "Next phase priorities" section below.
 
 ## How to use this plan
 - Phases are **sequential** and each ends in a **verifiable, runnable build**. Do not start a phase
@@ -32,6 +37,31 @@
   schemas. Goal: add or overhaul a system by adding code/data, not rewriting existing systems.
 - **Target build matrix:** native (`cargo run`, performance) + WASM (`wasm32-unknown-unknown`,
   browser verification). Both must build at every phase.
+
+---
+
+## Next phase priorities (post direction update 2026-06-22)
+These are the highest-value next builds given the new operational RTS direction. In order:
+
+1. **Combat Group system** — group entity that owns a list of unit entities; group-level UI (assign
+   objective, set stance, request support, reinforce); individual units still use flow-field movement +
+   utility AI inside the group. This is the new primary player interface.
+
+2. **Geographic terrain** — mountain, river, pass, valley, and chokepoint tiles in the map generator
+   (noise + rules); terrain affects movement speed + passability; chokepoints are narrow tiles.
+   Rivers require crossing tiles. This makes geography matter strategically.
+
+3. **Logistics intent UI** — player draws a route between two points; depots auto-placed along it;
+   the system dispatches trucks automatically. First version: single corridor, one resource type.
+
+4. **Expansion flow** — resource regions marked on the map; player secures one → can build an extractor;
+   extractor feeds the logistics network. The core gameplay loop.
+
+5. **Reconnaissance** — fog of war (tiles unseen until a unit moves nearby); Combat Groups have a
+   vision radius; the player discovers the map through movement.
+
+6. **Automated rear defense** — threat notification when an enemy enters a rear zone; a designated
+   QRF group auto-responds; patrols along defined corridors.
 
 ---
 
@@ -347,18 +377,19 @@ power as a gated resource (C&C) · health bars + direct-fire combat · win/lose 
 flying bullet projectiles · noise-detailed terrain (lakes/cliffs/ore) w/ per-tile variation ·
 randomized multi-prong enemy start.
 
-**High-impact gaps vs reference games (prioritized):**
-1. **Attack-move / patrol / guard / stop-and-fight** (SC2/SupCom) — units currently only fire when an
-   enemy wanders into range; attack-move = advance and engage. *Biggest combat feel gap.*
-2. **Rally points on production buildings** (every RTS) — needed once production exists (Phase 4).
-3. **Formations: line/column/wedge + facing** (AoE/SupCom) — we have box only.
-4. **Selection ergonomics** — double-click already; add box-select prioritises combat units, tab to
-   cycle subgroups, control-group steal/append (SC2).
-5. **Strategic zoom / zoom-to-minimap** (SupCom) — smooth zoom to whole-map overview.
-6. **Fog of war / vision ranges** (all RTS) — currently full visibility.
-7. **Suppression / cover / retreat** (CoH) — depth for abstracted combat (Phase 5).
-8. **Area/queued build & repair, drag-to-place walls** (TA/They Are Billions).
-9. **Veterancy / experience** (CoH/SC2) — deferred, parking lot.
+**High-impact gaps vs reference games (reprioritized for operational RTS direction):**
+1. **Combat Groups** (SupCom group control, CoH unit cohesion) — *the* defining feature of the new
+   direction; players command groups not individuals. Build this before any other Phase 3+ work.
+2. **Geographic terrain** (every serious RTS) — mountains, rivers, passes, chokepoints. Currently
+   flat noise map. Geography is a core pillar.
+3. **Fog of war / reconnaissance** (all RTS) — currently full visibility. Recon is phase 1 of the
+   war loop. *Biggest gameplay gap given the new direction.*
+4. **Logistics intent / auto-routing** (unique to this game) — player draws routes, system runs trucks.
+5. **Expansion flow** (unique) — resource regions, secure → build → integrate loop.
+6. **Attack-move** (SC2/SupCom) — units currently only fire in place; attack-move = advance and engage.
+7. **Automated rear defense** (They Are Billions / CoH) — QRF, patrols, threat alerts.
+8. **Strategic zoom** (SupCom) — zoom-to-whole-map-overview; essential for theater command.
+9. **Suppression / cover / retreat** (CoH) — abstracted combat depth (later phase).
 10. **Audio/feedback** (all) — command acks, fire/impact SFX; none yet.
 
 ## Parking lot (explicitly deferred)

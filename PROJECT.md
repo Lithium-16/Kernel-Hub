@@ -12,33 +12,57 @@
 ---
 
 ## 1. One-line vision
-A **macro-scale, low-micro real-time strategy game** — Rusted Warfare's spirit, but at a far
-larger scale (hundreds of units *per side*), where the player commands by setting *policy and
-logistics* rather than micromanaging units. **The depth lives in the supply chain, especially
-the backline.** Battles are won upstream, in industry and logistics, before the front ever fires.
+A **tile-based operational RTS** focused on **military campaigns, logistics, and expansion**. The
+player is a theater commander directing a military machine. Victories are won through preparation,
+logistics, infrastructure, and operational planning — not unit micromanagement. The game sits
+between a traditional RTS and grand strategy.
 
 ## 2. Core pillars (the non-negotiable identity)
-1. **Large scale.** 1,000+ active units total (hundreds per side), both armies fully simulated.
-   This is a hard architectural target from day one, not an aspiration.
-2. **Low micromanagement.** The player sets standing orders, zones, and production policy; units
-   execute autonomously. Direct unit control is *opt-in*, never required.
-3. **Deep logistics, especially the backline.** Multi-stage supply chains, self-running but deep
-   to optimize and defend. RimWorld influence = logistics/jobs/zones model (NOT combat granularity).
-4. **Abstracted combat.** HP + cover + suppression + range. Combat is mostly the *demand signal*
-   the logistics system must feed. No per-hit/body-part detail.
-5. **Infrastructure is core gameplay.** Planning and building roads, rail, power, and supply
-   networks is a major strategic layer with its own *blueprint/planning mode* — not a side mechanic.
-6. **Built to extend.** Every system is data-driven and modular so expanding it or making major
-   changes later is easy. Strong first-class **map-making** support is part of this.
+1. **Theater commander, not a pilot.** The player commands Combat Groups, not individual vehicles.
+   Individual units are still simulated and rendered, but the primary interface is the group layer.
+2. **Logistics intent, not logistics micromanagement.** The player defines intent (routes, depots,
+   corridors, plans). The system executes automatically. Players should never manually route a truck.
+3. **Expansion is the core progression loop.** Resource deposits are infinite. Players fight for
+   territory because resource *regions* are valuable, not because resources deplete. The map is
+   worth owning.
+4. **Geography matters.** Tile-based terrain with mountains, passes, rivers, valleys, and chokepoints
+   that create real strategic decisions. The map is not decorative.
+5. **Automated rear defense.** Radar, patrols, quick reaction forces, and automatic repairs handle
+   rear threats. The player focuses on fronts and operations.
+6. **Rewards preparation over APM.** Every system should reward planning, positioning, and logistics
+   more than reaction speed or individual unit control.
+7. **Built to extend.** Data-driven, modular, ECS. New content = author data, not edit code.
 
 ## 3. Control philosophy — the player commands at 3 levels
-The "low micro" promise is delivered by this structure. Most play happens at levels 1–2.
-1. **Strategic (set-and-forget policy):** production orders/bills, resource priorities, supply
-   network design, doctrines, defense zones. Set once, runs itself.
-2. **Operational (set intent):** "hold this front," "secure that region," assign a squad to a
-   sector. Squads handle tactical execution themselves.
-3. **Tactical (optional micro):** *draft* a squad for hands-on control during a key moment.
-   The only manual layer, used by choice.
+The low-micro promise is structural. Most play happens at levels 1–2.
+1. **Strategic (policy):** logistics network, routes, depots, corridors, expansion plans, defense
+   zones, doctrine presets. Set once, runs itself.
+2. **Operational (intent):** assign objectives to Combat Groups, set behavior priorities, request
+   support, reinforce groups. The player is a theater commander, not a unit controller.
+3. **Tactical (optional):** *draft* a group for direct control at a key moment. Never required.
+
+### 3.1 The war loop (five phases)
+Every operation follows this cycle — the game should support all five, not just Execution:
+1. **Reconnaissance** — discover terrain, enemy positions, resource regions.
+2. **Planning** — assign objectives, choose routes, prepare logistics.
+3. **Preparation** — pre-position supplies, build roads/depots, move forces to staging.
+4. **Execution** — Combat Groups advance and engage per their orders.
+5. **Consolidation** — secure taken territory, establish logistics, repair, reinforce.
+
+### 3.2 Combat Groups (the primary player-facing unit)
+Groups are collections of individual units organized by role:
+- **Armored Group** (tanks, heavy vehicles)
+- **Mechanized Group** (infantry + vehicles)
+- **Artillery Group** (indirect fire support)
+- Future: Recon Group, Engineer Group, Air Defense Group
+
+Players interact with groups to:
+- Assign objectives (advance to, hold, attack, withdraw)
+- Set behavior priorities (aggressive / defensive / hold)
+- Request support (artillery, air, supply)
+- Reinforce (attach replacement units from the rear)
+
+Individual units within a group handle execution autonomously via the utility AI + standing orders.
 
 ## 4. Tech stack & tooling
 | Concern | Choice | Rationale |
@@ -131,36 +155,57 @@ are marked ★.
 
 ## 7. Game design
 
-### 7.1 Resources (multi-stage — refined tier locked in)
-Raw resources are extracted, then **refined and manufactured** before use — this is the backbone of
-the deep backline logistics.
-- **Ore** (raw, stockpile) — mined from ore nodes.
-- **Crude** (raw, stockpile) — from oil/geyser nodes.
-- **Metal** (refined) — Ore → Refinery → Metal. Primary build material.
-- **Refined Fuel** (refined) — Crude → Refinery → Fuel. Powers vehicles/aircraft and convoy movement.
-- **Components** (manufactured) — Metal (+Power) → Foundry → Components; gate advanced units/buildings.
-- **Power** (flow rate, not bank) — buildings stall if the grid goes negative. Generators produce it.
-Raw → refined → manufactured means you build an *industrial base*, not just plop extractors.
+### 7.1 Resources (military-focused, deliberately simple)
+Economy is military, not industrial. **No Factorio-style production chains.**
 
-### 7.2 Logistics — the deep system (rear → front)
+**Strategic resources** (extracted from territory, infinite deposits — fight for the region, not depletion):
+- **Ore** — mined from ore regions; feeds construction.
+- **Oil** — from oil regions; feeds fuel production.
+
+**Logistics resources** (consumed by operations, generated from strategic resources):
+- **Building Supplies** — from Ore; used for construction and fortifications.
+- **Weapon Parts** — from Ore + manufacturing; enables unit production and repairs.
+- **Ammo** — manufactured; consumed by combat. Empty = reduced effectiveness.
+- **Fuel** — from Oil; consumed by vehicle movement and operations. Empty = immobile.
+
+**Why simple:** the depth is in *logistics* (routing, distribution, security), not production chains.
+Resources should be instantly legible so the player focuses on the operational layer.
+
+**Expansion beats depletion:** resource deposits are infinite. The player fights for territory because
+ore/oil *regions* are strategically valuable, not because individual nodes run out.
+
+### 7.2 Logistics — intent-based, automatically executed
+The player defines **logistics intent**; the system executes it. Players should never manually
+drive a truck or issue a haul order.
+
+**What the player creates:**
+- **Routes** — define a supply corridor between two points (rear depot → forward area).
+- **Depots** — designate a tile or area as a storage/distribution point.
+- **Logistics corridors** — broader zones where supply trucks operate automatically.
+- **Expansion plans** — mark a resource region for future integration into the supply network.
+
+**What the system manages automatically:**
+- Truck routing and dispatch.
+- Delivery scheduling and load balancing.
+- Re-routing when a road is cut or depot destroyed.
+- Resource movement along defined corridors.
+
+**Depth mechanics:**
+- **Infrastructure matters** — roads raise convoy speed + capacity; building roads is strategic investment.
+- **Supply range** — units far from a depot resupply slowly. Advancing requires *pushing logistics
+  forward*: new depots, extended roads. You can't just move the army; you have to move the supply chain.
+- **Route security** — corridors can be raided. Cutting the enemy's supply line is a win condition;
+  defending yours is rear-area defense. A front that runs out of ammo collapses on its own.
+- **Pull-based** — depots have target stock levels; shortfalls trigger automatic resupply from the rear.
+  Players set policy (keep 200 shells at depot X), not individual hauls.
+
 ```
-EXTRACT          REFINE/MAKE         STORE              DISTRIBUTE          FRONT
-ore/fuel nodes → refineries,    →  stockpile zones  →  haulers/convoys  →  forward supply
-(rear)           factories          + warehouses        along roads/rail    dumps → units
-                 (ammo,fuel,        (priorities,        (auto-dispatched    consume (ammo,
-                  parts, units)      capacity)           by job system)      fuel, reinforce)
+STRATEGIC     →  LOGISTICS HUB  →  CORRIDOR  →  FORWARD DEPOT  →  COMBAT GROUPS
+(ore / oil)      (refines into      (roads,       (ammo, fuel,       (consume ammo
+                  supplies/ammo/     trucks,        supplies)          fuel; auto-
+                  fuel; auto)        auto-          (player-placed)    request resupply)
+                                     dispatch)
 ```
-Depth mechanics:
-- **Pull-based, demand-driven hauling** — dumps/stockpiles have target stock levels; shortfalls
-  generate haul jobs; job system dispatches nearest free hauler. Player sets policy, not routes.
-- **Throughput & infrastructure** — routes have bandwidth; roads/rail raise convoy speed + capacity;
-  bottlenecks are real. Building/upgrading infrastructure is a core strategic lever.
-- **Supply range / coverage** — units far from supply resupply slowly or not at all. Advancing
-  requires *pushing logistics forward* (new dumps, extended roads), not just moving units.
-- **Route security** — convoys travel real paths; can be raided. Defending corridors (and cutting
-  the enemy's) is strategic. A backline cut off from ammo collapses without direct losses → a win path.
-- **Stockpile zones & production bills** (RimWorld layer) — designate storage zones w/ priorities &
-  capacity; standing production orders ("keep 200 shells, then pause"). Manage policy, not items.
 
 ### 7.3 Combat — flow, damage model, suppression (abstracted, logistics-fed)
 Combat **auto-resolves** from positioning, supply, and stats; the player commands intent, not shots.
@@ -420,6 +465,47 @@ BuildingDef(
 )
 ```
 
+### 7.17 Expansion — the primary progression mechanic
+Expansion is how the player grows. Resources are infinite; the fight is for the *region*.
+
+**Expansion flow:**
+1. **Discover** — reconnaissance reveals a resource region (ore basin, oil field).
+2. **Secure** — Combat Groups push out and hold the territory militarily.
+3. **Plan** — player draws an infrastructure plan (roads, power, depot locations).
+4. **Build** — engineers/construction units execute the plan.
+5. **Connect** — extend logistics corridor to the new region.
+6. **Activate** — extractors come online; resources flow into the war economy.
+7. **Integrate** — the new region feeds the military machine; enables further expansion.
+
+Holding territory is inherently worth doing because every region is a productive asset. Losing
+territory hurts immediately through reduced resource flow.
+
+### 7.18 Map design — geography as strategy
+Maps are tile-based. Terrain creates real strategic decisions; it is not decorative.
+
+**Key terrain types and their strategic role:**
+- **Mountains** — impassable or slow; force route choices; excellent defensive terrain.
+- **Passes** — chokepoints; a small force can hold one against a large army.
+- **Rivers** — barrier requiring bridge/crossing; cutting crossings disrupts supply lines.
+- **Valleys** — concealed movement corridors; ambush terrain.
+- **Chokepoints** — the most contested tiles on the map.
+- **Resource basins** — the objectives of expansion; what the war is fought over.
+- **Roads** — player-built; increase convoy speed/capacity; strategic investment.
+
+### 7.19 Rear-area defense — automated, not babysitting
+The player focuses on fronts and operations. Rear threats (raiders, breakthroughs) are handled
+automatically. The player sets policy; the system executes.
+
+**Automated systems:**
+- **Radar + threat notifications** — detects incursions, alerts the player with location + severity.
+- **Patrols** — garrison units automatically patrol defined zones.
+- **Quick Reaction Forces (QRF)** — a designated group responds automatically to incursions near their zone.
+- **Automatic repairs** — damaged infrastructure triggers repair jobs dispatched to nearby engineers.
+- **Alert levels** — depots/corridors can be marked as high-priority; more patrol density automatically assigned.
+
+The player should *never* need to chase individual raiders manually. If the automated systems fail,
+it is a policy failure (QRF not assigned, patrol zone not defined) not a micro failure.
+
 ## 8. Roadmap (core-first, then content; playable/verifiable at each step)
 > **Restructured 2026-06-18 — core-first.** Front-load UI + core unit/building gameplay + combat +
 > a polish pass into a *complete, polished vertical slice*, THEN add major features/content. The deep
@@ -497,6 +583,28 @@ BuildingDef(
 - **2026-06-18** — **Roadmap restructured to core-first** (see §8): UI + core unit/building gameplay +
   combat + a polish pass (a complete, polished vertical slice) come BEFORE major features. Deep
   logistics/infrastructure (the identity) → Phase 6; a minimal economy stays in Phase 3; map editor → Phase 8.
+- **2026-06-22** — **Major game direction update** (owner instruction). Key changes recorded here:
+  1. **Combat Groups** replace individual unit control as the primary player-facing layer. Individuals
+     still simulated + rendered, but players issue orders to groups (Armored / Mechanized / Artillery),
+     not vehicles. Groups have objectives, behavior priorities, support requests, and reinforcement.
+  2. **The five-phase war loop** (Recon → Planning → Preparation → Execution → Consolidation) is the
+     design spine. Every system should support all five phases, not just Execution.
+  3. **Logistics intent replaces logistics micromanagement.** Player creates routes, depots, corridors,
+     and expansion plans; the system manages trucks, deliveries, and routing automatically.
+  4. **Resources simplified** to Strategic (Ore, Oil) + Logistics (Building Supplies, Weapon Parts,
+     Ammo, Fuel). No Factorio-style chains. Economy is military-focused and legible.
+  5. **Expansion is the primary progression mechanic.** Deposits are infinite; fight for regions,
+     not depletion. The seven-step expansion flow (Discover → Secure → Plan → Build → Connect →
+     Activate → Integrate) is the core gameplay loop.
+  6. **Geography is strategic.** Tile-based maps with mountains, passes, rivers, chokepoints, valleys,
+     and resource basins that create real decisions. Terrain is not decorative.
+  7. **Rear defense is automated.** Radar, patrols, QRF, auto-repair handle rear threats. Player
+     focuses on fronts and operations; never chases individual raiders.
+  8. **Design principle:** consistently rewards preparation, planning, logistics, and positioning more
+     than APM, micromanagement, or individual vehicle control.
+  **Existing code compatibility:** flow-field movement, individual unit sim/render, building placement,
+  faction system, health/combat, ECS — all compatible. New build priorities: Combat Group layer,
+  logistics intent UI, expansion flow, geographic terrain generation.
 - **2026-06-18** — **Pathfinding upgraded** to 8-neighbour Dijkstra + gradient flow + bilinear sampling
   (natural, anticipatory routing). **Placeholder art** swapped to Kenney "Top-down Tanks Redux" (CC0).
   **Camera Y-pan** fixed (world is Y-up via from_display_rect; derive screen-relative dirs from the camera).
