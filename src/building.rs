@@ -58,9 +58,9 @@ mod tests {
     fn accepts_some_passable_region() {
         let nav = { let (m,_) = TileMap::generate(64, 64); NavGrid::from_map(&m) };
         let mut found = None;
-        'outer: for y in 0..62 {
-            for x in 0..62 {
-                if can_place(&nav, x as i32, y as i32, 2, 2) {
+        'outer: for y in 0i32..62 {
+            for x in 0i32..62 {
+                if can_place(&nav, x, y, 2, 2) {
                     found = Some((x, y));
                     break 'outer;
                 }
