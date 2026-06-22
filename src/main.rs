@@ -245,6 +245,7 @@ async fn main() {
     let mut drag_start: Option<Vec2> = None;
     let mut last_click: (f64, Option<Entity>) = (0.0, None); // (time, entity) for double-click
     let mut placing: Option<usize> = None; // index into defs.buildings while in placement mode
+    let mut ai_timer = 0.0f32; // enemy re-evaluates its advance on this cadence
     let mut ui = ui::Ui::new();
     let economy = economy::Economy::default();
     let mut control_groups = groups::ControlGroups::new();
@@ -531,6 +532,33 @@ async fn main() {
             placing = None;
             spawn_army(&mut world, &defs, &sprites, PLAYER_FACTION, map_px * 0.5 + vec2(-600.0, 0.0), player_tint, count);
             spawn_army(&mut world, &defs, &sprites, ENEMY_FACTION, map_px * 0.5 + vec2(600.0, 0.0), enemy_tint, count);
+        }
+
+        // --- Enemy AI: periodically order the whole enemy force to advance on the
+        // player's center of mass, so it actually attacks instead of waiting. ---
+        ai_timer -= get_frame_time();
+        if ai_timer <= 0.0 {
+            ai_timer = 1.5;
+            let mut sum = Vec2::ZERO;
+            let mut n = 0u32;
+            for (_e, (f, p)) in world.query::<(&Faction, &Position)>().iter() {
+                if f.0 == PLAYER_FACTION {
+                    sum += p.0;
+                    n += 1;
+                }
+            }
+            if n > 0 {
+                let target = sum / n as f32;
+                let enemies: Vec<Entity> = world
+                    .query::<&Faction>()
+                    .iter()
+                    .filter(|(_, f)| f.0 == ENEMY_FACTION)
+                    .map(|(e, _)| e)
+                    .collect();
+                if !enemies.is_empty() {
+                    issue_move(&mut world, &nav, &mut flow_cache, &enemies, target);
+                }
+            }
         }
 
         // --- Fixed-timestep simulation ---

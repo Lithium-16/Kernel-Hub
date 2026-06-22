@@ -164,7 +164,8 @@ produces sensible behavior for both units and buildings.
 - [~] **Combat core** — `Health` + `Weapon` (data-driven hp/range/dps per unit type), two factions
       (player vanguard + enemy crimson, tinted), direct-fire `combat::step` (nearest enemy in range each
       tick, hitscan), death/despawn, health bars, player-faction-only selection. Done 2026-06-21,
-      unit-tested. Projectiles, armor table, stance-driven advance, and enemy AI still to add.
+      unit-tested. Basic enemy AI (whole force periodically advances on the player's centroid)
+      done 2026-06-21. Projectiles, armor table, stance-driven advance, smarter AI still to add.
 - [ ] **Utility AI** — per-unit scorer over candidate actions (idle, take-job, move-to, engage,
       retreat, resupply); pick highest; standing orders bias weights. Runs on staggered schedule.
 - [~] **Standing orders & stances** — `Stance` component (Aggressive / Defensive / Hold-Ground) set
