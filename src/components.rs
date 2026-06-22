@@ -56,11 +56,14 @@ pub struct Health {
     pub max: f32,
 }
 
-/// A direct-fire weapon: damage per second applied to the nearest enemy within `range`
-/// (world px). Units with no weapon (engineers, trucks) don't get this component.
+/// A direct-fire weapon. Fires discrete shots at `fire_rate` shots/sec, each dealing
+/// `damage` HP. `cooldown` counts down between shots (starts at 0 so first shot fires
+/// immediately when a target enters range). One tracer per shot = no line clutter.
 pub struct Weapon {
     pub range: f32,
-    pub dps: f32,
+    pub damage: f32,
+    pub fire_rate: f32, // shots per second
+    pub cooldown: f32,  // seconds until next shot (mutable, decremented each tick)
 }
 
 /// A rotating turret (vehicles). `angle` is the current barrel direction (radians); the

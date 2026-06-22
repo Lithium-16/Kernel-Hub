@@ -15,6 +15,7 @@ mod assets;
 mod building;
 mod camera;
 mod combat;
+mod debug;
 mod components;
 mod data;
 mod ecs;
@@ -91,8 +92,13 @@ fn spawn_army(
             stance::Stance::Aggressive,
             components::Health { cur: unit.hp, max: unit.hp },
         ));
-        if unit.dps > 0.0 {
-            let _ = world.insert_one(e, components::Weapon { range: unit.range, dps: unit.dps });
+        if unit.fire_rate > 0.0 {
+            let _ = world.insert_one(e, components::Weapon {
+                range: unit.range,
+                damage: unit.damage,
+                fire_rate: unit.fire_rate,
+                cooldown: 0.0, // fires immediately on first target
+            });
         }
         if unit.turret_turn_rate > 0.0 {
             let _ = world.insert_one(e, components::Turret {
@@ -274,6 +280,8 @@ async fn main() {
     let mut last_click: (f64, Option<Entity>) = (0.0, None); // (time, entity) for double-click
     let mut placing: Option<usize> = None; // index into defs.buildings while in placement mode
     let mut ai_timer = 0.0f32; // enemy re-evaluates its advance on this cadence
+    let mut event_log = debug::EventLog::new();
+    let mut stats = debug::Stats::new();
     let mut ui = ui::Ui::new();
     let economy = economy::Economy::default();
     let mut control_groups = groups::ControlGroups::new();
@@ -373,6 +381,74 @@ async fn main() {
         std::process::exit(0);
     }
 
+    // Headless assertion runner: COLDWAR_ASSERT=<scenario>. Prints PASS/FAIL, exits 0/1.
+    if let Ok(scenario) = std::env::var("COLDWAR_ASSERT") {
+        debug::run_assert(&scenario);
+    }
+
+    // Headless world-state query: COLDWAR_QUERY=<fields> [COLDWAR_QTICKS=N].
+    // Runs N ticks of a two-army battle, prints one JSON line, exits 0.
+    if let Ok(fields) = std::env::var("COLDWAR_QUERY") {
+        let ticks: u32 = std::env::var("COLDWAR_QTICKS").ok().and_then(|s| s.parse().ok()).unwrap_or(300);
+        // Kick off AI advance so both armies move toward each other in query mode.
+        {
+            let enemies: Vec<Entity> = world.query::<&Faction>().iter()
+                .filter(|(_, f)| f.0 == ENEMY_FACTION).map(|(e, _)| e).collect();
+            let player_center = {
+                let mut s = Vec2::ZERO; let mut n = 0u32;
+                for (_, (f, p)) in world.query::<(&Faction, &Position)>().iter() {
+                    if f.0 == PLAYER_FACTION { s += p.0; n += 1; }
+                }
+                if n > 0 { s / n as f32 } else { map_px * 0.5 }
+            };
+            if !enemies.is_empty() { issue_move(&mut world, &nav, &mut flow_cache, &enemies, player_center); }
+        }
+        let mut t0_sum = 0.0f64;
+        let mut query_ai = 0.0f32;
+        for tick_i in 0..ticks {
+            let t0 = std::time::Instant::now();
+            // Periodically refresh enemy orders toward the player.
+            query_ai += tick_dt;
+            if query_ai >= 2.0 || tick_i == 0 {
+                query_ai = 0.0;
+                let mut s = Vec2::ZERO; let mut n = 0u32;
+                for (_, (f, p)) in world.query::<(&Faction, &Position)>().iter() {
+                    if f.0 == PLAYER_FACTION { s += p.0; n += 1; }
+                }
+                if n > 0 {
+                    let target = s / n as f32;
+                    let enemies: Vec<Entity> = world.query::<&Faction>().iter()
+                        .filter(|(_, f)| f.0 == ENEMY_FACTION).map(|(e, _)| e).collect();
+                    if !enemies.is_empty() { issue_move(&mut world, &nav, &mut flow_cache, &enemies, target); }
+                }
+            }
+            let tracers_before = world.query::<&components::Tracer>().iter().count();
+            let alive_before = world.query::<&components::Health>().iter().count();
+            grid.rebuild(&world);
+            movement::step(&mut world, &grid, &nav, map_px, tick_dt);
+            grid.rebuild(&world);
+            movement::resolve_collisions(&mut world, &grid, &nav, map_px, 2);
+            movement::settle_arrivals(&mut world);
+            grid.rebuild(&world);
+            combat::step(&mut world, &grid, tick_dt, PLAYER_FACTION);
+            // Count new tracers as shots fired this tick
+            let new_shots = world.query::<&components::Tracer>().iter().count().saturating_sub(tracers_before);
+            for _ in 0..new_shots { stats.record_shot(PLAYER_FACTION); }
+            // Count kills (units whose health entity disappeared)
+            let alive_after = world.query::<&components::Health>().iter().count();
+            if alive_before > alive_after {
+                for _ in 0..(alive_before - alive_after) { stats.record_kill("any"); }
+            }
+            let elapsed = t0.elapsed().as_secs_f64() * 1000.0;
+            stats.record_tick(elapsed);
+            t0_sum += elapsed;
+            event_log.advance();
+        }
+        let tick_ms = (t0_sum / ticks as f64) as f32;
+        println!("{}", stats.query_json(&world, &fields, tick_ms));
+        std::process::exit(0);
+    }
+
     loop {
         let (mx, my) = mouse_position();
         let mp = vec2(mx, my);
@@ -436,6 +512,7 @@ async fn main() {
                     }
                 }
                 flow_cache.clear(); // nav changed: stale routes must not be reused
+                event_log.building(&def.id, tx as usize, ty as usize);
             }
             if is_mouse_button_pressed(MouseButton::Right) || is_key_pressed(KeyCode::Escape) {
                 placing = None;
@@ -523,6 +600,7 @@ async fn main() {
                     }
                 }
             } else {
+                event_log.move_order(sel.len(), click);
                 issue_move(&mut world, &nav, &mut flow_cache, &sel, click);
             }
         }
@@ -599,6 +677,8 @@ async fn main() {
             movement::settle_arrivals(&mut world);
             grid.rebuild(&world);
             combat::step(&mut world, &grid, tick_dt, PLAYER_FACTION);
+            event_log.advance();
+            stats.record_tick(tick_dt as f64 * 1000.0);
             sim.tick();
             accumulator -= tick_dt;
         }
@@ -662,6 +742,11 @@ async fn main() {
                 let hint = "Press R to restart";
                 let dh = measure_text(hint, None, 28, 1.0);
                 draw_text(hint, (sw - dh.width) * 0.5, sh * 0.42 + 46.0, 28.0, WHITE);
+                // Log once and flush the event log
+                if text == "VICTORY" || text == "DEFEAT" {
+                    event_log.game_over(text);
+                    event_log.flush();
+                }
             }
         }
 

@@ -46,8 +46,10 @@ pub struct UnitDef {
     pub hp: f32,
     /// Weapon range in world px (0 = unarmed).
     pub range: f32,
-    /// Weapon damage per second (0 = unarmed).
-    pub dps: f32,
+    /// Damage per shot (0 = unarmed).
+    pub damage: f32,
+    /// Shots per second (0 = unarmed).
+    pub fire_rate: f32,
     /// Turret rotation speed (rad/s). 0 = no turret (infantry fire direction = hull).
     pub turret_turn_rate: f32,
 }

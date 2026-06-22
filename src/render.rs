@@ -102,24 +102,25 @@ fn draw_tiles(map: &TileMap, view: Rect, sprites: &Sprites) {
 
 /// Flying bullets: a bright projectile travels shooter→target over its lifetime, with a
 /// short colored trail (cyan = friendly fire, orange = enemy). Purely visual.
-/// Bullet tracers: a small bright dot travels from shooter to target, with a short
-/// fixed-length trail (never the full shot path — that's what caused the line clutter).
+/// Bullet tracers: an invisible bullet travels from muzzle to target; the only visual
+/// is the glowing wake it leaves — a short fixed-length trail that fades as it arrives.
+/// No dot, no sphere — just the tracer streak.
 fn draw_tracers(world: &hecs::World) {
     use crate::components::{Tracer, TRACER_TTL};
-    const TRAIL_PX: f32 = 14.0; // trail length in world pixels, regardless of shot distance
+    const TRAIL_PX: f32 = 18.0; // world-px length of the streak behind the bullet
     for (_e, t) in world.query::<&Tracer>().iter() {
         let prog = (1.0 - t.ttl / TRACER_TTL).clamp(0.0, 1.0);
         let total = t.from.distance(t.to).max(0.001);
         let dir = (t.to - t.from) / total;
-        // Bullet head: travels the full from→to path
-        let head = t.from + dir * prog * total;
-        // Tail: fixed pixel length behind the head, clamped to the path start
-        let tail_dist = (prog * total - TRAIL_PX).max(0.0);
+        // Bullet position along the path
+        let head_dist = prog * total;
+        let tail_dist = (head_dist - TRAIL_PX).max(0.0);
+        let head = t.from + dir * head_dist;
         let tail = t.from + dir * tail_dist;
-        let a = (t.ttl / TRACER_TTL).clamp(0.0, 1.0); // fade out as it arrives
+        // Fade out in the last 30% of travel so it disappears on impact
+        let alpha = if prog > 0.7 { ((1.0 - prog) / 0.3).clamp(0.0, 1.0) } else { 1.0 };
         let c = t.color;
-        draw_line(tail.x, tail.y, head.x, head.y, 1.8, Color::new(c.r, c.g, c.b, a * 0.9));
-        draw_circle(head.x, head.y, 2.2, Color::new(1.0, 0.97, 0.80, a));
+        draw_line(tail.x, tail.y, head.x, head.y, 1.5, Color::new(c.r, c.g, c.b, alpha * 0.95));
     }
 }
 
@@ -250,11 +251,10 @@ fn draw_turret_barrels(world: &hecs::World) {
 /// Weapon range circles on selected units — helps the player understand engagement ranges.
 fn draw_range_circles(world: &hecs::World) {
     use crate::components::Weapon;
-    let c = Color::new(1.0, 0.85, 0.3, 0.18);
-    let edge = Color::new(1.0, 0.85, 0.3, 0.55);
+    // Outline only — no filled circle so overlapping ranges don't compound opacity.
+    let edge = Color::new(1.0, 0.85, 0.3, 0.45);
     for (_e, (pos, wpn, _sel)) in world.query::<(&Position, &Weapon, &Selected)>().iter() {
         if wpn.range > 0.0 {
-            draw_circle(pos.0.x, pos.0.y, wpn.range, c);
             draw_circle_lines(pos.0.x, pos.0.y, wpn.range, 1.0, edge);
         }
     }
