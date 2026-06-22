@@ -22,7 +22,7 @@ impl NavGrid {
         let mut passable = vec![false; map.width * map.height];
         for y in 0..map.height {
             for x in 0..map.width {
-                passable[y * map.width + x] = matches!(map.get(x, y), Tile::Ground | Tile::Resource);
+                passable[y * map.width + x] = map.get(x, y).passable();
             }
         }
         Self { w: map.width, h: map.height, passable }
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn flow_points_toward_goal() {
-        let map = TileMap::generate_test(64, 64);
+        let (map, _) = TileMap::generate(64, 64);
         let nav = NavGrid::from_map(&map);
         let goal = (50usize, 15usize);
         let cell = (45usize, 15usize);

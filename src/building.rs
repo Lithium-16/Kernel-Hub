@@ -49,14 +49,14 @@ mod tests {
 
     #[test]
     fn rejects_out_of_bounds() {
-        let nav = NavGrid::from_map(&TileMap::generate_test(32, 32));
+        let nav = { let (m,_) = TileMap::generate(32, 32); NavGrid::from_map(&m) };
         assert!(!can_place(&nav, -1, 0, 2, 2));
         assert!(!can_place(&nav, 31, 31, 3, 3)); // spills past the edge
     }
 
     #[test]
     fn accepts_some_passable_region() {
-        let nav = NavGrid::from_map(&TileMap::generate_test(64, 64));
+        let nav = { let (m,_) = TileMap::generate(64, 64); NavGrid::from_map(&m) };
         let mut found = None;
         'outer: for y in 0..62 {
             for x in 0..62 {

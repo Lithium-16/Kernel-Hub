@@ -17,6 +17,7 @@ const BG: Color = Color::new(0.07, 0.085, 0.11, 1.0);
 pub fn present(
     world: &hecs::World,
     map: &TileMap,
+    fog: &crate::fog::FogGrid,
     camera: &GameCamera,
     sim: &Sim,
     sprites: &Sprites,
@@ -37,12 +38,14 @@ pub fn present(
     draw_buildings(world);
     draw_move_orders(world);
     draw_selection_rings(world, sprites);
-    draw_entities(world, sprites);
-    draw_turret_barrels(world);
+    // Only draw entities visible through fog.
+    draw_entities_fogged(world, fog, sprites);
+    draw_turret_barrels_fogged(world, fog);
     draw_tracers(world);
-    draw_health_bars(world);
+    draw_health_bars_fogged(world, fog);
     draw_hitboxes(world);
     draw_range_circles(world);
+    draw_fog_overlay(fog, view);
 
     // Placement ghost (world space): green = valid, red = blocked.
     if let Some((r, valid)) = ghost {
@@ -124,10 +127,10 @@ fn draw_tracers(world: &hecs::World) {
     }
 }
 
-/// Health bar above damaged units (hidden at full HP to reduce clutter).
-fn draw_health_bars(world: &hecs::World) {
-    use crate::components::Health;
-    for (_e, (pos, r, h)) in world.query::<(&Position, &Renderable, &Health)>().iter() {
+fn draw_health_bars_fogged(world: &hecs::World, fog: &crate::fog::FogGrid) {
+    use crate::components::{Faction, Health};
+    for (_e, (pos, r, h, fac)) in world.query::<(&Position, &Renderable, &Health, &Faction)>().iter() {
+        if fac.0 != crate::PLAYER_FACTION && !fog.visible_world(pos.0) { continue; }
         if h.cur >= h.max || h.max <= 0.0 {
             continue;
         }
@@ -144,6 +147,26 @@ fn draw_health_bars(world: &hecs::World) {
         };
         draw_rectangle(x, y, w, 3.5, Color::new(0.0, 0.0, 0.0, 0.7));
         draw_rectangle(x, y, w * frac, 3.5, fill);
+    }
+}
+
+/// Fog overlay: black for Hidden tiles, dark tint for LastSeen tiles.
+fn draw_fog_overlay(fog: &crate::fog::FogGrid, view: Rect) {
+    use crate::fog::FogState;
+    let ts = crate::map::TILE_SIZE;
+    let min_tx = ((view.x / ts).floor() as i32).max(0) as usize;
+    let min_ty = ((view.y / ts).floor() as i32).max(0) as usize;
+    let max_tx = (((view.x + view.w) / ts).ceil() as i32).clamp(0, fog.w as i32) as usize;
+    let max_ty = (((view.y + view.h) / ts).ceil() as i32).clamp(0, fog.h as i32) as usize;
+    for ty in min_ty..max_ty {
+        for tx in min_tx..max_tx {
+            let c = match fog.state(tx, ty) {
+                FogState::Hidden   => Color::new(0.0, 0.0, 0.0, 1.0),
+                FogState::LastSeen => Color::new(0.0, 0.0, 0.0, 0.55),
+                FogState::Visible  => continue,
+            };
+            draw_rectangle(tx as f32 * ts, ty as f32 * ts, ts, ts, c);
+        }
     }
 }
 
@@ -177,8 +200,18 @@ fn draw_selection_rings(world: &hecs::World, sprites: &Sprites) {
     }
 }
 
-fn draw_entities(world: &hecs::World, sprites: &Sprites) {
-    for (_e, (pos, r, head)) in world.query::<(&Position, &Renderable, &Heading)>().iter() {
+fn draw_entities_fogged(world: &hecs::World, fog: &crate::fog::FogGrid, sprites: &Sprites) {
+    use crate::fog::FogState;
+    use crate::components::Faction;
+    for (_e, (pos, r, head, fac)) in world.query::<(&Position, &Renderable, &Heading, &Faction)>().iter() {
+        // Player units always visible (they reveal fog themselves).
+        // Enemy units only visible in Visible tiles.
+        let vis = if fac.0 == crate::PLAYER_FACTION {
+            true
+        } else {
+            fog.visible_world(pos.0)
+        };
+        if !vis { continue; }
         let src = sprites.unit_rect(r.sprite);
         draw_texture_ex(
             &sprites.atlas,
@@ -229,21 +262,17 @@ fn draw_move_orders(world: &hecs::World) {
     }
 }
 
-/// Turret barrel drawn on top of the hull — a short rectangle pointing in the turret's
-/// current aim angle. Only rendered for units that have a Turret component.
-fn draw_turret_barrels(world: &hecs::World) {
-    use crate::components::Turret;
-    for (_e, (pos, r, turret)) in world.query::<(&Position, &Renderable, &Turret)>().iter() {
+fn draw_turret_barrels_fogged(world: &hecs::World, fog: &crate::fog::FogGrid) {
+    use crate::components::{Faction, Turret};
+    for (_e, (pos, r, turret, fac)) in world.query::<(&Position, &Renderable, &Turret, &Faction)>().iter() {
+        if fac.0 != crate::PLAYER_FACTION && !fog.visible_world(pos.0) { continue; }
         let barrel_len = r.size * 0.52;
         let barrel_w = r.size * 0.14;
         let cos = turret.angle.cos();
         let sin = turret.angle.sin();
-        // Barrel tip and base
         let tip = pos.0 + vec2(cos, sin) * barrel_len;
         let base = pos.0 + vec2(cos, sin) * r.size * 0.10;
-        // Draw as a thick line (barrel)
         draw_line(base.x, base.y, tip.x, tip.y, barrel_w, Color::new(0.18, 0.20, 0.22, 1.0));
-        // Turret body (small dark circle over the hull center)
         draw_circle(pos.0.x, pos.0.y, r.size * 0.22, Color::new(0.22, 0.24, 0.27, 1.0));
     }
 }

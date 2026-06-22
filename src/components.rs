@@ -108,7 +108,13 @@ pub struct MoveOrder {
     pub anchor: Vec2,
     pub seek: f32,
     pub arrive: f32,
+    /// If true the unit keeps moving toward its goal even while engaging enemies (attack-move).
+    /// If false (default formation move) the unit stops once engaged.
+    pub attack_move: bool,
 }
+
+/// Vision radius for this unit (world pixels). Determines how much fog it reveals.
+pub struct VisionRange(pub f32);
 
 /// A unit's fixed offset from the group's formation anchor. Held across a whole order
 /// chain so the formation shape translates along queued waypoints (each leg's goal is

@@ -11,15 +11,19 @@ use std::sync::Arc;
 use hecs::Entity;
 use macroquad::prelude::*;
 
+mod ai_brain;
 mod assets;
 mod building;
 mod camera;
 mod combat;
+mod combat_group;
 mod debug;
 mod components;
 mod data;
+mod depot;
 mod ecs;
 mod economy;
+mod fog;
 mod groups;
 mod hud;
 mod map;
@@ -58,12 +62,13 @@ fn window_conf() -> Conf {
 }
 
 /// The player's faction; only these units are selectable/commandable.
-const PLAYER_FACTION: &str = "vanguard";
+pub const PLAYER_FACTION: &str = "vanguard";
 /// The enemy faction.
-const ENEMY_FACTION: &str = "crimson";
+pub const ENEMY_FACTION: &str = "crimson";
 
-/// Spawn `count` units in a loose block centered on `center`, cycling unit types, all
-/// assigned to `faction` and drawn with `tint`. Armed types also get a `Weapon`.
+/// Spawn `count` units in a block centered on `center` for the given faction.
+/// Returns the list of spawned entity IDs so the caller can form a CombatGroup.
+#[allow(clippy::too_many_arguments)]
 fn spawn_army(
     world: &mut hecs::World,
     defs: &Definitions,
@@ -71,11 +76,17 @@ fn spawn_army(
     faction: &str,
     center: Vec2,
     tint: Color,
+    unit_id_filter: Option<&str>, // None = cycle all types
     count: usize,
-) {
+) -> Vec<hecs::Entity> {
     let cols = (count as f32).sqrt().ceil().max(1.0) as usize;
+    let filtered: Vec<_> = defs.units.iter()
+        .filter(|u| unit_id_filter.is_none() || unit_id_filter == Some(u.id.as_str()))
+        .collect();
+    let unit_pool: Vec<_> = if filtered.is_empty() { defs.units.iter().collect() } else { filtered };
+    let mut entities = Vec::with_capacity(count);
     for i in 0..count {
-        let unit = &defs.units[i % defs.units.len()];
+        let unit = unit_pool[i % unit_pool.len()];
         let sprite = sprites.unit_index(&unit.sprite);
         let gx = (i % cols) as f32 - cols as f32 * 0.5;
         let gy = (i / cols) as f32 - cols as f32 * 0.5;
@@ -91,13 +102,14 @@ fn spawn_army(
             components::UnitKind { id: unit.id.clone(), name: unit.name.clone() },
             stance::Stance::Aggressive,
             components::Health { cur: unit.hp, max: unit.hp },
+            components::VisionRange(fog::VISION_RADIUS_PX),
         ));
         if unit.fire_rate > 0.0 {
             let _ = world.insert_one(e, components::Weapon {
                 range: unit.range,
                 damage: unit.damage,
                 fire_rate: unit.fire_rate,
-                cooldown: 0.0, // fires immediately on first target
+                cooldown: 0.0,
             });
         }
         if unit.turret_turn_rate > 0.0 {
@@ -106,30 +118,39 @@ fn spawn_army(
                 turn_rate: unit.turret_turn_rate,
             });
         }
+        entities.push(e);
     }
+    entities
 }
 
-/// Set up a fresh battle: the player force left of center, and the enemy split into 2–3
-/// prongs at random angles in the right hemisphere (radius < the map's clear battlefield),
-/// so the opening attack comes from different directions each game/restart.
+/// Set up both sides symmetrically. Player spawns bottom-left, enemy top-right.
+/// Each side gets one Armored Group and one Engineer Group registered in the GroupRegistry.
+/// The enemy waits PREP_TICKS before advancing.
+#[allow(clippy::too_many_arguments)]
 fn spawn_scenario(
     world: &mut hecs::World,
+    groups: &mut combat_group::GroupRegistry,
     defs: &Definitions,
     sprites: &Sprites,
-    map_px: Vec2,
+    map: &map::TileMap,
     count: usize,
     player_tint: Color,
     enemy_tint: Color,
 ) {
-    spawn_army(world, defs, sprites, PLAYER_FACTION, map_px * 0.5 + vec2(-600.0, 0.0), player_tint, count);
+    let p_spawn = map.player_spawn();
+    let e_spawn = map.enemy_spawn();
 
-    let groups = macroquad::rand::gen_range(2, 4); // 2 or 3 prongs
-    let per = (count / groups).max(1);
-    for _ in 0..groups {
-        let ang = macroquad::rand::gen_range(-1.4f32, 1.4f32); // right hemisphere, away from player
-        let pos = map_px * 0.5 + vec2(ang.cos(), ang.sin()) * 680.0;
-        spawn_army(world, defs, sprites, ENEMY_FACTION, pos, enemy_tint, per);
-    }
+    // Player side
+    let p_armor = spawn_army(world, defs, sprites, PLAYER_FACTION, p_spawn, player_tint, Some("tank"), count);
+    let p_eng   = spawn_army(world, defs, sprites, PLAYER_FACTION, p_spawn + vec2(100.0, 0.0), player_tint, Some("engineer"), 5);
+    groups.add("1st Armored Group", PLAYER_FACTION, p_armor);
+    groups.add("1st Engineer Group", PLAYER_FACTION, p_eng);
+
+    // Enemy side (identical capability)
+    let e_armor = spawn_army(world, defs, sprites, ENEMY_FACTION, e_spawn, enemy_tint, Some("tank"), count);
+    let e_eng   = spawn_army(world, defs, sprites, ENEMY_FACTION, e_spawn + vec2(-100.0, 0.0), enemy_tint, Some("engineer"), 5);
+    groups.add("1st Enemy Armored Group", ENEMY_FACTION, e_armor);
+    groups.add("1st Enemy Engineer Group", ENEMY_FACTION, e_eng);
 }
 
 fn clear_selection(world: &mut hecs::World) {
@@ -204,27 +225,51 @@ fn issue_move(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache, uni
             taken[si] = true;
             slots[si]
         }).unwrap_or(click);
-        let _ = world.insert_one(e, MoveOrder { flow: flow.clone(), goal, anchor: click, seek, arrive });
-        // Remember the formation offset (so queued legs keep the shape) and drop any
-        // pending waypoints — a fresh move order replaces the whole plan.
+        let _ = world.insert_one(e, MoveOrder { flow: flow.clone(), goal, anchor: click, seek, arrive, attack_move: false });
         let _ = world.insert_one(e, components::Formation { offset: goal - click });
         let _ = world.remove_one::<components::OrderQueue>(e);
     }
 }
 
-/// Issue a single move leg for one unit toward `anchor`, holding its formation `offset`
-/// so the group's shape translates along the path (goal = anchor + offset). Used to
-/// advance queued waypoints.
+/// Same as `issue_move` but sets the attack_move flag when targeting an enemy.
+fn issue_move_with_flags(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache, units: &[Entity], click: Vec2, attack_move: bool) {
+    let (tx, ty) = ((click.x / map::TILE_SIZE) as i32, (click.y / map::TILE_SIZE) as i32);
+    if units.is_empty() || tx < 0 || ty < 0 || tx as usize >= nav.w || ty as usize >= nav.h || !nav.passable(tx as usize, ty as usize) { return; }
+    let flow = cache.get_or_build(nav, (tx as usize, ty as usize));
+    let n = units.len();
+    let cols = (n as f32).sqrt().ceil().max(1.0) as i32;
+    let rows = ((n as i32 + cols - 1) / cols).max(1);
+    let spacing = movement::UNIT_RADIUS * 2.2;
+    let slots: Vec<Vec2> = (0..n as i32).map(|i| {
+        let cx = (i % cols) as f32 - (cols - 1) as f32 * 0.5;
+        let cy = (i / cols) as f32 - (rows - 1) as f32 * 0.5;
+        click + vec2(cx * spacing, cy * spacing)
+    }).collect();
+    let half = vec2(cols as f32, rows as f32) * spacing * 0.5;
+    let seek = half.length() + spacing * 2.0;
+    let arrive = spacing * 2.0;
+    let positions: Vec<(Entity, Vec2)> = units.iter().filter_map(|&e| {
+        let pos = world.query_one_mut::<&Position>(e).ok()?.0;
+        Some((e, pos))
+    }).collect();
+    let mut taken = vec![false; slots.len()];
+    for (e, p) in positions {
+        let best = slots.iter().enumerate().filter(|(si, _)| !taken[*si]).min_by(|(_, a), (_, b)| p.distance(**a).partial_cmp(&p.distance(**b)).unwrap()).map(|(si, _)| si);
+        let goal = best.map(|si| { taken[si] = true; slots[si] }).unwrap_or(click);
+        let _ = world.insert_one(e, MoveOrder { flow: flow.clone(), goal, anchor: click, seek, arrive, attack_move });
+        let _ = world.insert_one(e, components::Formation { offset: goal - click });
+        let _ = world.remove_one::<components::OrderQueue>(e);
+    }
+}
+
 fn issue_leg(world: &mut hecs::World, nav: &NavGrid, cache: &mut FlowCache, e: Entity, anchor: Vec2, offset: Vec2) {
     let (tx, ty) = ((anchor.x / map::TILE_SIZE) as i32, (anchor.y / map::TILE_SIZE) as i32);
-    if tx < 0 || ty < 0 || tx as usize >= nav.w || ty as usize >= nav.h || !nav.passable(tx as usize, ty as usize) {
-        return;
-    }
+    if tx < 0 || ty < 0 || tx as usize >= nav.w || ty as usize >= nav.h || !nav.passable(tx as usize, ty as usize) { return; }
     let flow = cache.get_or_build(nav, (tx as usize, ty as usize));
     let spacing = movement::UNIT_RADIUS * 2.2;
     let seek = offset.length() + spacing * 2.0;
     let arrive = spacing * 2.0;
-    let _ = world.insert_one(e, MoveOrder { flow, goal: anchor + offset, anchor, seek, arrive });
+    let _ = world.insert_one(e, MoveOrder { flow, goal: anchor + offset, anchor, seek, arrive, attack_move: false });
 }
 
 /// Advance waypoint queues: any unit with no active `MoveOrder` but a non-empty
@@ -251,24 +296,34 @@ async fn main() {
 
     let sprites = Sprites::load();
     let defs = data::load_definitions();
-    let map = TileMap::generate_test(256, 256);
+    let (map, _regions) = map::TileMap::generate(256, 256);
     let map_px = map.size_px();
     let mut nav = NavGrid::from_map(&map);
-    let mut flow_cache = FlowCache::new(48);
+    let mut flow_cache = FlowCache::new(64);
     let minimap = minimap::Minimap::build(&map);
+
+    let mut fog = fog::FogGrid::new(map.width, map.height);
+    let (ptx, pty) = map.player_spawn_tile();
+    fog.reveal_tile(ptx as i32, pty as i32, fog::HQ_REVEAL_TILES);
+    let (etx, ety) = map.enemy_spawn_tile();
+    // Enemy also gets its HQ pre-revealed (symmetric)
+    fog.reveal_tile(etx as i32, ety as i32, fog::HQ_REVEAL_TILES);
 
     let mut world = ecs::new_world();
     let count: usize = std::env::var("COLDWAR_UNITS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(200);
-    // Seed RNG from wall-clock so the enemy's approach differs each launch/restart.
+        .unwrap_or(30); // smaller default; quality over quantity now
     macroquad::rand::srand(miniquad::date::now().to_bits());
     let player_tint = Color::new(0.85, 0.92, 1.0, 1.0);
     let enemy_tint = Color::new(1.0, 0.55, 0.55, 1.0);
-    spawn_scenario(&mut world, &defs, &sprites, map_px, count, player_tint, enemy_tint);
 
-    let mut cam = camera::GameCamera::centered(map_px);
+    let mut groups = combat_group::GroupRegistry::new();
+    let mut ai = ai_brain::AiBrain::new(ENEMY_FACTION, PLAYER_FACTION);
+
+    spawn_scenario(&mut world, &mut groups, &defs, &sprites, &map, count, player_tint, enemy_tint);
+
+    let mut cam = camera::GameCamera { center: map.player_spawn(), scale: 1.0 };
     if let Ok(z) = std::env::var("COLDWAR_ZOOM") {
         if let Ok(s) = z.parse::<f32>() {
             cam.scale = s;
@@ -279,7 +334,6 @@ async fn main() {
     let mut drag_start: Option<Vec2> = None;
     let mut last_click: (f64, Option<Entity>) = (0.0, None); // (time, entity) for double-click
     let mut placing: Option<usize> = None; // index into defs.buildings while in placement mode
-    let mut ai_timer = 0.0f32; // enemy re-evaluates its advance on this cadence
     let mut event_log = debug::EventLog::new();
     let mut stats = debug::Stats::new();
     let mut ui = ui::Ui::new();
@@ -578,13 +632,25 @@ async fn main() {
             }
         }
 
-        // --- Move order (right mouse): only the currently-selected units ---
-        // Plain RMB = fresh formation move; Shift+RMB = queue a waypoint (if the group
-        // already has a plan to append to, else it's just a fresh move).
+        // --- Move / Attack-move order (right mouse) ---
+        // Right-click ground → formation move.
+        // Right-click enemy unit → attack-move to that position (unit advances and fires en route).
+        // Shift+RMB → queue waypoint (if already moving).
         if is_mouse_button_pressed(MouseButton::Right) && !over_ui && !placing_active {
             let click = cam2d.screen_to_world(mp);
             let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
             let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
+            // Detect if clicking on an enemy unit (attack-move).
+            let attack_target = {
+                let mut found = false;
+                let mut best_d = 24.0f32 * 24.0;
+                for (_e, (pos, fac)) in world.query::<(&Position, &Faction)>().iter() {
+                    if fac.0 == PLAYER_FACTION { continue; }
+                    let d2 = pos.0.distance_squared(click);
+                    if d2 < best_d { best_d = d2; found = true; }
+                }
+                found
+            };
             let has_active = sel.iter().any(|&e| {
                 world.get::<&MoveOrder>(e).is_ok()
                     || world.get::<&components::OrderQueue>(e).map(|q| !q.anchors.is_empty()).unwrap_or(false)
@@ -601,7 +667,7 @@ async fn main() {
                 }
             } else {
                 event_log.move_order(sel.len(), click);
-                issue_move(&mut world, &nav, &mut flow_cache, &sel, click);
+                issue_move_with_flags(&mut world, &nav, &mut flow_cache, &sel, click, attack_target);
             }
         }
 
@@ -627,41 +693,36 @@ async fn main() {
             }
         }
 
-        // --- Restart (R): wipe the field, reset nav, respawn both armies ---
+        // --- Restart (R) ---
         if is_key_pressed(KeyCode::R) {
             let all: Vec<Entity> = world.iter().map(|e| e.entity()).collect();
-            for e in all {
-                let _ = world.despawn(e);
-            }
+            for e in all { let _ = world.despawn(e); }
             nav = NavGrid::from_map(&map);
             flow_cache.clear();
             placing = None;
-            spawn_scenario(&mut world, &defs, &sprites, map_px, count, player_tint, enemy_tint);
+            groups.clear();
+            ai = ai_brain::AiBrain::new(ENEMY_FACTION, PLAYER_FACTION);
+            spawn_scenario(&mut world, &mut groups, &defs, &sprites, &map, count, player_tint, enemy_tint);
         }
 
-        // --- Enemy AI: periodically order the whole enemy force to advance on the
-        // player's center of mass, so it actually attacks instead of waiting. ---
-        ai_timer -= get_frame_time();
-        if ai_timer <= 0.0 {
-            ai_timer = 1.5;
-            let mut sum = Vec2::ZERO;
-            let mut n = 0u32;
-            for (_e, (f, p)) in world.query::<(&Faction, &Position)>().iter() {
-                if f.0 == PLAYER_FACTION {
-                    sum += p.0;
-                    n += 1;
-                }
-            }
-            if n > 0 {
-                let target = sum / n as f32;
-                let enemies: Vec<Entity> = world
-                    .query::<&Faction>()
-                    .iter()
-                    .filter(|(_, f)| f.0 == ENEMY_FACTION)
-                    .map(|(e, _)| e)
-                    .collect();
-                if !enemies.is_empty() {
-                    issue_move(&mut world, &nav, &mut flow_cache, &enemies, target);
+        // --- AI brain tick (runs on fixed sim cadence, not render) ---
+        // Executed once per render frame for now; will move into sim tick loop.
+        {
+            // Fan out group orders to individual units.
+            let orders: Vec<_> = groups.all().iter().map(|g| (g.faction.clone(), g.order.clone(), g.members.clone())).collect();
+            for (_faction, order, members) in &orders {
+                let living: Vec<Entity> = members.iter().copied().filter(|&e| world.contains(e)).collect();
+                match order {
+                    combat_group::GroupOrder::AdvanceTo(goal) => {
+                        issue_move(&mut world, &nav, &mut flow_cache, &living, *goal);
+                    }
+                    combat_group::GroupOrder::Hold => {
+                        for &e in &living { let _ = world.remove_one::<MoveOrder>(e); }
+                    }
+                    combat_group::GroupOrder::Withdraw(goal) => {
+                        issue_move(&mut world, &nav, &mut flow_cache, &living, *goal);
+                    }
+                    combat_group::GroupOrder::Idle => {}
                 }
             }
         }
@@ -677,12 +738,16 @@ async fn main() {
             movement::settle_arrivals(&mut world);
             grid.rebuild(&world);
             combat::step(&mut world, &grid, tick_dt, PLAYER_FACTION);
+            // AI brain tick — uses same systems as player
+            ai.tick(&mut world, &mut groups);
+            groups.prune_all(&world);
+            // Fog update from player units
+            fog.update(&world, PLAYER_FACTION);
             event_log.advance();
             stats.record_tick(tick_dt as f64 * 1000.0);
             sim.tick();
             accumulator -= tick_dt;
         }
-        // Units that just arrived and still have queued waypoints start their next leg.
         advance_queues(&mut world, &nav, &mut flow_cache);
         let tick_ms = ((get_time() - t0) * 1000.0) as f32;
 
@@ -690,7 +755,7 @@ async fn main() {
         combat::update_turrets(&mut world, &grid, get_frame_time());
 
         let drag_box = drag_start.map(|s| (s, mp));
-        render::present(&world, &map, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
+        render::present(&world, &map, &fog, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
         // Recompute layout after this frame's input so panels reflect current selection.
         let hud_layout = hud::HudLayout::compute(&world, sw, sh);
         match hud::draw(&mut ui, &world, &economy, &hud_layout) {
@@ -756,7 +821,7 @@ async fn main() {
             frame += 1;
             if frame >= capture_frames {
                 let rt = render_target(screen_width() as u32, screen_height() as u32);
-                render::present(&world, &map, &cam, &sim, &sprites, None, None, tick_ms, Some(rt.clone()));
+                render::present(&world, &map, &fog, &cam, &sim, &sprites, None, None, tick_ms, Some(rt.clone()));
                 let mut uicam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh));
                 uicam.render_target = Some(rt.clone());
                 set_camera(&uicam);

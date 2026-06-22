@@ -56,10 +56,11 @@ impl Sprites {
 
     pub fn tile_rect(&self, t: Tile) -> Rect {
         slot_rect(match t {
-            Tile::Ground => SLOT_GROUND,
-            Tile::Water => SLOT_WATER,
-            Tile::Cliff => SLOT_CLIFF,
-            Tile::Resource => SLOT_RESOURCE,
+            Tile::Ground | Tile::Chokepoint => SLOT_GROUND,
+            Tile::Water | Tile::River | Tile::RiverCrossing => SLOT_WATER,
+            Tile::Cliff | Tile::MountainPass => SLOT_CLIFF,
+            Tile::OreBasin | Tile::OilField => SLOT_RESOURCE,
+            Tile::Road => SLOT_GROUND,
         })
     }
 

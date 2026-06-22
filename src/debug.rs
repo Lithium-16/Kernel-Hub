@@ -275,7 +275,7 @@ fn assert_formation_fills() -> Result<String, String> {
     use macroquad::prelude::{vec2, Vec2};
 
     let map_px = Vec2::new(8192.0, 8192.0);
-    let nav_map = crate::map::TileMap::generate_test(256, 256);
+    let (nav_map, _) = crate::map::TileMap::generate(256, 256);
     let nav = crate::nav::NavGrid::from_map(&nav_map);
     let mut flow_cache = crate::nav::FlowCache::new(16);
     let mut world = World::new();
@@ -316,7 +316,7 @@ fn assert_formation_fills() -> Result<String, String> {
         let cy = (i as i32 / cols_f) as f32 - (rows - 1) as f32 * 0.5;
         let slot = goal + vec2(cx * spacing, cy * spacing);
         let _ = world.insert_one(e, crate::components::MoveOrder {
-            flow: flow.clone(), goal: slot, anchor: goal, seek, arrive,
+            flow: flow.clone(), goal: slot, anchor: goal, seek, arrive, attack_move: false,
         });
         let _ = world.insert_one(e, crate::components::Formation { offset: slot - goal });
     }
