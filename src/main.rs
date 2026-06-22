@@ -334,7 +334,7 @@ async fn main() {
     let mut drag_start: Option<Vec2> = None;
     let mut last_click: (f64, Option<Entity>) = (0.0, None); // (time, entity) for double-click
     let mut placing: Option<usize> = None; // index into defs.buildings while in placement mode
-    /// When Some(group_id), the next RMB click in world space sets that group's AdvanceTo order.
+    // When Some(group_id), the next RMB click in world space sets that group's AdvanceTo order.
     let mut group_advance_mode: Option<u32> = None;
     let mut event_log = debug::EventLog::new();
     let mut stats = debug::Stats::new();
