@@ -5,7 +5,7 @@
 use hecs::World;
 use macroquad::prelude::Vec2;
 
-use crate::components::{Faction, Position};
+use crate::components::{Faction, Position, VisionRange};
 use crate::map::TILE_SIZE;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -63,12 +63,14 @@ impl FogGrid {
         }
     }
 
-    /// Full update: age then reveal from every player-faction unit.
+    /// Full update: age then reveal from every player-faction unit using its VisionRange
+    /// component (falls back to VISION_RADIUS_PX for units without the component).
     pub fn update(&mut self, world: &World, player_faction: &str) {
         self.age();
-        for (_e, (pos, fac)) in world.query::<(&Position, &Faction)>().iter() {
+        for (_e, (pos, fac, vis)) in world.query::<(&Position, &Faction, Option<&VisionRange>)>().iter() {
             if fac.0 == player_faction {
-                self.reveal_world(pos.0, VISION_RADIUS_PX);
+                let r = vis.map_or(VISION_RADIUS_PX, |v| v.0);
+                self.reveal_world(pos.0, r);
             }
         }
     }
@@ -81,7 +83,7 @@ impl FogGrid {
     }
 }
 
-/// Default unit vision radius in world pixels. Will become a component later.
+/// Default unit vision radius in world pixels. Used when a unit has no VisionRange component.
 pub const VISION_RADIUS_PX: f32 = 5.0 * TILE_SIZE; // 5 tiles
 /// HQ pre-reveal radius in tiles.
 pub const HQ_REVEAL_TILES: i32 = 20;

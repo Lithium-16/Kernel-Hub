@@ -334,6 +334,8 @@ async fn main() {
     let mut drag_start: Option<Vec2> = None;
     let mut last_click: (f64, Option<Entity>) = (0.0, None); // (time, entity) for double-click
     let mut placing: Option<usize> = None; // index into defs.buildings while in placement mode
+    /// When Some(group_id), the next RMB click in world space sets that group's AdvanceTo order.
+    let mut group_advance_mode: Option<u32> = None;
     let mut event_log = debug::EventLog::new();
     let mut stats = debug::Stats::new();
     let mut ui = ui::Ui::new();
@@ -511,7 +513,7 @@ async fn main() {
         ui.begin();
         // Input layering: compute HUD panel rects up front (anchored to window size) and
         // gate world input on them, so clicks on any panel never fall through to the world.
-        let input_layout = hud::HudLayout::compute(&world, sw, sh);
+        let input_layout = hud::HudLayout::compute(&world, &groups, sw, sh);
         let over_ui = input_layout.contains(mp);
 
         // Minimap click / drag recenters the camera (handled before cam.update clamps).
@@ -534,6 +536,10 @@ async fn main() {
                 Some(i) if i + 1 < defs.buildings.len() => Some(i + 1),
                 _ => None,
             };
+        }
+        if is_key_pressed(KeyCode::Escape) {
+            placing = None;
+            group_advance_mode = None;
         }
         let mut ghost: Option<(Rect, bool)> = None;
         if let Some(idx) = placing {
@@ -568,7 +574,7 @@ async fn main() {
                 flow_cache.clear(); // nav changed: stale routes must not be reused
                 event_log.building(&def.id, tx as usize, ty as usize);
             }
-            if is_mouse_button_pressed(MouseButton::Right) || is_key_pressed(KeyCode::Escape) {
+            if is_mouse_button_pressed(MouseButton::Right) {
                 placing = None;
             }
         }
@@ -633,41 +639,49 @@ async fn main() {
         }
 
         // --- Move / Attack-move order (right mouse) ---
-        // Right-click ground → formation move.
-        // Right-click enemy unit → attack-move to that position (unit advances and fires en route).
+        // If group_advance_mode is active, RMB sets the AdvanceTo target for that group.
+        // Otherwise: right-click ground → formation move; right-click enemy → attack-move.
         // Shift+RMB → queue waypoint (if already moving).
         if is_mouse_button_pressed(MouseButton::Right) && !over_ui && !placing_active {
             let click = cam2d.screen_to_world(mp);
-            let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
-            let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
-            // Detect if clicking on an enemy unit (attack-move).
-            let attack_target = {
-                let mut found = false;
-                let mut best_d = 24.0f32 * 24.0;
-                for (_e, (pos, fac)) in world.query::<(&Position, &Faction)>().iter() {
-                    if fac.0 == PLAYER_FACTION { continue; }
-                    let d2 = pos.0.distance_squared(click);
-                    if d2 < best_d { best_d = d2; found = true; }
-                }
-                found
-            };
-            let has_active = sel.iter().any(|&e| {
-                world.get::<&MoveOrder>(e).is_ok()
-                    || world.get::<&components::OrderQueue>(e).map(|q| !q.anchors.is_empty()).unwrap_or(false)
-            });
-            if shift && has_active {
-                for &e in &sel {
-                    if let Ok(q) = world.query_one_mut::<&mut components::OrderQueue>(e) {
-                        q.anchors.push_back(click);
-                    } else {
-                        let mut anchors = std::collections::VecDeque::new();
-                        anchors.push_back(click);
-                        let _ = world.insert_one(e, components::OrderQueue { anchors });
-                    }
+
+            if let Some(gid) = group_advance_mode.take() {
+                // Set the group's AdvanceTo order; the fanout loop dispatches it next frame.
+                if let Some(g) = groups.get_mut(gid) {
+                    g.order = combat_group::GroupOrder::AdvanceTo(click);
                 }
             } else {
-                event_log.move_order(sel.len(), click);
-                issue_move_with_flags(&mut world, &nav, &mut flow_cache, &sel, click, attack_target);
+                let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+                let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
+                // Detect if clicking on an enemy unit (attack-move).
+                let attack_target = {
+                    let mut found = false;
+                    let mut best_d = 24.0f32 * 24.0;
+                    for (_e, (pos, fac)) in world.query::<(&Position, &Faction)>().iter() {
+                        if fac.0 == PLAYER_FACTION { continue; }
+                        let d2 = pos.0.distance_squared(click);
+                        if d2 < best_d { best_d = d2; found = true; }
+                    }
+                    found
+                };
+                let has_active = sel.iter().any(|&e| {
+                    world.get::<&MoveOrder>(e).is_ok()
+                        || world.get::<&components::OrderQueue>(e).map(|q| !q.anchors.is_empty()).unwrap_or(false)
+                });
+                if shift && has_active {
+                    for &e in &sel {
+                        if let Ok(q) = world.query_one_mut::<&mut components::OrderQueue>(e) {
+                            q.anchors.push_back(click);
+                        } else {
+                            let mut anchors = std::collections::VecDeque::new();
+                            anchors.push_back(click);
+                            let _ = world.insert_one(e, components::OrderQueue { anchors });
+                        }
+                    }
+                } else {
+                    event_log.move_order(sel.len(), click);
+                    issue_move_with_flags(&mut world, &nav, &mut flow_cache, &sel, click, attack_target);
+                }
             }
         }
 
@@ -700,6 +714,7 @@ async fn main() {
             nav = NavGrid::from_map(&map);
             flow_cache.clear();
             placing = None;
+            group_advance_mode = None;
             groups.clear();
             ai = ai_brain::AiBrain::new(ENEMY_FACTION, PLAYER_FACTION);
             spawn_scenario(&mut world, &mut groups, &defs, &sprites, &map, count, player_tint, enemy_tint);
@@ -709,12 +724,13 @@ async fn main() {
         // Executed once per render frame for now; will move into sim tick loop.
         {
             // Fan out group orders to individual units.
+            // GroupOrder::AdvanceTo uses attack_move=true so units advance AND engage en route.
             let orders: Vec<_> = groups.all().iter().map(|g| (g.faction.clone(), g.order.clone(), g.members.clone())).collect();
             for (_faction, order, members) in &orders {
                 let living: Vec<Entity> = members.iter().copied().filter(|&e| world.contains(e)).collect();
                 match order {
                     combat_group::GroupOrder::AdvanceTo(goal) => {
-                        issue_move(&mut world, &nav, &mut flow_cache, &living, *goal);
+                        issue_move_with_flags(&mut world, &nav, &mut flow_cache, &living, *goal, true);
                     }
                     combat_group::GroupOrder::Hold => {
                         for &e in &living { let _ = world.remove_one::<MoveOrder>(e); }
@@ -757,7 +773,7 @@ async fn main() {
         let drag_box = drag_start.map(|s| (s, mp));
         render::present(&world, &map, &fog, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
         // Recompute layout after this frame's input so panels reflect current selection.
-        let hud_layout = hud::HudLayout::compute(&world, sw, sh);
+        let hud_layout = hud::HudLayout::compute(&world, &groups, sw, sh);
         match hud::draw(&mut ui, &world, &economy, &ai, &groups, &hud_layout) {
             hud::HudAction::Stop => {
                 let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
@@ -778,9 +794,25 @@ async fn main() {
                     }
                 }
             }
+            hud::HudAction::GroupHold(id) => {
+                if let Some(g) = groups.get_mut(id) {
+                    g.order = combat_group::GroupOrder::Hold;
+                }
+            }
+            hud::HudAction::GroupAdvanceMode(id) => {
+                group_advance_mode = Some(id);
+            }
             hud::HudAction::None => {}
         }
         minimap.draw(&world, view, hud_layout.minimap);
+
+        // Group advance-target mode hint.
+        if group_advance_mode.is_some() {
+            let msg = "RIGHT-CLICK map to set ADVANCE TO target  (ESC cancels)";
+            let d = measure_text(msg, None, 22, 1.0);
+            let sw2 = screen_width();
+            draw_text(msg, (sw2 - d.width) * 0.5, screen_height() * 0.5 - 48.0, 22.0, Color::new(0.45, 1.0, 0.55, 1.0));
+        }
 
         // --- Win/lose banner (only once a battle has been spawned) ---
         if count > 0 {
@@ -825,7 +857,7 @@ async fn main() {
                 let mut uicam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh));
                 uicam.render_target = Some(rt.clone());
                 set_camera(&uicam);
-                let cap_layout = hud::HudLayout::compute(&world, sw, sh);
+                let cap_layout = hud::HudLayout::compute(&world, &groups, sw, sh);
                 let _ = hud::draw(&mut ui, &world, &economy, &ai, &groups, &cap_layout);
                 minimap.draw(&world, cam.view_rect(sw, sh), cap_layout.minimap);
                 set_default_camera();

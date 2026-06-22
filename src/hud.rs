@@ -7,6 +7,7 @@
 use hecs::World;
 use macroquad::prelude::*;
 
+use crate::combat_group::{GroupRegistry, GroupOrder};
 use crate::components::{Selected, UnitKind};
 use crate::economy::Economy;
 use crate::stance::{self, Stance};
@@ -17,6 +18,10 @@ pub const TOP_H: f32 = 34.0;
 /// Bottom command-bar height.
 pub const BAR_H: f32 = 56.0;
 const SEL_W: f32 = 230.0;
+/// Group detail card width.
+const GRP_DETAIL_W: f32 = 260.0;
+/// Group detail card height.
+const GRP_DETAIL_H: f32 = 120.0;
 
 /// Result of a HUD interaction for the main loop to act on.
 pub enum HudAction {
@@ -24,6 +29,10 @@ pub enum HudAction {
     Stop,
     ClearSel,
     SetStance(Stance),
+    /// Set the named group's order to Hold.
+    GroupHold(u32),
+    /// Enter advance-target-selection mode: the next RMB sets AdvanceTo for this group.
+    GroupAdvanceMode(u32),
 }
 
 /// Anchored rects for every HUD panel this frame, computed before world input so the
@@ -33,6 +42,8 @@ pub struct HudLayout {
     pub bottom: Rect,
     pub selection: Option<Rect>,
     pub command: Option<Rect>,
+    /// Group detail card (shown when a group member is selected).
+    pub group_detail: Option<Rect>,
     pub minimap: Rect,
 }
 
@@ -40,7 +51,7 @@ pub struct HudLayout {
 pub const MINIMAP_SIZE: f32 = 180.0;
 
 impl HudLayout {
-    pub fn compute(world: &World, sw: f32, sh: f32) -> Self {
+    pub fn compute(world: &World, groups: &GroupRegistry, sw: f32, sh: f32) -> Self {
         let (tally, total) = selection_summary(world);
         let rows = tally.len();
         let selection = (rows > 0).then(|| {
@@ -49,12 +60,18 @@ impl HudLayout {
         });
         // Command card: bottom-left, above the command bar, only with a selection.
         let command = (total > 0).then(|| Rect::new(8.0, sh - BAR_H - 8.0 - 104.0, 330.0, 104.0));
+        // Group detail card: immediately right of the command card, shown when a group member selected.
+        let sel_gid = groups.selected_group_id(world);
+        let group_detail = sel_gid.map(|_| {
+            Rect::new(346.0, sh - BAR_H - 8.0 - GRP_DETAIL_H, GRP_DETAIL_W, GRP_DETAIL_H)
+        });
         let minimap = Rect::new(sw - MINIMAP_SIZE - 8.0, TOP_H + 8.0, MINIMAP_SIZE, MINIMAP_SIZE);
         Self {
             top: Rect::new(0.0, 0.0, sw, TOP_H),
             bottom: Rect::new(0.0, sh - BAR_H, sw, BAR_H),
             selection,
             command,
+            group_detail,
             minimap,
         }
     }
@@ -66,6 +83,7 @@ impl HudLayout {
             || self.minimap.contains(p)
             || self.selection.is_some_and(|r| r.contains(p))
             || self.command.is_some_and(|r| r.contains(p))
+            || self.group_detail.is_some_and(|r| r.contains(p))
     }
 }
 
@@ -90,13 +108,18 @@ pub fn draw(
     world: &World,
     eco: &Economy,
     ai: &crate::ai_brain::AiBrain,
-    groups: &crate::combat_group::GroupRegistry,
+    groups: &GroupRegistry,
     layout: &HudLayout,
 ) -> HudAction {
     draw_top_bar(ui, eco, ai, layout.top);
     let mut action = draw_bottom_bar(ui, world, layout.bottom);
     if let Some(r) = layout.command {
         if let Some(a) = draw_command_card(ui, world, r) {
+            action = a;
+        }
+    }
+    if let Some(r) = layout.group_detail {
+        if let Some(a) = draw_group_detail_card(ui, groups, world, r) {
             action = a;
         }
     }
@@ -136,8 +159,57 @@ fn draw_command_card(ui: &mut Ui, world: &World, r: Rect) -> Option<HudAction> {
     action
 }
 
+/// Group detail card: shown when a group member is selected. Displays the group name,
+/// strength bar, current order, and buttons to Hold or enter Advance-To target mode.
+fn draw_group_detail_card(ui: &mut Ui, groups: &GroupRegistry, world: &World, r: Rect) -> Option<HudAction> {
+    let gid = groups.selected_group_id(world)?;
+    let g = groups.all().iter().find(|g| g.id == gid)?;
+
+    ui.panel(r);
+
+    // Name
+    ui.label(vec2(r.x + 8.0, r.y + 18.0), &g.name);
+
+    // Strength fraction + numeric label
+    let orig = g.original_strength.max(1);
+    let strength = g.strength();
+    let frac = strength as f32 / orig as f32;
+    let bar_r = Rect::new(r.x + 8.0, r.y + 26.0, r.w - 16.0, 8.0);
+    let fill = if frac > 0.6 { Color::new(0.4, 0.9, 0.4, 1.0) }
+               else if frac > 0.3 { Color::new(0.9, 0.8, 0.3, 1.0) }
+               else { Color::new(0.9, 0.3, 0.3, 1.0) };
+    ui.bar(bar_r, frac, fill);
+    let fs = ui.theme.font_size as u16;
+    let label = format!("{}/{}", strength, orig);
+    let d = measure_text(&label, None, fs, 1.0);
+    ui.label(vec2(r.x + r.w - 8.0 - d.width, r.y + 20.0), &label);
+
+    // Current order
+    let order_label = match &g.order {
+        GroupOrder::Idle        => "Order: Idle",
+        GroupOrder::Hold        => "Order: Hold",
+        GroupOrder::AdvanceTo(_)=> "Order: Advancing",
+        GroupOrder::Withdraw(_) => "Order: Withdrawing",
+    };
+    let accent = Color::new(0.72, 0.88, 1.0, 0.9);
+    ui.label_colored(vec2(r.x + 8.0, r.y + 52.0), order_label, accent);
+
+    // Ammo / Fuel placeholders (Phase 4)
+    ui.label(vec2(r.x + 8.0, r.y + 68.0), "Ammo: —   Fuel: —");
+
+    // Order buttons
+    let mut action = None;
+    if ui.button(Rect::new(r.x + 8.0, r.y + 84.0, 118.0, 26.0), "Advance To") {
+        action = Some(HudAction::GroupAdvanceMode(gid));
+    }
+    if ui.button(Rect::new(r.x + 134.0, r.y + 84.0, 80.0, 26.0), "Hold") {
+        action = Some(HudAction::GroupHold(gid));
+    }
+    action
+}
+
 /// Group summary panel: shows player combat groups across the bottom bar.
-fn draw_group_panel(ui: &mut Ui, groups: &crate::combat_group::GroupRegistry, _world: &World, bottom: Rect) {
+fn draw_group_panel(ui: &mut Ui, groups: &GroupRegistry, _world: &World, bottom: Rect) {
     let mut x = bottom.x + 250.0; // start after Stop/Clear buttons
     let player_faction = crate::PLAYER_FACTION;
     for g in groups.all() {
@@ -184,10 +256,10 @@ fn draw_top_bar(ui: &mut Ui, _eco: &Economy, ai: &crate::ai_brain::AiBrain, r: R
     }
 
     let segments = [
-        ("Ammo", "—", false, "Ammo — consumed by combat. Flows from depots (Phase 4)."),
-        ("Fuel", "—", false, "Fuel — consumed by vehicles. Flows from refineries (Phase 4)."),
+        ("Ammo",     "—", false, "Ammo — consumed by combat. Flows from depots (Phase 4)."),
+        ("Fuel",     "—", false, "Fuel — consumed by vehicles. Flows from refineries (Phase 4)."),
         ("Supplies", "—", false, "Building Supplies — used for construction and repairs (Phase 4)."),
-        ("Parts", "—", false, "Weapon Parts — enables production and reinforcement (Phase 4)."),
+        ("Parts",    "—", false, "Weapon Parts — enables production and reinforcement (Phase 4)."),
     ];
 
     let mut x = r.x + 14.0;
