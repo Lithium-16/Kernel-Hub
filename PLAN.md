@@ -114,7 +114,7 @@ proven under a 1,000+-unit stress test.
 - [ ] **A\*** — single-unit fallback for stragglers/special cases (deferred; flow field covers group moves).
 - [x] **Local avoidance** — separation + "around" steering via the spatial grid; units don't stack. ✓
 - [x] **Movement system** — turn-then-move steering (flow/slot dir + avoidance); positional collision pass; stall-based arrival. ✓
-- [x] **Formation slots** — group moves assign each unit its own slot in a packed block (greedy nearest) and seek it once near the formation anchor, instead of all crushing one point. Killed the long-standing packed-group jitter: 600-unit residual motion 2.30 → 0.06 px/tick. `COLDWAR_SETTLE` headless jitter metric. ✓ 2026-06-18
+- [x] **Formation slots** — group moves assign each unit its own slot in a packed block (greedy nearest) and seek it once near the formation anchor, instead of all crushing one point. Movers shove idle/arrived units aside so the block actually fills (no edge-jamming). Killed the packed-group jitter AND made formations settle perfectly: 200/600/1200-unit residual motion now 0.00 px/tick, 0 units left moving. `COLDWAR_SETTLE` headless jitter metric. ✓ 2026-06-18, push-through 2026-06-21
 - [ ] **Staggered ticks** — not needed yet (1,200-unit tick ≈ 2.3 ms); available lever if sim/render grows.
 - [x] **Stress harness** — `COLDWAR_UNITS` spawns N; overlay reports tick ms + counts (1,200 verified). ✓
 

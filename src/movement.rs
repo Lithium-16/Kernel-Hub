@@ -175,8 +175,9 @@ pub fn settle_arrivals(world: &mut World) {
     }
 }
 
-/// Keep unit centers apart. Moving units yield to idle ones; pushes never move a
-/// unit onto impassable terrain.
+/// Keep unit centers apart. Moving units push idle/arrived units aside (so groups can
+/// pack into their formation slots); two movers split the correction. Pushes never move
+/// a unit onto impassable terrain.
 pub fn resolve_collisions(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, passes: u32) {
     let moving: HashSet<Entity> = world.query::<&MoveOrder>().iter().map(|(e, _)| e).collect();
     for _ in 0..passes {
@@ -192,9 +193,12 @@ pub fn resolve_collisions(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, 
                 let dist = d.length();
                 let overlap = COLLISION_DIAM - dist;
                 if dist > 0.0001 && overlap > COLLISION_SLOP {
+                    // Movers shove idle/arrived units aside (instead of treating them as
+                    // immovable walls), so a group can actually push into its formation
+                    // slots instead of jamming at the edge. Two movers split evenly.
                     let w = match (self_moving, moving.contains(&other)) {
-                        (false, true) => 0.0,
-                        (true, false) => 1.0,
+                        (false, true) => 0.85, // I'm idle, a mover is pushing through me
+                        (true, false) => 0.15, // I'm moving into an idle unit: barely deflect
                         _ => 0.5,
                     };
                     push += d / dist * (overlap - COLLISION_SLOP) * w;
