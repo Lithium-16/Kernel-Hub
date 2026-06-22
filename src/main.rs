@@ -520,6 +520,19 @@ async fn main() {
             }
         }
 
+        // --- Restart (R): wipe the field, reset nav, respawn both armies ---
+        if is_key_pressed(KeyCode::R) {
+            let all: Vec<Entity> = world.iter().map(|e| e.entity()).collect();
+            for e in all {
+                let _ = world.despawn(e);
+            }
+            nav = NavGrid::from_map(&map);
+            flow_cache.clear();
+            placing = None;
+            spawn_army(&mut world, &defs, &sprites, PLAYER_FACTION, map_px * 0.5 + vec2(-600.0, 0.0), player_tint, count);
+            spawn_army(&mut world, &defs, &sprites, ENEMY_FACTION, map_px * 0.5 + vec2(600.0, 0.0), enemy_tint, count);
+        }
+
         // --- Fixed-timestep simulation ---
         let t0 = get_time();
         accumulator += get_frame_time();
@@ -565,6 +578,34 @@ async fn main() {
             hud::HudAction::None => {}
         }
         minimap.draw(&world, view, hud_layout.minimap);
+
+        // --- Win/lose banner (only once a battle has been spawned) ---
+        if count > 0 {
+            let mut player_alive = 0usize;
+            let mut enemy_alive = 0usize;
+            for (_e, (f, _h)) in world.query::<(&Faction, &components::Health)>().iter() {
+                if f.0 == PLAYER_FACTION {
+                    player_alive += 1;
+                } else if f.0 == ENEMY_FACTION {
+                    enemy_alive += 1;
+                }
+            }
+            let banner = if player_alive == 0 {
+                Some(("DEFEAT", Color::new(1.0, 0.4, 0.4, 1.0)))
+            } else if enemy_alive == 0 {
+                Some(("VICTORY", Color::new(0.5, 1.0, 0.6, 1.0)))
+            } else {
+                None
+            };
+            if let Some((text, color)) = banner {
+                let big = 74.0;
+                let d = measure_text(text, None, big as u16, 1.0);
+                draw_text(text, (sw - d.width) * 0.5, sh * 0.42, big, color);
+                let hint = "Press R to restart";
+                let dh = measure_text(hint, None, 28, 1.0);
+                draw_text(hint, (sw - dh.width) * 0.5, sh * 0.42 + 46.0, 28.0, WHITE);
+            }
+        }
 
         next_frame().await;
 

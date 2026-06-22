@@ -211,7 +211,7 @@ fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &S
     let _ = sim;
     // Below the top resource bar so the two don't overlap.
     draw_text(
-        "Drag/Shift-select, dbl-click=type, RMB move (Shift=queue), Ctrl+1-9 group, B=build  (WASD pan)",
+        "Drag-select, RMB move (Shift=queue), dbl-click=type, Ctrl+1-9 group, B=build, R=restart  (WASD pan)",
         16.0,
         crate::hud::TOP_H + 24.0,
         24.0,
