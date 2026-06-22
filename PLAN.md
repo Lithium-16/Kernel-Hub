@@ -176,162 +176,109 @@ world); resizes cleanly; screenshot; tests for layout + input-capture logic.
 
 ---
 
-## Phase 3 — Units & Buildings infrastructure + autonomy core
-**Goal:** the full **unit AND building** object model + autonomy — Forms/abilities/transitions,
-building placement/construction/production, utility AI + job system + squads — so minimal player input
-produces sensible behavior for both units and buildings.
+## Phase 3 — Combat Groups + Reconnaissance (current)
+**Goal:** the two features the new direction depends on most before logistics can be layered on top.
+Individual units still exist and fight — Combat Groups are a command layer above them.
+Fog of war makes geography matter.
 
 **Build:**
-- [ ] **Registry + event bus + system traits** — the extensibility scaffolding (Phase-1 debt); the
-      dispatch layer abilities/effects/conditions/transitions register into.
-- [ ] **Ability framework** — `AbilityDef` + effect registry; **auto-cast policies** (Manual/Auto/Off
-      + `AutoRule{condition, target, priority}`) scored inside the utility AI.
-- [ ] **Forms & transitions** — unit state machine (mobile / sieged / deploy / construction phases);
-      a building is just an immobile Form; HP carries over as %.
-- [~] **Command-card UI** — `hud.rs` command card (bottom-left, appears on selection) with Stop +
-      stance buttons (active stance outlined) done 2026-06-21; ability buttons (auto-generated from
-      Form abilities), cooldown/disabled/toggle states, and targeting modes still to add.
-- [~] **Combat core** — `Health` + `Weapon` (data-driven hp/range/dps per unit type), two factions
-      (player vanguard + enemy crimson, tinted), direct-fire `combat::step` (nearest enemy in range each
-      tick, hitscan), death/despawn, health bars, player-faction-only selection. Done 2026-06-21,
-      unit-tested. Basic enemy AI (whole force periodically advances on the player's centroid)
-      done 2026-06-21. Projectiles, armor table, stance-driven advance, smarter AI still to add.
-- [ ] **Utility AI** — per-unit scorer over candidate actions (idle, take-job, move-to, engage,
-      retreat, resupply); pick highest; standing orders bias weights. Runs on staggered schedule.
-- [~] **Standing orders & stances** — `Stance` component (Aggressive / Defensive / Hold-Ground) set
-      per selection via the command card, unit-tested (`dominant`/`set_selected`), Hold-Ground halts
-      movement, done 2026-06-21; Hold-fire / Cautious, retreat-at-X%-HP, auto-resupply, and combat
-      effects land with the combat system.
-- [ ] **Job system** — global job board (haul, build-assist, repair, garrison, reinforce); idle
-      units claim by priority + proximity; jobs have state (open/claimed/done) and re-queue on fail.
-- [ ] **Squad/formation layer** — named squads; **formations** (line/column/wedge/spread); squad-level
-      orders fan out; shared flow-field target; **squad templates** define desired composition;
-      auto-reinforce hook (stubbed until production exists).
-- [~] **Selection & command UI** — click, drag-box, **Shift-add**, **double-click select-type-on-screen**,
-      **control groups 1–9** (Ctrl+N assign, N recall, dead-member pruning, unit-tested), and
-      **Shift+RMB waypoint queueing** (formation offset held across legs so the block translates along
-      the path; rendered as faint rings) done 2026-06-21; attack-move / patrol / guard / garrison /
-      retreat / rally / ability order types and **opt-in squad drafting** still to add.
-- [ ] **Zones** — paint defense/staging/no-go zones that orders and jobs reference.
-- [ ] **Doctrine presets** — save/apply policy bundles (stances + priorities) to a force in one action.
-- [~] **Building placement** — B cycles building types; ghost preview with grid snap + validity
-      (terrain + footprint + unit overlap, green/red), left-click commits, footprint tiles blocked in
-      nav (flow cache cleared so units path around), multi-place mode, Esc/RMB cancels. Done 2026-06-21,
-      validity unit-tested (`building.rs`). Build-radius / resource-node rules + rotation still to add.
-- [ ] **Construction** — builders take build jobs; site → frame → complete Forms; gradual drain;
-      cancel (refund) / repair.
-- [ ] **Production** — producer buildings: queue + rally point + exit; bills; research queue.
-      (Resource *costs* wired in Phase 4; queue / placement / construction *systems* built here.)
-- [ ] **Building command card + deploy/undeploy** — buildings use the same card; MCV↔HQ transitions.
+- [~] **Combat core** — `Health`, `Weapon`, discrete shots, turret aiming, two factions, health bars. ✓ 2026-06-21
+- [~] **Selection & command UI** — drag-box, Shift-add, double-click-type, control groups 1–9, waypoint queueing. ✓ 2026-06-21
+- [~] **Building placement** — ghost preview, grid snap, validity check, nav-blocking. ✓ 2026-06-21
+- [~] **Stances** — Aggressive / Defensive / Hold-Ground on command card. ✓ 2026-06-21
+- [ ] **Combat Group entity** — `CombatGroup` owns a list of unit entities; group card UI (name, strength bar, supply status, losses); player selects a group, not individuals.
+- [ ] **Group orders** — Advance To (attack-move: group moves and engages en route), Hold Position, Withdraw, Request Artillery Support, Reinforce.
+- [ ] **Attack-move** — group advances toward target tile; units engage enemies encountered; does not stop at first enemy.
+- [ ] **Fog of war** — tiles hidden (black) until revealed by unit vision radius; last-seen shows dimmed terrain; Radar building reveals large fixed area; enemy blips on radar (location only, not unit type).
+- [ ] **Geographic terrain tiles** — Mountain (impassable), Mountain Pass (narrow passable), River (impassable except at crossings), Valley, Chokepoint; movement speed and vision modifiers per tile type.
+- [ ] **Recon Group unit type** — high vision radius, fast, light armor; purpose-built for reconnaissance.
 
-**Key types:** `Form`, `Ability`/`AbilityDef`, `AutoRule`, `Transition`, `UtilityAgent`, `StandingOrder`,
-`Job`/`JobBoard` (incl. `BuildJob`), `Squad`, `Zone`, `Selection`, `Placement`, `ProductionQueue`.
+**Key types:** `CombatGroup`, `GroupOrder`, `FogOfWar`, `TileProperties`, `VisionRadius`.
 
-**Acceptance:** undrafted units idle→claim jobs and defend zones with no per-unit input; a squad
-moves/holds as one; drafting a squad gives direct control; **a builder constructs a placed building
-(site→complete) and a producer building queues + rallies a unit; deploy↔undeploy works**; an auto-cast
-ability fires on its condition; screenshot; tests for utility scoring, job claim/release, and a transition.
+**Acceptance:** player forms a group, orders it to advance, it engages enemies en route; fog hides the map until explored; radar reveals a large area; geographic tiles affect movement; `COLDWAR_ASSERT=formation_fills` still passes.
 
 ---
 
-## Phase 4 — Economy, Logistics & Infrastructure (the identity phase)
-**Goal:** the full multi-stage, self-running supply chain — extraction → refining → manufacturing →
-storage → distribution → front — plus **infrastructure as a core build/plan pillar** (roads, rail,
-power, supply networks) with a blueprint/planning mode, throughput, and coverage.
+## Phase 4 — Physical Resources + Extraction
+**Goal:** the first economic loop. Resources are physical quantities in the world, not numbers in a spreadsheet. Weapons stop firing when ammo runs out. Vehicles stop when fuel runs out.
 
 **Build:**
-- [ ] **Resources** — Ore, Crude (raw); Metal, Fuel (refined); Components (manufactured); Power (flow).
-- [ ] **Production buildings** — Extractor, Refinery, Foundry, factories; **production bills**
-      (standing orders: "keep N, then pause"); gradual resource drain while producing.
-- [ ] **Supply/network graph** — depots/conduits as nodes, in-range/connected edges; carries
-      resources + power; throughput (bandwidth) per edge; coverage radius.
-- [ ] **Power grid** — production vs consumption balance per tick; buildings stall on deficit.
-- [ ] **Storage** — stockpile zones + warehouses/depots with priorities & capacity.
-- [ ] **Pull-based hauling** — dumps/stockpiles have target levels; shortfalls emit haul jobs;
-      Supply Trucks (from Phase 3 job system) fulfill them. Convoys burn Fuel.
-- [ ] **Infrastructure construction** — roads (speed + throughput), **rail backbone** with stations,
-      **power transmission lines/pylons**, depots/hubs, pipelines, fortifications; built by
-      construction units via the job system; terrain-aware (bridges/cuts).
-- [ ] **Blueprint / planning mode** — ghost-place a whole network, validate, then commit to build;
-      save/copy plans. (A headline feature — infrastructure planning is a core pillar.)
-- [ ] **Throughput, upgrades & vulnerability** — links have capacity; upgrade to scale; infra can be
-      damaged/destroyed and repaired; cutting enemy roads/power/supply is a strategic objective.
-- [ ] **Supply coverage** — "is tile X supplied?" query (used by combat resupply in Phase 5).
-- [ ] **Resource flow solver** — deterministic per-tick balance pass across the network.
-- [ ] **Research / upgrades** — research buildings produce `UpgradeDef`s (faction-wide, build-gated);
-      effective stat = base + active upgrades; effects can unlock abilities/forms.
-- [ ] **Economy UI** — resource readouts, power balance, bills, network overlay.
+- [ ] **Resource types** — Ore, Oil (strategic); Ammo, Fuel, Building Supplies, Weapon Parts (logistics). All stored as integer quantities in depots.
+- [ ] **Extraction buildings** — Mine (on Ore Basin tile), Oil Pump (on Oil Field tile). Engineers build them from blueprints. Produce resource over time into nearest depot.
+- [ ] **Processing buildings** — Processing Facility (Ore → Building Supplies + Weapon Parts), Fuel Refinery (Oil → Fuel), Ammo Factory (Weapon Parts → Ammo). Engineers build from blueprints.
+- [ ] **Depot** — stores all resource types; visible stockpile bar per resource (amber=low, red=empty); supply radius around it.
+- [ ] **Ammo consumption** — units draw ammo from nearby depot before firing; weapons stop when ammo=0.
+- [ ] **Fuel consumption** — vehicles consume fuel on movement; stop when fuel=0.
+- [ ] **Geographic resource regions** — Ore Basin, Oil Field as named tile regions; visible on map and Region View.
+- [ ] **Construction from blueprints** — Engineer Group assigned to blueprint auto-paths to it and builds, consuming Building Supplies from nearest depot.
 
-**Key types:** `Resource`, `Stockpile`, `ProductionBill`, `SupplyNode`/`SupplyEdge`/`SupplyGraph`,
-`PowerGrid`, `HaulJob`, `Road`.
+**Key types:** `ResourceType`, `Stockpile`, `Depot`, `Extractor`, `ProcessingBuilding`, `OreBasin`, `OilField`.
 
-**Acceptance:** a base auto-refines raw → components and auto-distributes to a forward dump with
-zero manual hauling; cutting a route starves the downstream dump; power deficit stalls buildings;
-network overlay screenshot; a blueprinted road+power network builds out and a destroyed segment
-cuts throughput; tests for flow solver + coverage + bill logic.
+**Acceptance:** place a mine blueprint, assign engineers, mine builds and ore flows into depot; ammo factory consumes weapon parts and produces ammo; a unit runs out of ammo and stops firing; a vehicle runs out of fuel and stops moving; depot bars visible and accurate.
 
 ---
 
-## Phase 5 — Combat (abstracted, logistics-fed)
-**Goal:** auto-resolving combat driven by positioning, cover, and supply — combat as the demand
-signal on the logistics system.
+## Phase 5 — Roads + Supply Routes + Trucks
+**Goal:** the logistics layer. The player draws routes; the system executes. A cut road immediately reduces throughput.
 
 **Build:**
-- [ ] **Health/damage** — HP, death, wreckage; damage application system.
-- [ ] **Weapons & projectiles** — projectile entities (travel time, can miss movers); range, ROF,
-      damage; **splash** flag (artillery).
-- [ ] **Damage table** — `armor_mult[damage_type][armor_class]` (subsumes the AA rule; gives counters).
-- [ ] **Targeting** — auto-acquire via spatial grid; threat/priority selection.
-- [ ] **Cover & terrain** — accuracy/range modifiers from elevation/cover tiles; positioning matters.
-- [ ] **Suppression** — incoming fire reduces effectiveness/forces caution (ties to utility AI).
-- [ ] **Ammo, fuel & upkeep** — burn per volley/move + a continuous upkeep trickle; low units auto-pull
-      resupply from nearest forward dump via job system; starved units can't fire/maneuver.
-- [ ] **Damage/repair** — Engineers repair; wreck salvage (optional).
-- [ ] **Combat feedback** — health bars, hit/explosion FX, suppression indicator.
+- [ ] **Road blueprint tool** — player clicks two points, ghost preview shown, confirm places road tiles; engineers auto-claim and build using Building Supplies.
+- [ ] **Road tiers** — off-road (1× speed), dirt road (2×), paved (3×); road tile type determines convoy speed.
+- [ ] **Road damage + repair** — artillery damages road segments; damaged road reverts toward off-road speed; engineers auto-repair if Building Supplies available and repair job assigned.
+- [ ] **Supply Route tool** — player selects origin depot, destination depot, resource type, priority; system creates the route.
+- [ ] **Truck system** — trucks spawn from origin depot, follow road network (pathfind along road tiles), deliver resource to destination, return; visible as vehicle sprites.
+- [ ] **Route display** — active routes shown as colored lines on map; alert icon when route disrupted (road cut, depot empty, trucks destroyed).
+- [ ] **Convoy ambush** — enemy units can attack trucks; destroyed truck loses cargo; player sees notification.
 
-**Key types:** `Health`, `Weapon`, `Projectile`, `Armament`, `Ammo`, `Suppression`, `DamageEvent`.
+**Key types:** `RoadTile`, `RoadTier`, `SupplyRoute`, `Truck`, `RouteAlert`.
 
-**Acceptance:** two armies auto-fight on positioning + supply with no micro; a unit cut off from
-supply degrades and stops firing; AA/air interaction correct; screenshot of a supplied vs starved
-engagement; tests for damage, AA targeting rules, ammo/resupply.
+**Acceptance:** player draws a road, engineers build it; player creates a route, trucks drive it; artillery damages the road, throughput drops, player sees alert; engineers repair the road, throughput recovers; trucks can be destroyed.
 
 ---
 
-## Phase 6 — Enemy AI (commander-level)
-**Goal:** a macro AI opponent that plays the same game you do — economy, logistics, and attacks.
+## Phase 6 — Reinforcements + Region System + Interdiction
+**Goal:** the operational layer. Groups track losses, regions appear on the strategic map, supply lines can be interdicted.
 
 **Build:**
-- [ ] **Economic AI** — expand to nodes, build extractors/refineries/foundries, keep bills running.
-- [ ] **Logistics AI** — build depots/roads, maintain forward supply, defend corridors.
-- [ ] **Military AI** — mass to a threshold, form squads, attack-move toward objectives; defend if hit.
-- [ ] **Strategic targeting** — value targets (incl. raiding enemy supply lines as a win path).
-- [ ] **Difficulty knobs** — economy multiplier, aggression threshold, reaction time.
-- [ ] **AI debug view** — show AI intent/state for tuning.
+- [ ] **Loss tracking** — Combat Group card shows current/original strength (34/50 tanks); tracks kills against the group's roster.
+- [ ] **Reinforce panel** — player clicks Reinforce on a group; panel shows available sources (factories, reserve depots, build queues) with travel time estimates; player chooses; replacement units path to group automatically.
+- [ ] **Region system** — named strategic areas (Ore Basin, Mountain Pass, Oil Field, Valley, etc.); zoom out past threshold → Region View; each region shows ownership, military presence, stockpile levels, threat level, resource output.
+- [ ] **Region ownership** — region controlled by faction with military presence + a depot there; contested when both factions present; losing a region cuts resource output immediately.
+- [ ] **Logistics interdiction** — Artillery Group can be ordered to fire on road segments (destroying them); Recon and light groups can attack convoys; enemy can do the same.
+- [ ] **Alternate route** — if primary road cut, player can draw alternate route around it; system switches trucks automatically.
 
-**Key types:** `AiBrain`, `AiGoal`, `ThreatMap`, difficulty config.
+**Key types:** `CombatGroupRoster`, `ReinforceSource`, `Region`, `RegionOwnership`, `InterdictionTarget`.
 
-**Acceptance:** AI builds a functioning logistics economy and mounts coordinated attacks; raids
-player supply when advantageous; a full match is playable start→finish; tests for AI decision steps
-where feasible.
+**Acceptance:** group takes losses and card shows reduced strength; player reinforces from a factory and units arrive; zooming out shows Region View with cards; enemy cuts a road and trucks slow; player creates alternate route and trucks reroute.
 
 ---
 
-## Phase 7 — Polish, UI & match rules
-**Goal:** a complete, playable single-player match with all the framing systems.
+## Phase 7 — Automated Rear Defense + Win Conditions + Full Loop
+**Goal:** the Eastern Pass reference scenario is fully playable. Automated systems handle rear threats without babysitting. Win conditions close the loop.
 
 **Build:**
-- [ ] **Fog of war** — unexplored/explored-dimmed/visible; per-unit sight on spatial grid.
-- [ ] **Minimap** — terrain, units, supply network, alerts.
-- [ ] **Command/policy UI** — bills, zones, network design, standing orders, drafting.
-- [ ] **Configurable victory conditions** — annihilation / decapitation / economic / survival /
-      custom combos selected at match setup.
-- [ ] **Match setup** — pick faction, map, opponents, rules, difficulty.
-- [ ] **Audio** — SFX + ambient (lightweight).
-- [ ] **A real playable map** + a short scenario to validate the whole loop.
-- [ ] **Performance pass** — confirm scale targets hold in a full match (sim LOD, render budget).
+- [ ] **Radar threat alerts** — Radar Station detects enemy incursion in its area → notification with location, severity, "Send QRF" button.
+- [ ] **QRF designation** — player marks a Combat Group as QRF for a zone; group auto-moves to respond to threats, returns to position after.
+- [ ] **Patrol routes** — player draws patrol path, assigns group; group cycles continuously.
+- [ ] **Bunker garrison** — infantry group assigned to a Bunker gains cover bonus and reduced damage.
+- [ ] **Gun Turret ammo** — Gun Turrets draw ammo from nearest depot; stop firing when empty.
+- [ ] **Win conditions** — Decapitation (destroy HQ), Economic Collapse (Weapon Parts=0 + factory destroyed), Territorial Control (hold all resource regions for 10 min). Selectable at match start.
+- [ ] **Enemy AI — operational level** — enemy expands toward resource regions, builds supply routes, attacks objectives, interdicts player supply lines when advantageous.
+- [ ] **Eastern Pass playable** — designed map with mountain pass, two resource regions, chokepoint; verifies entire nine-phase loop.
 
-**Acceptance:** a full match is winnable/losable under at least two victory rulesets at the scale
-target with acceptable performance; fog/minimap/UI functional; screenshots of a complete match.
+**Key types:** `QRFZone`, `PatrolRoute`, `GarrisonBonus`, `WinCondition`, `AiOperationalGoal`.
+
+**Acceptance:** Eastern Pass scenario plays through all nine phases; radar alerts fire correctly; QRF responds and returns; win conditions trigger correctly; enemy AI builds a logistics network and attacks.
+
+---
+
+## Phase 8 — Content, Polish, Campaign
+**Build:**
+- [ ] Full unit and building roster (all types from §7.3–§7.4).
+- [ ] Designed campaign map. Eastern Pass as the tutorial/first mission.
+- [ ] Audio: command acks, weapon fire, impact, ambient.
+- [ ] Full UI polish pass (icons, tooltips, animations).
+- [ ] Performance pass at full scale (500+ units per side, complex road network).
 
 ---
 
@@ -370,12 +317,7 @@ Standing practice (owner, 2026-06-21): continuously test/compare features and co
 well-known RTS games (see PROJECT.md §12) and pull the next-most-impactful idea from here each
 iteration. Keep this list fresh — add as we learn, check off as we ship.
 
-**Have (matches genre standard):** flow-field group movement (SupCom/PA) · formation slots with
-push-through · control groups 1–9 + double-click-type + shift-add (SC2) · command card + stances ·
-waypoint queueing (shift) · minimap click/drag-pan · building placement w/ ghost+grid-snap (C&C) ·
-power as a gated resource (C&C) · health bars + direct-fire combat · win/lose + restart ·
-flying bullet projectiles · noise-detailed terrain (lakes/cliffs/ore) w/ per-tile variation ·
-randomized multi-prong enemy start.
+**Have:** flow-field movement · formation slots with push-through · control groups 1–9 · shift-add/double-click-type · command card + stances · waypoint queueing · minimap · building placement (ghost+snap) · discrete combat (turrets aim, per-shot tracers, range circles) · health bars · win/lose + restart · noise map with terrain variation · randomized enemy start · debug suite (COLDWAR_ASSERT/QUERY/EVENTLOG).
 
 **High-impact gaps vs reference games (reprioritized for operational RTS direction):**
 1. **Combat Groups** (SupCom group control, CoH unit cohesion) — *the* defining feature of the new
