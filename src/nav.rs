@@ -15,21 +15,37 @@ pub struct NavGrid {
     pub w: usize,
     pub h: usize,
     passable: Vec<bool>,
+    /// Terrain movement cost, scaled ×10 (ground=10, road=5, pass=20, crossing=25).
+    /// Stored as u8; max representable cost ×10 is 255 (well above any tile value).
+    tile_cost_x10: Vec<u8>,
 }
 
 impl NavGrid {
     pub fn from_map(map: &TileMap) -> Self {
-        let mut passable = vec![false; map.width * map.height];
+        let n = map.width * map.height;
+        let mut passable = vec![false; n];
+        let mut tile_cost_x10 = vec![10u8; n];
         for y in 0..map.height {
             for x in 0..map.width {
-                passable[y * map.width + x] = map.get(x, y).passable();
+                let t = map.get(x, y);
+                let i = y * map.width + x;
+                passable[i] = t.passable();
+                // Store cost ×10 so integer arithmetic is lossless.
+                // Clamp to u8::MAX (25.5) — no tile comes close.
+                tile_cost_x10[i] = (t.move_cost() * 10.0).min(255.0) as u8;
             }
         }
-        Self { w: map.width, h: map.height, passable }
+        Self { w: map.width, h: map.height, passable, tile_cost_x10 }
     }
 
     pub fn passable(&self, x: usize, y: usize) -> bool {
         self.passable[y * self.w + x]
+    }
+
+    /// Movement cost for a tile, ×10 (ground=10, road=5, pass=20, crossing=25).
+    #[inline]
+    pub fn tile_cost_x10(&self, x: usize, y: usize) -> u32 {
+        self.tile_cost_x10[y * self.w + x] as u32
     }
 
     /// Mark a tile impassable (e.g. a placed building). Callers must invalidate any
@@ -41,11 +57,15 @@ impl NavGrid {
     }
 }
 
-const ORTHO: u32 = 10;
-const DIAG: u32 = 14;
-/// Treat blocked/edge neighbours as this much costlier than the current cell, so the
-/// flow gradient steers units away from walls before they reach them.
-const WALL_PENALTY: u32 = 40;
+// Base step costs ×10 so they multiply cleanly with tile_cost_x10 / 10.
+// ground (cost_x10=10): ortho step = ORTHO_BASE * 10 / 10 = 100  (was 10)
+//   pass (cost_x10=20): ortho step = 100 * 20 / 10 = 200          (was 10)
+//   road (cost_x10= 5): ortho step = 100 *  5 / 10 =  50          (was 10)
+const ORTHO_BASE: u32 = 100;
+const DIAG_BASE: u32 = 141; // ≈ sqrt(2) * 100
+/// Treat blocked/edge neighbours as this much costlier, so the gradient bends away
+/// from walls. Scaled ×10 relative to the old WALL_PENALTY=40.
+const WALL_PENALTY: u32 = 400;
 
 /// A per-tile flow direction toward a goal, from an 8-neighbour Dijkstra cost field.
 pub struct FlowField {
@@ -66,8 +86,8 @@ impl FlowField {
         }
 
         const NB: [(i32, i32, u32); 8] = [
-            (1, 0, ORTHO), (-1, 0, ORTHO), (0, 1, ORTHO), (0, -1, ORTHO),
-            (1, 1, DIAG), (1, -1, DIAG), (-1, 1, DIAG), (-1, -1, DIAG),
+            (1, 0, ORTHO_BASE), (-1, 0, ORTHO_BASE), (0, 1, ORTHO_BASE), (0, -1, ORTHO_BASE),
+            (1, 1, DIAG_BASE), (1, -1, DIAG_BASE), (-1, 1, DIAG_BASE), (-1, -1, DIAG_BASE),
         ];
 
         while let Some(Reverse((c, x, y))) = heap.pop() {
@@ -89,7 +109,8 @@ impl FlowField {
                 {
                     continue;
                 }
-                let nc = c + step;
+                // Multiply base step by destination tile cost (÷10 to undo the ×10 scale).
+                let nc = c + step * nav.tile_cost_x10(nx, ny) / 10;
                 if nc < cost[ny * w + nx] {
                     cost[ny * w + nx] = nc;
                     heap.push(Reverse((nc, nx, ny)));
@@ -207,5 +228,21 @@ mod tests {
         let dir = ff.dir_at(w);
         assert!(dir.length() > 0.5, "flow direction should be set");
         assert!(dir.x > 0.0, "flow should point toward goal (to the right), got {dir:?}");
+    }
+
+    #[test]
+    fn terrain_costs_stored_correctly() {
+        use crate::map::Tile;
+        let (map, _) = TileMap::generate(64, 64);
+        let nav = NavGrid::from_map(&map);
+        // Verify the cost lookup matches what move_cost() would give.
+        for y in 0..map.height {
+            for x in 0..map.width {
+                let t = map.get(x, y);
+                let expected = (t.move_cost() * 10.0).min(255.0) as u8;
+                let got = nav.tile_cost_x10[y * nav.w + x];
+                assert_eq!(got, expected, "cost mismatch at ({x},{y}) tile={t:?}");
+            }
+        }
     }
 }
