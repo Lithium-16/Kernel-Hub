@@ -38,6 +38,7 @@ pub fn present(
     draw_move_orders(world);
     draw_selection_rings(world, sprites);
     draw_entities(world, sprites);
+    draw_tracers(world);
     draw_health_bars(world);
     draw_hitboxes(world);
 
@@ -90,6 +91,16 @@ fn draw_tiles(map: &TileMap, view: Rect, sprites: &Sprites) {
                 },
             );
         }
+    }
+}
+
+/// Shot tracers (faded by remaining lifetime), colored by the shooter's side.
+fn draw_tracers(world: &hecs::World) {
+    use crate::components::{Tracer, TRACER_TTL};
+    for (_e, t) in world.query::<&Tracer>().iter() {
+        let a = (t.ttl / TRACER_TTL).clamp(0.0, 1.0);
+        let c = Color::new(t.color.r, t.color.g, t.color.b, a);
+        draw_line(t.from.x, t.from.y, t.to.x, t.to.y, 1.5, c);
     }
 }
 
@@ -164,13 +175,14 @@ fn draw_entities(world: &hecs::World, sprites: &Sprites) {
     }
 }
 
-/// Move-order feedback: a faint line from each moving unit to its goal, and a
-/// destination marker (ring + cross) at each distinct goal.
+/// Move-order feedback for the **selected** units only (drawing a line for every moving
+/// unit crisscrosses the field and reads like weapon fire). A faint line to each goal +
+/// a destination marker at each distinct goal.
 fn draw_move_orders(world: &hecs::World) {
-    let line = Color::new(0.45, 1.0, 0.55, 0.18);
+    let line = Color::new(0.45, 1.0, 0.55, 0.22);
     let mark = Color::new(0.45, 1.0, 0.55, 0.95);
     let mut goals: Vec<Vec2> = Vec::new();
-    for (_e, (pos, order)) in world.query::<(&Position, &MoveOrder)>().iter() {
+    for (_e, (pos, order, _sel)) in world.query::<(&Position, &MoveOrder, &Selected)>().iter() {
         draw_line(pos.0.x, pos.0.y, order.goal.x, order.goal.y, 1.0, line);
         if !goals.iter().any(|g| g.distance(order.goal) < 2.0) {
             goals.push(order.goal);
@@ -182,10 +194,10 @@ fn draw_move_orders(world: &hecs::World) {
         draw_line(g.x, g.y - 9.0, g.x, g.y + 9.0, 1.5, mark);
     }
 
-    // Queued waypoints (Shift+RMB): fainter rings at each distinct upcoming anchor.
+    // Queued waypoints (Shift+RMB) for selected units: fainter rings at each anchor.
     let wp = Color::new(0.45, 1.0, 0.55, 0.5);
     let mut waypoints: Vec<Vec2> = Vec::new();
-    for (_e, q) in world.query::<&crate::components::OrderQueue>().iter() {
+    for (_e, (q, _sel)) in world.query::<(&crate::components::OrderQueue, &Selected)>().iter() {
         for &a in &q.anchors {
             if !waypoints.iter().any(|p| p.distance(a) < 2.0) {
                 waypoints.push(a);

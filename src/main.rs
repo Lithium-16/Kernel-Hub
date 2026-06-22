@@ -571,7 +571,7 @@ async fn main() {
             movement::resolve_collisions(&mut world, &grid, &nav, map_px, 2);
             movement::settle_arrivals(&mut world);
             grid.rebuild(&world);
-            combat::step(&mut world, &grid, tick_dt);
+            combat::step(&mut world, &grid, tick_dt, PLAYER_FACTION);
             sim.tick();
             accumulator -= tick_dt;
         }

@@ -4,19 +4,38 @@
 //! enough to make two armies actually fight.
 
 use hecs::{Entity, World};
+use macroquad::prelude::{Color, Vec2};
 
-use crate::components::{Faction, Health, Position, Weapon};
+use crate::components::{Faction, Health, Position, Tracer, Weapon, TRACER_TTL};
 use crate::spatial::SpatialGrid;
 
-/// One combat tick: acquire targets, apply damage, remove the dead.
-pub fn step(world: &mut World, grid: &SpatialGrid, dt: f32) {
+/// One combat tick: age old tracers, acquire targets, apply damage, spawn tracers,
+/// remove the dead. `player_faction` only picks the tracer color (friendly vs hostile).
+pub fn step(world: &mut World, grid: &SpatialGrid, dt: f32, player_faction: &str) {
+    // Age and retire tracers from previous ticks.
+    let mut expired: Vec<Entity> = Vec::new();
+    for (e, t) in world.query::<&mut Tracer>().iter() {
+        t.ttl -= dt;
+        if t.ttl <= 0.0 {
+            expired.push(e);
+        }
+    }
+    for e in expired {
+        let _ = world.despawn(e);
+    }
+
     let mut damage: Vec<(Entity, f32)> = Vec::new();
+    // (from, to, color) for each shot fired this tick.
+    let mut shots: Vec<(Vec2, Vec2, Color)> = Vec::new();
+    let friendly = Color::new(0.55, 0.85, 1.0, 1.0);
+    let hostile = Color::new(1.0, 0.6, 0.45, 1.0);
 
     for (e, (pos, wpn, fac)) in world.query::<(&Position, &Weapon, &Faction)>().iter() {
         if wpn.dps <= 0.0 {
             continue;
         }
         let mut best: Option<Entity> = None;
+        let mut best_pos = Vec2::ZERO;
         let mut best_d = wpn.range * wpn.range;
         grid.for_neighbors(pos.0, wpn.range, |other, op| {
             if other == e {
@@ -26,16 +45,20 @@ pub fn step(world: &mut World, grid: &SpatialGrid, dt: f32) {
             if d2 > best_d {
                 return;
             }
-            // Enemy = has a Faction that differs from ours, and is damageable.
+            // Enemy = has a Faction that differs from ours (no friendly fire), and is
+            // damageable.
             let is_enemy = world.get::<&Faction>(other).map(|f| f.0 != fac.0).unwrap_or(false)
                 && world.get::<&Health>(other).is_ok();
             if is_enemy {
                 best_d = d2;
                 best = Some(other);
+                best_pos = op;
             }
         });
         if let Some(t) = best {
             damage.push((t, wpn.dps * dt));
+            let color = if fac.0 == player_faction { friendly } else { hostile };
+            shots.push((pos.0, best_pos, color));
         }
     }
 
@@ -43,6 +66,10 @@ pub fn step(world: &mut World, grid: &SpatialGrid, dt: f32) {
         if let Ok(h) = world.query_one_mut::<&mut Health>(t) {
             h.cur -= amt;
         }
+    }
+
+    for (from, to, color) in shots {
+        world.spawn((Tracer { from, to, color, ttl: TRACER_TTL },));
     }
 
     let dead: Vec<Entity> = world
@@ -79,12 +106,12 @@ mod tests {
         let target = world.spawn((Position(vec2(20.0, 0.0)), Faction("b".into()), Health { cur: 25.0, max: 25.0 }));
 
         let grid = grid_for(&world);
-        step(&mut world, &grid, 1.0); // 1s * 10 dps = 10 damage
+        step(&mut world, &grid, 1.0, "a"); // 1s * 10 dps = 10 damage
         assert!((world.get::<&Health>(target).unwrap().cur - 15.0).abs() < 0.001);
 
         for _ in 0..5 {
             let grid = grid_for(&world);
-            step(&mut world, &grid, 1.0);
+            step(&mut world, &grid, 1.0, "a");
         }
         assert!(world.get::<&Health>(target).is_err(), "target should have died and despawned");
         assert!(world.get::<&Health>(attacker).is_ok(), "attacker should be unharmed");
@@ -102,7 +129,7 @@ mod tests {
         let friend = world.spawn((Position(vec2(15.0, 0.0)), Faction("a".into()), Health { cur: 30.0, max: 30.0 }));
 
         let grid = grid_for(&world);
-        step(&mut world, &grid, 1.0);
+        step(&mut world, &grid, 1.0, "a");
         assert_eq!(world.get::<&Health>(friend).unwrap().cur, 30.0, "friendlies must not take fire");
     }
 
@@ -118,7 +145,7 @@ mod tests {
         let far = world.spawn((Position(vec2(100.0, 0.0)), Faction("b".into()), Health { cur: 20.0, max: 20.0 }));
 
         let grid = grid_for(&world);
-        step(&mut world, &grid, 1.0);
+        step(&mut world, &grid, 1.0, "a");
         assert_eq!(world.get::<&Health>(far).unwrap().cur, 20.0, "out-of-range enemy must be untouched");
     }
 }

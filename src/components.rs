@@ -63,6 +63,18 @@ pub struct Weapon {
     pub dps: f32,
 }
 
+/// A short-lived shot tracer (shooter→target), colored by the shooter's side and faded
+/// over `ttl`. Purely visual; carries no Position/Faction so other systems ignore it.
+pub struct Tracer {
+    pub from: Vec2,
+    pub to: Vec2,
+    pub color: Color,
+    pub ttl: f32,
+}
+
+/// Initial lifetime of a tracer in seconds (also used to compute its fade alpha).
+pub const TRACER_TTL: f32 = 0.12;
+
 /// Per-unit arrival bookkeeping: last tick's position + a stall counter (consecutive
 /// near-goal ticks with little real progress → the unit has effectively arrived).
 pub struct MoveState {
