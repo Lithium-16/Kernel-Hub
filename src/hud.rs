@@ -9,6 +9,7 @@ use macroquad::prelude::*;
 
 use crate::components::{Selected, UnitKind};
 use crate::economy::Economy;
+use crate::stance::{self, Stance};
 use crate::ui::Ui;
 
 /// Top resource-bar height.
@@ -17,11 +18,12 @@ pub const TOP_H: f32 = 34.0;
 pub const BAR_H: f32 = 56.0;
 const SEL_W: f32 = 230.0;
 
-/// Result of the bottom-bar buttons for the main loop to act on.
+/// Result of a HUD interaction for the main loop to act on.
 pub enum HudAction {
     None,
     Stop,
     ClearSel,
+    SetStance(Stance),
 }
 
 /// Anchored rects for every HUD panel this frame, computed before world input so the
@@ -30,25 +32,33 @@ pub struct HudLayout {
     pub top: Rect,
     pub bottom: Rect,
     pub selection: Option<Rect>,
+    pub command: Option<Rect>,
 }
 
 impl HudLayout {
     pub fn compute(world: &World, sw: f32, sh: f32) -> Self {
-        let rows = selection_summary(world).0.len();
+        let (tally, total) = selection_summary(world);
+        let rows = tally.len();
         let selection = (rows > 0).then(|| {
             let h = 34.0 + rows as f32 * 24.0;
             Rect::new(sw - SEL_W - 8.0, sh - BAR_H - 8.0 - h, SEL_W, h)
         });
+        // Command card: bottom-left, above the command bar, only with a selection.
+        let command = (total > 0).then(|| Rect::new(8.0, sh - BAR_H - 8.0 - 104.0, 330.0, 104.0));
         Self {
             top: Rect::new(0.0, 0.0, sw, TOP_H),
             bottom: Rect::new(0.0, sh - BAR_H, sw, BAR_H),
             selection,
+            command,
         }
     }
 
     /// Does a screen point land on any HUD panel? World input is skipped when true.
     pub fn contains(&self, p: Vec2) -> bool {
-        self.top.contains(p) || self.bottom.contains(p) || self.selection.is_some_and(|r| r.contains(p))
+        self.top.contains(p)
+            || self.bottom.contains(p)
+            || self.selection.is_some_and(|r| r.contains(p))
+            || self.command.is_some_and(|r| r.contains(p))
     }
 }
 
@@ -67,12 +77,46 @@ pub fn selection_summary(world: &World) -> (Vec<(String, u32)>, u32) {
     (tally, total)
 }
 
-/// Draw the whole HUD and return any bottom-bar action.
+/// Draw the whole HUD and return any interaction (command card overrides bottom bar).
 pub fn draw(ui: &mut Ui, world: &World, eco: &Economy, layout: &HudLayout) -> HudAction {
     draw_top_bar(ui, eco, layout.top);
-    let action = draw_bottom_bar(ui, world, layout.bottom);
+    let mut action = draw_bottom_bar(ui, world, layout.bottom);
+    if let Some(r) = layout.command {
+        if let Some(a) = draw_command_card(ui, world, r) {
+            action = a;
+        }
+    }
     if let Some(r) = layout.selection {
         draw_selection_panel(ui, world, r);
+    }
+    action
+}
+
+/// Command card: standard commands + stance buttons; the active stance is outlined.
+fn draw_command_card(ui: &mut Ui, world: &World, r: Rect) -> Option<HudAction> {
+    ui.panel(r);
+    ui.label(vec2(r.x + 10.0, r.y + 22.0), "Commands");
+    let mut action = None;
+
+    // Stop (clears orders).
+    if ui.button(Rect::new(r.x + r.w - 84.0, r.y + 6.0, 76.0, 24.0), "Stop") {
+        action = Some(HudAction::Stop);
+    }
+
+    // Stance row, active stance outlined in accent green.
+    let current = stance::dominant(world);
+    let accent = Color::new(0.45, 1.0, 0.55, 0.95);
+    let (bw, bh) = (100.0, 32.0);
+    let mut x = r.x + 10.0;
+    for s in Stance::ALL {
+        let rect = Rect::new(x, r.y + 36.0, bw, bh);
+        if ui.button(rect, s.label()) {
+            action = Some(HudAction::SetStance(s));
+        }
+        if current == Some(s) {
+            draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 2.5, accent);
+        }
+        x += bw + 6.0;
     }
     action
 }

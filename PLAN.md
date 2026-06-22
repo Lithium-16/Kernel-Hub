@@ -158,12 +158,15 @@ produces sensible behavior for both units and buildings.
       + `AutoRule{condition, target, priority}`) scored inside the utility AI.
 - [ ] **Forms & transitions** — unit state machine (mobile / sieged / deploy / construction phases);
       a building is just an immobile Form; HP carries over as %.
-- [ ] **Command-card UI** — auto-generated from the selection's Form abilities + standard commands;
-      cooldown/disabled/toggle states; click/hotkey → fire or targeting mode.
+- [~] **Command-card UI** — `hud.rs` command card (bottom-left, appears on selection) with Stop +
+      stance buttons (active stance outlined) done 2026-06-21; ability buttons (auto-generated from
+      Form abilities), cooldown/disabled/toggle states, and targeting modes still to add.
 - [ ] **Utility AI** — per-unit scorer over candidate actions (idle, take-job, move-to, engage,
       retreat, resupply); pick highest; standing orders bias weights. Runs on staggered schedule.
-- [ ] **Standing orders & stances** — Aggressive / Defensive / Hold-fire / Hold-ground / Cautious;
-      retreat-at-X%-HP; auto-resupply toggle. Set per unit or per squad; persist until changed.
+- [~] **Standing orders & stances** — `Stance` component (Aggressive / Defensive / Hold-Ground) set
+      per selection via the command card, unit-tested (`dominant`/`set_selected`), Hold-Ground halts
+      movement, done 2026-06-21; Hold-fire / Cautious, retreat-at-X%-HP, auto-resupply, and combat
+      effects land with the combat system.
 - [ ] **Job system** — global job board (haul, build-assist, repair, garrison, reinforce); idle
       units claim by priority + proximity; jobs have state (open/claimed/done) and re-queue on fail.
 - [ ] **Squad/formation layer** — named squads; **formations** (line/column/wedge/spread); squad-level

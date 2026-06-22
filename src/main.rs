@@ -26,6 +26,7 @@ mod render;
 mod selection;
 mod sim;
 mod spatial;
+mod stance;
 mod ui;
 
 use assets::Sprites;
@@ -72,6 +73,7 @@ fn spawn_army(world: &mut hecs::World, defs: &Definitions, sprites: &Sprites, ma
             Renderable { sprite, tint, size: unit.radius * 2.6 },
             Faction(unit.faction.clone()),
             components::UnitKind { id: unit.id.clone(), name: unit.name.clone() },
+            stance::Stance::Aggressive,
         ));
     }
 }
@@ -390,6 +392,16 @@ async fn main() {
                 }
             }
             hud::HudAction::ClearSel => clear_selection(&mut world),
+            hud::HudAction::SetStance(s) => {
+                stance::set_selected(&mut world, s);
+                // Hold-Ground also halts current movement.
+                if s == stance::Stance::HoldGround {
+                    let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
+                    for e in sel {
+                        let _ = world.remove_one::<MoveOrder>(e);
+                    }
+                }
+            }
             hud::HudAction::None => {}
         }
 
