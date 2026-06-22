@@ -517,3 +517,29 @@ Remaining:
 - Prefer prose planning the owner can steer in chat over heavy questionnaires.
 - This is on **Windows** (PowerShell primary; Bash available). Game repo dir:
   `C:\Users\patri\Downloads\ClaudeCode\coldwar-rts` (the parent folder holds unrelated projects).
+
+## 12. RTS benchmarking & competitive analysis (standing practice)
+**Standing instruction (owner, 2026-06-21):** continuously test and compare our features and
+code against well-known RTS games, and use those comparisons to keep proposing features. Every
+iteration / increment should ask: *"how do the games that solved this already do it, and are we
+matching or deliberately diverging?"* — then surface concrete suggestions.
+
+**Reference games & what to mine from each:**
+- **Supreme Commander / Total Annihilation / Planetary Annihilation** — flow-field movement at huge
+  scale, strategic zoom, queued/patrol/factory build orders, eco as flow rates (our economy model),
+  area commands. *Closest spiritual reference for scale + macro.*
+- **StarCraft II** — control-group/hotkey muscle memory, control feel, command-card clarity,
+  selection ergonomics (we mirror: groups, double-click-type, shift-add, command card).
+- **Company of Heroes** — cover/suppression, squad cohesion, retreat behavior; informs our
+  abstracted combat + stances.
+- **Age of Empires IV / II** — formations (line/box/wedge), gather/drop-off logistics loops, rally
+  points, idle-villager management → our job board & rally/production.
+- **Command & Conquer / Red Alert** — base building feel, power as a global resource that gates
+  production (we already model power), MCV deploy↔undeploy (our building↔unit transitions).
+- **They Are Billions** — large defensive lines, wall/zone painting, pause-and-plan against waves.
+- **RimWorld / Factorio** — the logistics/jobs/zones/throughput identity (our core pillar), not
+  combat micro.
+
+**How to apply:** when building or polishing a system, note in the commit / PLAN how it compares to
+the reference (matching, simplified, or intentionally different and why). Keep the comparative
+feature backlog in PLAN.md fresh and pull the next-most-impactful idea from it each iteration.

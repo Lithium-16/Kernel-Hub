@@ -317,6 +317,30 @@ target with acceptable performance; fog/minimap/UI functional; screenshots of a 
 - **Extensibility** — registries, event bus, trait boundaries, and versioned schemas established in
   Phase 1 and maintained as a standing rule for every new system.
 
+## RTS comparison & feature backlog (living — review every iteration)
+Standing practice (owner, 2026-06-21): continuously test/compare features and code against
+well-known RTS games (see PROJECT.md §12) and pull the next-most-impactful idea from here each
+iteration. Keep this list fresh — add as we learn, check off as we ship.
+
+**Have (matches genre standard):** flow-field group movement (SupCom/PA) · formation slots with
+push-through · control groups 1–9 + double-click-type + shift-add (SC2) · command card + stances ·
+waypoint queueing (shift) · minimap click/drag-pan · building placement w/ ghost+grid-snap (C&C) ·
+power as a gated resource (C&C) · health bars + direct-fire combat · win/lose + restart.
+
+**High-impact gaps vs reference games (prioritized):**
+1. **Attack-move / patrol / guard / stop-and-fight** (SC2/SupCom) — units currently only fire when an
+   enemy wanders into range; attack-move = advance and engage. *Biggest combat feel gap.*
+2. **Rally points on production buildings** (every RTS) — needed once production exists (Phase 4).
+3. **Formations: line/column/wedge + facing** (AoE/SupCom) — we have box only.
+4. **Selection ergonomics** — double-click already; add box-select prioritises combat units, tab to
+   cycle subgroups, control-group steal/append (SC2).
+5. **Strategic zoom / zoom-to-minimap** (SupCom) — smooth zoom to whole-map overview.
+6. **Fog of war / vision ranges** (all RTS) — currently full visibility.
+7. **Suppression / cover / retreat** (CoH) — depth for abstracted combat (Phase 5).
+8. **Area/queued build & repair, drag-to-place walls** (TA/They Are Billions).
+9. **Veterancy / experience** (CoH/SC2) — deferred, parking lot.
+10. **Audio/feedback** (all) — command acks, fire/impact SFX; none yet.
+
 ## Parking lot (explicitly deferred)
 Naval/amphibious units · multiplayer/netcode · replays · campaign/story · player-facing modding ·
 additional factions beyond the first · full free-form tech-tree *screen* · per-unit veterancy (later) ·
