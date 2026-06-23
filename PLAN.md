@@ -197,6 +197,91 @@ Fog of war makes geography matter.
 
 ---
 
+## Phase 3.5 — Building Framework (NEXT)
+**Goal:** Buildings become real game entities with health, type identity, optional turrets, and
+storage. The placement system bridges into functional components. HQ becomes a proper entity
+whose destruction is a win condition. Units and buildings share the same combat system — no
+special targeting code needed.
+
+### Design
+
+**Every placed building is a single ECS entity with:**
+- `Building { tx, ty, w, h }` — footprint + nav blocking (already exists, keep)
+- `BuildingKind(String)` — type id matching BuildingDef (new)
+- `Faction(String)` — ownership
+- `Health { cur, max }` — makes it targetable by the existing combat system automatically;
+  units in Aggressive stance will attack enemy buildings in weapon range just like enemy units
+- `Position(Vec2)` — world centre of the footprint (needed for range queries, turret rotation)
+- Optional functional components added at spawn based on kind:
+  - `Depot` — HQ, Supply Depot (resource storage + resupply radius)
+  - `Turret + Weapon` — Gun Turret, Bunker, AA Tower (auto-fires at enemies in range)
+  - `AmmoStorage` — armed buildings draw from nearest friendly depot to reload
+  - `VisionRange` — Radar Station (large fog reveal radius)
+  - `Extractor` — Mine, Oil Pump (already exists)
+
+### Building types to define in definitions.ron
+
+| id | Name | Size | Function | Turret |
+|---|---|---|---|---|
+| `hq` | Headquarters | 3×3 | Depot (large); win-condition target | No |
+| `depot` | Supply Depot | 2×2 | Depot (standard) | No |
+| `bunker` | Bunker | 2×2 | Health 500; infantry garrison cover bonus | MG (range 140, dmg 8, rate 3/s) |
+| `gun_turret` | Gun Turret | 1×1 | Standalone heavy turret | Cannon (range 200, dmg 40, rate 0.6/s) |
+| `aa_tower` | AA Tower | 2×2 | Anti-vehicle/air turret | AA gun (range 200, dmg 20, rate 2/s) |
+| `radar` | Radar Station | 2×2 | Vision radius 40 tiles (fog reveal) | No |
+| `mine` | Mine | 2×2 | Extracts Ore (already exists) | No |
+| `oil_pump` | Oil Pump | 2×2 | Extracts Oil (already exists) | No |
+| `processing` | Processing Facility | 3×3 | Ore → Supplies + Parts | No |
+| `refinery` | Fuel Refinery | 2×2 | Oil → Fuel | No |
+| `ammo_factory` | Ammo Factory | 2×2 | Parts → Ammo | No |
+
+### BuildingDef additions (definitions.ron)
+```ron
+hp: 200.0          // health pool; 0 = indestructible (for map decorations)
+has_turret: false  // whether to attach Turret + Weapon at spawn
+turret_range: 0.0  turret_damage: 0.0  turret_fire_rate: 0.0  turret_turn_rate: 0.0
+has_depot: false   depot_supply_range: 0.0  depot_start_stock: false
+vision_range: 0.0  // > 0 → VisionRange component (Radar)
+hull_sprite: ""    turret_sprite: ""  // future: building sprites
+```
+
+### HQ entity
+Spawned at scenario start for each faction at `map.player_spawn()` / `map.enemy_spawn()`.
+Has `Building + BuildingKind("hq") + Health(1000) + Depot + Faction`. Destroying the enemy HQ
+triggers the Decapitation win condition (Phase 7 checks for `Health.cur <= 0`).
+
+### Placement system
+When the player places a building (B key), `spawn_building()` reads the BuildingDef and attaches
+the correct functional components automatically — no manual wiring per type.
+
+### Targeting
+No new targeting code needed. The existing `combat::step` already finds the nearest enemy entity
+with `Health` in weapon range. Buildings with `Health + Faction + Position` are automatically
+valid targets. Units will attack enemy buildings they encounter while advancing.
+
+**Build:**
+- [ ] **BuildingDef extended** — add `hp`, turret fields, depot fields, `vision_range`, sprite names to BuildingDef; update definitions.ron with all building types.
+- [ ] **BuildingKind component** — `pub struct BuildingKind(pub String)` in components.rs; all placed buildings get this.
+- [ ] **Health on buildings** — all placed buildings get `Health { cur, max }` from BuildingDef.hp; health bar drawn for damaged buildings.
+- [ ] **Position on buildings** — centre-of-footprint Vec2; needed for range queries and turret aiming.
+- [ ] **Armed buildings** — buildings with `has_turret: true` get `Turret + Weapon + AmmoStorage`; existing `combat::step` handles firing automatically.
+- [ ] **Depot buildings** — buildings with `has_depot: true` get `Depot` component; resupply system works unchanged.
+- [ ] **Radar buildings** — buildings with `vision_range > 0` get `VisionRange`; fog system works unchanged.
+- [ ] **`spawn_building()` function** — reads BuildingDef, spawns entity with all appropriate components, nav-blocks footprint.
+- [ ] **HQ entities** — spawned at scenario start for both factions; player HQ health shown in HUD.
+- [ ] **Building render** — draw health bars on damaged buildings; future: hull sprites from BuildingDef.
+- [ ] **Building select + info** — clicking a building shows its type, health, and (if depot) stockpile in the selection panel.
+- [ ] **`COLDWAR_ASSERT=hq_targetable`** — unit attacks enemy HQ, HQ health decreases.
+- [ ] **`COLDWAR_ASSERT=turret_fires`** — gun turret auto-fires at enemy unit in range.
+
+**Key types:** `BuildingKind`, `BuildingDef` (extended), `spawn_building()`.
+
+**Acceptance:** place a Gun Turret → it auto-fires at approaching enemies; place an HQ → it has
+health that decrements when attacked; place a Depot → it stores resources and resupplies nearby
+units; all 6 existing ASSERT scenarios still pass.
+
+---
+
 ## Logistics System (canonical design — governs Phases 4–6)
 
 > **Core philosophy: resources are physical.** Every resource exists at a specific location.
