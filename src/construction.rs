@@ -11,7 +11,7 @@
 use hecs::{Entity, World};
 use macroquad::prelude::Vec2;
 
-use crate::components::{Blueprint, Building, Faction, IsBuilding, MoveOrder, Position, UnitKind};
+use crate::components::{AutoBuildMode, Blueprint, Building, Faction, IsBuilding, MoveOrder, Position, UnitKind};
 use crate::depot::{Depot, ResourceType};
 
 // ---------------------------------------------------------------------------
@@ -69,12 +69,18 @@ pub fn step(world: &mut World, dt: f32) -> Vec<Entity> {
         faction: String,
     }
 
+    // Idle engineers: no IsBuilding, no MoveOrder.
+    // AutoBuildMode engineers: included even with a MoveOrder — they'll have it cleared on claim.
     let idle_engineers: Vec<EngineerInfo> = world
         .query::<(&UnitKind, &Position, &Faction)>()
         .without::<&IsBuilding>()
-        .without::<&MoveOrder>()
         .iter()
-        .filter(|(_, (uk, _, _))| uk.id == "engineer")
+        .filter(|(e, (uk, _, _))| {
+            uk.id == "engineer" && (
+                world.get::<&MoveOrder>(*e).is_err()          // truly idle
+                || world.get::<&AutoBuildMode>(*e).is_ok()   // or auto-build mode
+            )
+        })
         .map(|(e, (_, pos, fac))| EngineerInfo {
             entity: e,
             pos: pos.0,
@@ -123,10 +129,12 @@ pub fn step(world: &mut World, dt: f32) -> Vec<Entity> {
         }
     }
 
-    // Pass 1e: apply IsBuilding markers (separate pass to avoid borrow conflicts).
+    // Pass 1e: apply IsBuilding markers. Clear any existing MoveOrder so the
+    // engineer immediately starts pathing to the blueprint (important for AutoBuildMode).
     for (engineer_e, blueprint_e) in new_assignments {
-        // Harmless if already present (shouldn't happen but guard anyway).
         let _ = world.insert_one(engineer_e, IsBuilding { blueprint: blueprint_e });
+        let _ = world.remove_one::<MoveOrder>(engineer_e);
+        let _ = world.remove_one::<crate::components::OrderQueue>(engineer_e);
     }
 
     // -----------------------------------------------------------------------

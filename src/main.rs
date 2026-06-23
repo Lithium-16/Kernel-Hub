@@ -1031,6 +1031,20 @@ async fn main() {
                 let _ = world.despawn(e);
             }
 
+            // Sync AutoBuildMode markers from group flags.
+            // First clear all, then re-add for members of auto_build groups.
+            let clear_auto: Vec<hecs::Entity> = world
+                .query::<&components::AutoBuildMode>().iter().map(|(e,_)| e).collect();
+            for e in clear_auto { let _ = world.remove_one::<components::AutoBuildMode>(e); }
+            for g in groups.all() {
+                if !g.auto_build { continue; }
+                for &e in &g.members {
+                    if world.contains(e) {
+                        let _ = world.insert_one(e, components::AutoBuildMode);
+                    }
+                }
+            }
+
             // Construction: engineers advance blueprints toward completion.
             let completed_blueprints = construction::step(&mut world, tick_dt);
             for bp_entity in completed_blueprints {
@@ -1192,6 +1206,11 @@ async fn main() {
             hud::HudAction::CloseBuildPanel => {
                 build_panel_open = false;
                 placing = None;
+            }
+            hud::HudAction::ToggleAutoBuild(id) => {
+                if let Some(g) = groups.get_mut(id) {
+                    g.auto_build = !g.auto_build;
+                }
             }
             hud::HudAction::None => {}
         }

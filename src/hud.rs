@@ -27,6 +27,8 @@ pub enum HudAction {
     SetStance(Stance),
     /// Player clicked a group card — select all its members.
     SelectGroup(u32),
+    /// Player clicked the Auto-Build toggle on an engineer group card.
+    ToggleAutoBuild(u32),
     /// Player clicked a building in the build panel — start placing it.
     PlaceBuilding(usize),
     /// Player closed the build panel without selecting.
@@ -285,6 +287,25 @@ fn draw_group_panel(ui: &mut Ui, groups: &crate::combat_group::GroupRegistry, wo
         let label = format!("{}/{}", strength, orig);
         let d = measure_text(&label, None, fs, 1.0);
         ui.label(vec2(r.x + r.w - 6.0 - d.width, r.y + card_h - 4.0), &label);
+
+        // AUTO button — only for groups that contain engineers
+        let has_engineers = g.members.iter().any(|&e| {
+            world.get::<&crate::components::UnitKind>(e)
+                .map(|uk| uk.id == "engineer")
+                .unwrap_or(false)
+        });
+        if has_engineers {
+            let auto_r = Rect::new(r.x + 4.0, r.y + card_h - 18.0, 36.0, 14.0);
+            if g.auto_build {
+                draw_rectangle(auto_r.x, auto_r.y, auto_r.w, auto_r.h,
+                    Color::new(0.45, 1.0, 0.55, 0.30));
+                draw_rectangle_lines(auto_r.x, auto_r.y, auto_r.w, auto_r.h, 1.5,
+                    Color::new(0.45, 1.0, 0.55, 0.95));
+            }
+            if ui.button(auto_r, "AUTO") {
+                action = Some(HudAction::ToggleAutoBuild(g.id));
+            }
+        }
 
         x += card_w + 5.0;
     }

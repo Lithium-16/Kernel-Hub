@@ -32,6 +32,8 @@ pub struct CombatGroup {
     pub order: GroupOrder,
     /// Original member count (at formation time). Used for loss display.
     pub original_strength: usize,
+    /// When true, engineers in this group proactively seek and build blueprints.
+    pub auto_build: bool,
 }
 
 impl CombatGroup {
@@ -44,6 +46,7 @@ impl CombatGroup {
             members,
             order: GroupOrder::Idle,
             original_strength: n,
+            auto_build: false,
         }
     }
 
