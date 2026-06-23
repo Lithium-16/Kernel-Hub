@@ -24,6 +24,8 @@ pub enum HudAction {
     Stop,
     ClearSel,
     SetStance(Stance),
+    /// Player clicked a group card — select all its members.
+    SelectGroup(u32),
 }
 
 /// Anchored rects for every HUD panel this frame, computed before world input so the
@@ -100,7 +102,9 @@ pub fn draw(
             action = a;
         }
     }
-    draw_group_panel(ui, groups, world, layout.bottom);
+    if let Some(a) = draw_group_panel(ui, groups, world, layout.bottom) {
+        action = a;
+    }
     if let Some(r) = layout.selection {
         draw_selection_panel(ui, world, r);
     }
@@ -136,15 +140,30 @@ fn draw_command_card(ui: &mut Ui, world: &World, r: Rect) -> Option<HudAction> {
     action
 }
 
-/// Group summary panel: shows player combat groups across the bottom bar.
-fn draw_group_panel(ui: &mut Ui, groups: &crate::combat_group::GroupRegistry, _world: &World, bottom: Rect) {
+/// Group summary panel: shows player combat groups as clickable cards across the bottom bar.
+/// Clicking a card returns SelectGroup(id) so the main loop can select members + center camera.
+fn draw_group_panel(ui: &mut Ui, groups: &crate::combat_group::GroupRegistry, world: &World, bottom: Rect) -> Option<HudAction> {
     let mut x = bottom.x + 250.0; // start after Stop/Clear buttons
     let player_faction = crate::PLAYER_FACTION;
+    let mut action = None;
+    let accent = Color::new(0.45, 1.0, 0.55, 0.95);
     for g in groups.all() {
         if g.faction != player_faction { continue; }
         let w = 140.0;
         let r = Rect::new(x, bottom.y + 4.0, w, 48.0);
+        // Highlight if any member is selected.
+        let selected = g.any_selected(world);
+        if selected {
+            draw_rectangle(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0, Color::new(0.45, 1.0, 0.55, 0.18));
+        }
         ui.panel(r);
+        if selected {
+            draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, accent);
+        }
+        // Clicking the card selects the group.
+        if ui.button(r, "") {
+            action = Some(HudAction::SelectGroup(g.id));
+        }
         ui.label(vec2(r.x + 6.0, r.y + 16.0), &g.name);
         let strength = g.strength();
         let orig = g.original_strength.max(1);
@@ -160,6 +179,7 @@ fn draw_group_panel(ui: &mut Ui, groups: &crate::combat_group::GroupRegistry, _w
         ui.label(vec2(r.x + r.w - 6.0 - d.width, r.y + 44.0), &label);
         x += w + 6.0;
     }
+    action
 }
 
 /// Top bar: resource readouts with hover tooltips + AI prep timer.

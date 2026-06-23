@@ -15,21 +15,37 @@ pub struct NavGrid {
     pub w: usize,
     pub h: usize,
     passable: Vec<bool>,
+    /// Per-tile movement cost in ORTHO units. Normal ground = ORTHO (10). Higher values
+    /// slow units down (MountainPass = 20, RiverCrossing = 25). Impassable = u32::MAX.
+    tile_cost: Vec<u32>,
 }
 
 impl NavGrid {
     pub fn from_map(map: &TileMap) -> Self {
-        let mut passable = vec![false; map.width * map.height];
+        let n = map.width * map.height;
+        let mut passable = vec![false; n];
+        let mut tile_cost = vec![ORTHO; n];
         for y in 0..map.height {
             for x in 0..map.width {
-                passable[y * map.width + x] = map.get(x, y).passable();
+                let tile = map.get(x, y);
+                passable[y * map.width + x] = tile.passable();
+                let c = tile.move_cost();
+                tile_cost[y * map.width + x] = if c.is_finite() {
+                    (ORTHO as f32 * c).round() as u32
+                } else {
+                    u32::MAX
+                };
             }
         }
-        Self { w: map.width, h: map.height, passable }
+        Self { w: map.width, h: map.height, passable, tile_cost }
     }
 
     pub fn passable(&self, x: usize, y: usize) -> bool {
         self.passable[y * self.w + x]
+    }
+
+    pub fn tile_cost(&self, x: usize, y: usize) -> u32 {
+        if x < self.w && y < self.h { self.tile_cost[y * self.w + x] } else { u32::MAX }
     }
 
     /// Mark a tile impassable (e.g. a placed building). Callers must invalidate any
@@ -37,6 +53,7 @@ impl NavGrid {
     pub fn set_blocked(&mut self, x: usize, y: usize) {
         if x < self.w && y < self.h {
             self.passable[y * self.w + x] = false;
+            self.tile_cost[y * self.w + x] = u32::MAX;
         }
     }
 }
@@ -65,16 +82,17 @@ impl FlowField {
             heap.push(Reverse((0, goal.0, goal.1)));
         }
 
-        const NB: [(i32, i32, u32); 8] = [
-            (1, 0, ORTHO), (-1, 0, ORTHO), (0, 1, ORTHO), (0, -1, ORTHO),
-            (1, 1, DIAG), (1, -1, DIAG), (-1, 1, DIAG), (-1, -1, DIAG),
+        // Diagonal multiplier in ORTHO units (≈ √2 × 10 ≈ 14).
+        const NB: [(i32, i32, bool); 8] = [
+            (1, 0, false), (-1, 0, false), (0, 1, false), (0, -1, false),
+            (1, 1, true), (1, -1, true), (-1, 1, true), (-1, -1, true),
         ];
 
         while let Some(Reverse((c, x, y))) = heap.pop() {
             if c > cost[y * w + x] {
                 continue;
             }
-            for (dx, dy, step) in NB {
+            for (dx, dy, is_diag) in NB {
                 let (nx, ny) = (x as i32 + dx, y as i32 + dy);
                 if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
                     continue;
@@ -84,12 +102,15 @@ impl FlowField {
                     continue;
                 }
                 // No diagonal corner-cutting through wall corners.
-                if dx != 0 && dy != 0
+                if is_diag
                     && (!nav.passable((x as i32 + dx) as usize, y) || !nav.passable(x, (y as i32 + dy) as usize))
                 {
                     continue;
                 }
-                let nc = c + step;
+                // Scale the tile's movement cost by the diagonal multiplier.
+                let tc = nav.tile_cost(nx, ny);
+                let step = if is_diag { tc.saturating_mul(DIAG) / ORTHO } else { tc };
+                let nc = c.saturating_add(step);
                 if nc < cost[ny * w + nx] {
                     cost[ny * w + nx] = nc;
                     heap.push(Reverse((nc, nx, ny)));

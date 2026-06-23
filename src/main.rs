@@ -778,8 +778,43 @@ async fn main() {
                     }
                 }
             }
+            hud::HudAction::SelectGroup(id) => {
+                clear_selection(&mut world);
+                if let Some(g) = groups.get_mut(id) {
+                    g.select_members(&mut world);
+                    if let Some(c) = g.centroid(&world) {
+                        cam.center = c;
+                    }
+                }
+            }
             hud::HudAction::None => {}
         }
+
+        // G key: cycle through player combat groups (SupCom-style group cycling).
+        if is_key_pressed(KeyCode::G) {
+            let player_groups: Vec<u32> = groups.all().iter()
+                .filter(|g| g.faction == PLAYER_FACTION)
+                .map(|g| g.id)
+                .collect();
+            if !player_groups.is_empty() {
+                let current = groups.selected_group_id(&world);
+                let next_id = match current {
+                    Some(id) => {
+                        let pos = player_groups.iter().position(|&x| x == id).unwrap_or(0);
+                        player_groups[(pos + 1) % player_groups.len()]
+                    }
+                    None => player_groups[0],
+                };
+                clear_selection(&mut world);
+                if let Some(g) = groups.get_mut(next_id) {
+                    g.select_members(&mut world);
+                    if let Some(c) = g.centroid(&world) {
+                        cam.center = c;
+                    }
+                }
+            }
+        }
+
         minimap.draw(&world, view, hud_layout.minimap);
 
         // --- Win/lose banner (only once a battle has been spawned) ---
