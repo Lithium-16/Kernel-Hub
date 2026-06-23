@@ -782,11 +782,7 @@ async fn main() {
 
         let drag_box = drag_start.map(|s| (s, mp));
         render::present(&world, &map, &regions, &fog, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
-
-        // Explicitly set screen-space camera before HUD/text drawing.
-        // Camera2D::from_display_rect maps pixel coords with (0,0) top-left, Y down —
-        // the only camera mode where draw_text renders characters the right way around.
-        set_camera(&Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh)));
+        // present() exits with set_default_camera() — correct for HUD text.
 
         // Aggregate live economy from all player depots for the HUD top bar.
         let economy = economy::aggregate(&world, PLAYER_FACTION);

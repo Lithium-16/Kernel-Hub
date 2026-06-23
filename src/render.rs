@@ -61,20 +61,26 @@ pub fn present(
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, edge);
     }
 
-    // Switch to screen-space camera. Always use from_display_rect so text renders
-    // correctly — set_default_camera() gives a different (NDC) coordinate system
-    // that causes draw_text to produce mirrored characters.
-    let mut screen_cam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh));
-    screen_cam.render_target = target.clone();
-    set_camera(&screen_cam);
+    // Restore the correct screen-space camera for all 2D overlay/text drawing.
+    // set_default_camera() is the right call here — it is what made HUD text render
+    // correctly before region labels were added. from_display_rect breaks draw_text.
+    match &target {
+        None => set_default_camera(),
+        Some(_) => {
+            let mut ui = Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh));
+            ui.render_target = target.clone();
+            set_camera(&ui);
+        }
+    }
 
     if let Some((a, b)) = drag {
         let r = Rect::new(a.x.min(b.x), a.y.min(b.y), (b.x - a.x).abs(), (b.y - a.y).abs());
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, Color::new(0.5, 1.0, 0.6, 0.9));
     }
-    // Region name labels and overlay text — all in screen space.
+    // Region labels in screen space (world_to_screen converts coords — avoids Y-flip).
     draw_region_labels_screen(regions, view, sw, sh, camera.scale);
     draw_overlay(world, map, camera, sim, tick_ms, sh);
+    set_default_camera();
 }
 
 fn draw_tiles(map: &TileMap, view: Rect, sprites: &Sprites) {
