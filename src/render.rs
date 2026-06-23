@@ -499,8 +499,8 @@ fn draw_engineer_beams(world: &hecs::World) {
         };
 
         let dist = pos.0.distance(bp_pos);
-        // Only show beam when engineer is close enough to actually be building
-        if dist > 120.0 { continue; }
+        // Only show beam when engineer is within build range
+        if dist > crate::construction::ARRIVE_RANGE { continue; }
 
         // Pulse: alpha oscillates between 0.4 and 1.0
         let pulse = ((t * 4.0).sin() * 0.5 + 0.5) * 0.6 + 0.4;

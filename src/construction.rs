@@ -19,9 +19,13 @@ use crate::depot::{Depot, ResourceType};
 // ---------------------------------------------------------------------------
 
 const CLAIM_RANGE: f32 = 2000.0;
-const ARRIVE_RANGE: f32 = 80.0;
+/// Distance at which an engineer counts as "on site" and contributes build rate.
+/// Large enough for engineers to stop outside the nav-blocked blueprint footprint.
+pub const ARRIVE_RANGE: f32 = 160.0;
+/// Cap on simultaneous builders per blueprint (prevents runaway stacking).
+const MAX_BUILDERS_PER_BLUEPRINT: u32 = 5;
 
-const BUILD_RATE_PER_ENGINEER: f32 = 0.05; // progress [0..1] per second per adjacent engineer
+const BUILD_RATE_PER_ENGINEER: f32 = 0.06; // progress per second per on-site engineer
 const SUPPLY_INTERVAL: f32 = 5.0;          // seconds between each supply withdrawal
 const SUPPLIES_PER_INTERVAL: u32 = 5;      // building supplies consumed per interval
 
@@ -54,12 +58,8 @@ pub fn step(world: &mut World, dt: f32) -> Vec<Entity> {
         .map(|(e, (_, pos, fac))| (e, pos.0, fac.0.clone()))
         .collect();
 
-    // Pass 1b: find all engineers that already have an IsBuilding marker.
-    let claimed_targets: std::collections::HashSet<Entity> = world
-        .query::<&IsBuilding>()
-        .iter()
-        .map(|(_, ib)| ib.blueprint)
-        .collect();
+    // Pass 1b: count how many engineers are already assigned per blueprint.
+    // (Replaces the old single-claim set — we now allow up to MAX_BUILDERS_PER_BLUEPRINT.)
 
     // Pass 1c: collect idle engineers (same-faction, no IsBuilding, no MoveOrder).
     // "idle" = UnitKind id == "engineer" and has neither IsBuilding nor MoveOrder.
@@ -88,28 +88,38 @@ pub fn step(world: &mut World, dt: f32) -> Vec<Entity> {
 
     let mut new_assignments: Vec<(Entity /* engineer */, Entity /* blueprint */)> = Vec::new();
 
-    for (bp_entity, bp_pos, bp_faction) in &blueprints {
-        if claimed_targets.contains(bp_entity) {
-            continue; // already has an engineer
-        }
+    // Count how many engineers are already assigned per blueprint.
+    let mut current_builders: std::collections::HashMap<Entity, u32> =
+        std::collections::HashMap::new();
+    for (_, ib) in world.query::<&IsBuilding>().iter() {
+        *current_builders.entry(ib.blueprint).or_default() += 1;
+    }
 
-        let best = idle_engineers
+    for (bp_entity, bp_pos, bp_faction) in &blueprints {
+        // Allow multiple engineers per blueprint, up to the cap.
+        let slots_taken = *current_builders.get(bp_entity).unwrap_or(&0);
+        let slots_available = MAX_BUILDERS_PER_BLUEPRINT.saturating_sub(slots_taken);
+        if slots_available == 0 { continue; }
+
+        // Assign up to `slots_available` idle engineers, nearest-first.
+        let mut candidates: Vec<&EngineerInfo> = idle_engineers
             .iter()
             .filter(|eng| {
                 eng.faction == *bp_faction
                     && !assigned_engineers.contains(&eng.entity)
                     && eng.pos.distance(*bp_pos) <= CLAIM_RANGE
             })
-            .min_by(|a, b| {
-                a.pos
-                    .distance_squared(*bp_pos)
-                    .partial_cmp(&b.pos.distance_squared(*bp_pos))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            .collect();
+        candidates.sort_by(|a, b| {
+            a.pos.distance_squared(*bp_pos)
+                .partial_cmp(&b.pos.distance_squared(*bp_pos))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
-        if let Some(eng) = best {
+        for eng in candidates.into_iter().take(slots_available as usize) {
             assigned_engineers.insert(eng.entity);
             new_assignments.push((eng.entity, *bp_entity));
+            *current_builders.entry(*bp_entity).or_default() += 1;
         }
     }
 
@@ -253,10 +263,11 @@ pub fn step(world: &mut World, dt: f32) -> Vec<Entity> {
         }
 
         // Progress only advances when not fully stalled (no supplies at all).
+        let effective_builders = upd.builder_count.min(MAX_BUILDERS_PER_BLUEPRINT) as f32;
         let new_progress = if stall {
             upd.progress
         } else {
-            upd.progress + BUILD_RATE_PER_ENGINEER * upd.builder_count as f32 * dt
+            upd.progress + BUILD_RATE_PER_ENGINEER * effective_builders * dt
         };
 
         results.push(BpResult {
