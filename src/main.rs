@@ -205,6 +205,32 @@ fn spawn_scenario(
     // No additional depot_spawn needed — HQ is the starting depot.
 }
 
+/// Find the nearest passable world-position to `pos`. Used to spawn trucks
+/// and issue move orders outside building footprints.
+fn nearest_passable(pos: Vec2, nav: &NavGrid) -> Vec2 {
+    let tx = (pos.x / map::TILE_SIZE) as i32;
+    let ty = (pos.y / map::TILE_SIZE) as i32;
+    for r in 0i32..30 {
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if dx.abs() != r && dy.abs() != r { continue; } // outer ring only
+                let nx = tx + dx;
+                let ny = ty + dy;
+                if nx >= 0 && ny >= 0
+                    && (nx as usize) < nav.w && (ny as usize) < nav.h
+                    && nav.passable(nx as usize, ny as usize)
+                {
+                    return vec2(
+                        (nx as f32 + 0.5) * map::TILE_SIZE,
+                        (ny as f32 + 0.5) * map::TILE_SIZE,
+                    );
+                }
+            }
+        }
+    }
+    pos
+}
+
 fn clear_selection(world: &mut hecs::World) {
     let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
     for e in sel {
@@ -755,10 +781,11 @@ async fn main() {
                 } else {
                     to_sel = selection::in_rect(&world, Rect::new(minx, miny, maxx - minx, maxy - miny));
                 }
-                // Only player's own units are selectable — buildings/depots (no Renderable) excluded.
+                // Only player's own units are selectable — buildings, depots, and NonSelectable excluded.
                 to_sel.retain(|&e| {
                     world.get::<&Faction>(e).map(|f| f.0 == PLAYER_FACTION).unwrap_or(false)
                         && world.get::<&components::Renderable>(e).is_ok()
+                        && world.get::<&components::NonSelectable>(e).is_err()
                 });
                 for e in to_sel {
                     let _ = world.insert_one(e, Selected);
@@ -880,10 +907,11 @@ async fn main() {
             // ── Truck dispatch ────────────────────────────────────────────
             let dispatches = supply_route::dispatch_needed(&mut routes, &world);
             for (route_id, origin_e, dest_e, resource, amount) in dispatches {
-                // Get origin position for truck spawn
-                let spawn_pos = match world.get::<&components::Position>(origin_e) {
-                    Ok(p) => p.0,
-                    Err(_) => continue,
+                let origin_centre = match world.get::<&components::Position>(origin_e) {
+                    Ok(p) => p.0, Err(_) => continue,
+                };
+                let dest_centre = match world.get::<&components::Position>(dest_e) {
+                    Ok(p) => p.0, Err(_) => continue,
                 };
                 let faction = world.get::<&components::Faction>(origin_e)
                     .map(|f| f.0.clone())
@@ -893,18 +921,15 @@ async fn main() {
                 } else {
                     Color::new(1.0, 0.55, 0.55, 1.0)
                 };
+                // Spawn outside the source building footprint, drive to tile adjacent to destination.
+                let spawn_pos = nearest_passable(origin_centre, &nav);
+                let move_target = nearest_passable(dest_centre, &nav);
                 let truck_e = truck::spawn_truck(
                     &mut world, &sprites, route_id,
                     resource, amount, origin_e, dest_e,
                     spawn_pos, &faction, tint,
                 );
-                // Issue move to destination
-                let dest_pos = world.get::<&components::Position>(dest_e)
-                    .map(|p| p.0)
-                    .ok();
-                if let Some(target) = dest_pos {
-                    issue_move(&mut world, &nav, &mut flow_cache, &[truck_e], target);
-                }
+                issue_move(&mut world, &nav, &mut flow_cache, &[truck_e], move_target);
             }
 
             // ── Truck step — handle arrivals and destruction ───────────────
@@ -927,7 +952,8 @@ async fn main() {
                             origin.and_then(|o| world.get::<&components::Position>(o).map(|p| p.0).ok())
                         };
                         if let Some(target) = origin_pos {
-                            issue_move(&mut world, &nav, &mut flow_cache, &[truck_e], target);
+                            let passable_target = nearest_passable(target, &nav);
+                            issue_move(&mut world, &nav, &mut flow_cache, &[truck_e], passable_target);
                         }
                         if let Ok(mut t) = world.get::<&mut truck::Truck>(truck_e) {
                             t.state = truck::TruckState::DrivingBack;

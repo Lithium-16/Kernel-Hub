@@ -13,8 +13,8 @@ use macroquad::prelude::*;
 
 use crate::assets::Sprites;
 use crate::components::{
-    Faction, FuelTank, Health, Heading, Mobility, MoveState, Position, Renderable, UnitKind,
-    Velocity,
+    Faction, FuelTank, Health, Heading, Mobility, MoveState, NonSelectable, Position, Renderable,
+    UnitKind, Velocity,
 };
 use crate::depot::ResourceType;
 
@@ -109,6 +109,7 @@ pub fn spawn_truck(
             origin,
             state: TruckState::DrivingToDestination,
         },
+        NonSelectable,  // trucks are AI-driven; player cannot select them
     ))
 }
 

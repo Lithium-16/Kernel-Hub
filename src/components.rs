@@ -101,6 +101,9 @@ pub struct MoveState {
 /// Marker: entity is currently selected by the player.
 pub struct Selected;
 
+/// Marker: entity cannot be selected by the player (supply trucks, AI units, etc.).
+pub struct NonSelectable;
+
 /// A per-unit move order. The shared `flow` field routes the unit to the formation
 /// `anchor` (the click point); once within `seek` distance of the anchor it heads
 /// straight for its own `goal` slot, so the group fans into a block instead of all
