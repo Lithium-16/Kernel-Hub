@@ -8,7 +8,8 @@
 use hecs::World;
 use macroquad::prelude::*;
 
-use crate::components::{Position, Selected};
+use crate::components::{Faction, Position, Selected};
+use crate::fog::FogGrid;
 use crate::map::{self, TileMap};
 
 pub struct Minimap {
@@ -45,7 +46,8 @@ impl Minimap {
 
     /// Draw the minimap into `panel` (screen space; call with the default camera active).
     /// `view` is the camera's visible world rect, drawn as the viewport box.
-    pub fn draw(&self, world: &World, view: Rect, panel: Rect) {
+    /// Enemy units are only shown when their tile is currently Visible through fog.
+    pub fn draw(&self, world: &World, fog: &FogGrid, view: Rect, panel: Rect) {
         draw_rectangle(panel.x - 3.0, panel.y - 3.0, panel.w + 6.0, panel.h + 6.0, Color::new(0.06, 0.08, 0.10, 0.95));
         draw_texture_ex(
             &self.tex,
@@ -59,14 +61,19 @@ impl Minimap {
             },
         );
 
-        // Unit dots: selected pop bright green, others a cool slate.
-        let unit = Color::new(0.62, 0.72, 0.85, 1.0);
-        let sel = Color::new(0.45, 1.0, 0.55, 1.0);
-        for (e, pos) in world.query::<&Position>().iter() {
-            let p = self.to_panel(panel, pos.0);
+        // Unit dots: blue for player, red for enemy (only when visible through fog).
+        // Selected units get a bright green override.
+        let player_dot = Color::new(0.55, 0.75, 1.0, 1.0);
+        let enemy_dot  = Color::new(1.0, 0.45, 0.45, 1.0);
+        let sel_dot    = Color::new(0.45, 1.0, 0.55, 1.0);
+        for (e, (pos, fac)) in world.query::<(&Position, &Faction)>().iter() {
+            let is_player = fac.0 == crate::PLAYER_FACTION;
+            // Enemy dots hidden in fog.
+            if !is_player && !fog.visible_world(pos.0) { continue; }
             let selected = world.get::<&Selected>(e).is_ok();
-            let c = if selected { sel } else { unit };
+            let c = if selected { sel_dot } else if is_player { player_dot } else { enemy_dot };
             let s = if selected { 2.5 } else { 1.6 };
+            let p = self.to_panel(panel, pos.0);
             draw_rectangle(p.x - s * 0.5, p.y - s * 0.5, s, s, c);
         }
 

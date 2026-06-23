@@ -325,7 +325,7 @@ iteration. Keep this list fresh — add as we learn, check off as we ship.
 1. **Logistics intent / auto-routing** (unique to this game) — player draws routes, system runs trucks. Phase 5 core.
 2. **Expansion flow** (unique) — resource regions, secure → build extractor → depot integrates output. Phase 4 core.
 3. **Automated rear defense** (They Are Billions / CoH) — QRF designation, patrol routes, threat alerts from radar. Phase 7.
-4. **Minimap enemy intel** — enemy positions appear on minimap only when in visible fog tiles (currently always shown). Quick win.
+~~4. Minimap enemy intel~~ ✓ — enemy dots fog-gated; player=blue, enemy=red, selected=green.
 5. **Suppression / cover** (CoH) — moving under fire accrues suppression → slows + forces prone. Later phase.
 6. **Audio/feedback** (all) — command acks, weapon fire, impact SFX; none yet. Phase 8.
 

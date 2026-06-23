@@ -819,7 +819,7 @@ async fn main() {
             }
         }
 
-        minimap.draw(&world, view, hud_layout.minimap);
+        minimap.draw(&world, &fog, view, hud_layout.minimap);
 
         // --- Win/lose banner (only once a battle has been spawned) ---
         if count > 0 {
@@ -866,7 +866,7 @@ async fn main() {
                 set_camera(&uicam);
                 let cap_layout = hud::HudLayout::compute(&world, sw, sh);
                 let _ = hud::draw(&mut ui, &world, &economy, &ai, &groups, &cap_layout);
-                minimap.draw(&world, cam.view_rect(sw, sh), cap_layout.minimap);
+                minimap.draw(&world, &fog, cam.view_rect(sw, sh), cap_layout.minimap);
                 set_default_camera();
                 rt.texture.get_texture_data().export_png(path);
                 break;
