@@ -1,28 +1,35 @@
 // Data-driven game definitions (Cold-War-era starter faction).
 // Authored content lives here, not in code. Schema is versioned (see `version`).
-// Unit colors are white: the placeholder art (Kenney top-down tanks, CC0) is already
-// colored, so we draw it untinted. Faction tinting returns later.
+//
+// To add or change a unit's sprites:
+//   hull_sprite   = base name of the hull PNG, e.g. "hull_tank"
+//                   → loads hull_tank_player.png (vanguard) and hull_tank_enemy.png (crimson)
+//   turret_sprite = base name of the turret PNG, e.g. "turret_tank"
+//                   → loads turret_tank_player.png / turret_tank_enemy.png
+//                   → leave empty "" for units with no rotating turret sprite
+//   PNG files live in assets/sprites/. Also register new names in assets.rs sprite_bytes().
+//
 // speed = world px/s; turn_rate = rad/s (low = pivots before moving, like a tank).
+// ammo_capacity = onboard shells (0 = unarmed/no storage)
+// fuel_capacity = onboard fuel   (0 = foot soldier, no tank)
+// fuel_burn_rate = fuel per world-pixel moved (0 = use default 0.05)
 Definitions(
     version: 1,
     factions: [
         (id: "vanguard", name: "Vanguard Bloc", color: (110, 160, 230)),
     ],
     units: [
-        // ammo_capacity = onboard shells (0 = unarmed/no storage)
-        // fuel_capacity = onboard fuel (0 = foot soldier, no tank)
-        // fuel_burn_rate = fuel per world-pixel moved (0 = use default 0.05)
-        (id: "engineer", name: "Engineer",         faction: "vanguard", sprite: "engineer",  color: (255, 255, 255), radius: 9.0,  speed: 70.0,  turn_rate: 6.0, hp: 60.0,  range: 0.0,   damage: 0.0,  fire_rate: 0.0, turret_turn_rate: 0.0, fuel_capacity: 400.0),
-        (id: "infantry", name: "Infantry",         faction: "vanguard", sprite: "infantry",  color: (255, 255, 255), radius: 8.0,  speed: 82.0,  turn_rate: 9.0, hp: 50.0,  range: 95.0,  damage: 8.0,  fire_rate: 1.5, turret_turn_rate: 0.0, ammo_capacity: 60),
-        (id: "tank",     name: "Main Battle Tank", faction: "vanguard", sprite: "tank",      color: (255, 255, 255), radius: 12.0, speed: 60.0,  turn_rate: 3.2, hp: 240.0, range: 130.0, damage: 35.0, fire_rate: 0.8, turret_turn_rate: 2.2, ammo_capacity: 40,  fuel_capacity: 600.0, fuel_burn_rate: 0.06),
-        (id: "arty",     name: "Artillery",        faction: "vanguard", sprite: "artillery", color: (255, 255, 255), radius: 12.0, speed: 46.0,  turn_rate: 2.4, hp: 90.0,  range: 240.0, damage: 55.0, fire_rate: 0.5, turret_turn_rate: 1.4, ammo_capacity: 20,  fuel_capacity: 500.0, fuel_burn_rate: 0.05),
-        (id: "aa",       name: "AA Vehicle",       faction: "vanguard", sprite: "aa",        color: (255, 255, 255), radius: 10.0, speed: 66.0,  turn_rate: 4.0, hp: 80.0,  range: 140.0, damage: 18.0, fire_rate: 2.0, turret_turn_rate: 3.5, ammo_capacity: 120, fuel_capacity: 450.0, fuel_burn_rate: 0.05),
-        (id: "truck",    name: "Supply Truck",     faction: "vanguard", sprite: "truck",     color: (255, 255, 255), radius: 11.0, speed: 78.0,  turn_rate: 4.5, hp: 70.0,  range: 0.0,   damage: 0.0,  fire_rate: 0.0, turret_turn_rate: 0.0, fuel_capacity: 500.0, fuel_burn_rate: 0.04),
-        // Recon scout: fast, light armor, no weapon, 3× vision radius for fog-of-war.
-        (id: "scout",    name: "Recon Scout",      faction: "vanguard", sprite: "infantry",  color: (255, 255, 255), radius: 8.0,  speed: 120.0, turn_rate: 9.0, hp: 35.0,  range: 0.0,   damage: 0.0,  fire_rate: 0.0, turret_turn_rate: 0.0, vision_range: 480.0, fuel_capacity: 300.0, fuel_burn_rate: 0.03),
+        (id: "engineer", name: "Engineer",         faction: "vanguard", sprite: "engineer",  color: (255, 255, 255), radius: 9.0,  speed: 70.0,  turn_rate: 6.0, hp: 60.0,  range: 0.0,   damage: 0.0,  fire_rate: 0.0, turret_turn_rate: 0.0, fuel_capacity: 400.0,                                   hull_sprite: "hull_engineer", turret_sprite: ""),
+        (id: "infantry", name: "Infantry",         faction: "vanguard", sprite: "infantry",  color: (255, 255, 255), radius: 8.0,  speed: 82.0,  turn_rate: 9.0, hp: 50.0,  range: 95.0,  damage: 8.0,  fire_rate: 1.5, turret_turn_rate: 0.0, ammo_capacity: 60,                                      hull_sprite: "hull_infantry", turret_sprite: ""),
+        (id: "tank",     name: "Main Battle Tank", faction: "vanguard", sprite: "tank",      color: (255, 255, 255), radius: 12.0, speed: 60.0,  turn_rate: 3.2, hp: 240.0, range: 130.0, damage: 35.0, fire_rate: 0.8, turret_turn_rate: 2.2, ammo_capacity: 40,  fuel_capacity: 600.0, fuel_burn_rate: 0.06, hull_sprite: "hull_tank",     turret_sprite: "turret_tank"),
+        (id: "arty",     name: "Artillery",        faction: "vanguard", sprite: "artillery", color: (255, 255, 255), radius: 12.0, speed: 46.0,  turn_rate: 2.4, hp: 90.0,  range: 240.0, damage: 55.0, fire_rate: 0.5, turret_turn_rate: 1.4, ammo_capacity: 20,  fuel_capacity: 500.0, fuel_burn_rate: 0.05, hull_sprite: "hull_arty",     turret_sprite: "turret_arty"),
+        (id: "aa",       name: "AA Vehicle",       faction: "vanguard", sprite: "aa",        color: (255, 255, 255), radius: 10.0, speed: 66.0,  turn_rate: 4.0, hp: 80.0,  range: 140.0, damage: 18.0, fire_rate: 2.0, turret_turn_rate: 3.5, ammo_capacity: 120, fuel_capacity: 450.0, fuel_burn_rate: 0.05, hull_sprite: "hull_aa",       turret_sprite: "turret_aa"),
+        (id: "truck",    name: "Supply Truck",     faction: "vanguard", sprite: "truck",     color: (255, 255, 255), radius: 11.0, speed: 78.0,  turn_rate: 4.5, hp: 70.0,  range: 0.0,   damage: 0.0,  fire_rate: 0.0, turret_turn_rate: 0.0,                     fuel_capacity: 500.0, fuel_burn_rate: 0.04, hull_sprite: "hull_truck",    turret_sprite: ""),
+        // Recon scout: fast, light armor, no weapon, 3x vision radius for fog-of-war.
+        (id: "scout",    name: "Recon Scout",      faction: "vanguard", sprite: "infantry",  color: (255, 255, 255), radius: 8.0,  speed: 120.0, turn_rate: 9.0, hp: 35.0,  range: 0.0,   damage: 0.0,  fire_rate: 0.0, turret_turn_rate: 0.0, vision_range: 480.0, fuel_capacity: 300.0, fuel_burn_rate: 0.03, hull_sprite: "hull_scout",   turret_sprite: ""),
     ],
-    // Placeholder buildings (footprint in tiles). Drawn as colored footprints for now;
-    // sprites + production/logistics roles arrive with the building systems.
+    // Buildings — footprint in tiles, drawn as colored rectangles.
+    // Sprites + production roles added with building systems (Phase 4+).
     buildings: [
         (id: "hq",       name: "Headquarters", color: (96, 116, 156),  w: 3, h: 3),
         (id: "depot",    name: "Supply Depot", color: (132, 108, 74),   w: 2, h: 2),

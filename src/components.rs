@@ -25,9 +25,14 @@ pub struct Mobility {
 
 /// How an entity draws: a sprite index (into `Sprites`), a tint, and a world size.
 pub struct Renderable {
-    pub sprite: usize,
+    pub sprite: usize,          // atlas fallback index
     pub tint: Color,
     pub size: f32,
+    /// Hull sprite base name from definitions.ron (e.g. "hull_tank").
+    /// Empty = use placeholder atlas sprite.
+    pub hull_sprite: String,
+    /// Turret sprite base name (e.g. "turret_tank"). Empty = no separate turret.
+    pub turret_sprite: String,
 }
 
 /// Which faction an entity belongs to (faction id from the data definitions).

@@ -36,11 +36,15 @@ pub fn present(
     clear_background(BG);
     draw_tiles(map, view, sprites);
     draw_buildings(world);
+    draw_depots(world);
     draw_move_orders(world);
     draw_selection_rings(world, sprites);
-    // Only draw entities visible through fog.
+    // Units: hull+turret sprites when loaded, atlas fallback otherwise.
     draw_entities_fogged(world, fog, sprites, camera.scale);
-    draw_turret_barrels_fogged(world, fog, camera.scale);
+    // Turret barrel lines only shown when using atlas fallback (no turret sprite yet).
+    if !sprites.has_hull_turrets() {
+        draw_turret_barrels_fogged(world, fog, camera.scale);
+    }
     draw_tracers(world);
     draw_health_bars_fogged(world, fog);
     draw_hitboxes(world);
@@ -203,31 +207,81 @@ fn draw_selection_rings(world: &hecs::World, sprites: &Sprites) {
 /// Below this zoom level units render as colored dots for legibility.
 const OVERVIEW_ZOOM: f32 = 0.22;
 
+/// Draw all units visible through fog.
+///
+/// When hull/turret textures are loaded (frame 1+):
+///   1. Hull   — 256×256, rotates with Heading (body direction).
+///   2. Turret — 256×256, same canvas pivot, rotates with Turret.angle independently.
+///
+/// Before frame 1, falls back to the placeholder atlas sprite (atlas-based rendering).
 fn draw_entities_fogged(world: &hecs::World, fog: &crate::fog::FogGrid, sprites: &Sprites, cam_scale: f32) {
-    use crate::components::Faction;
+    use crate::components::{Faction, Turret};
     let overview = cam_scale < OVERVIEW_ZOOM;
-    for (_e, (pos, r, head, fac)) in world.query::<(&Position, &Renderable, &Heading, &Faction)>().iter() {
-        let vis = fac.0 == crate::PLAYER_FACTION || fog.visible_world(pos.0);
+    let real_sprites = sprites.has_hull_turrets();
+
+    for (_e, (pos, r, head, fac, turret_opt)) in
+        world.query::<(&Position, &Renderable, &Heading, &Faction, Option<&Turret>)>().iter()
+    {
+        let is_enemy = fac.0 != crate::PLAYER_FACTION;
+        let vis = !is_enemy || fog.visible_world(pos.0);
         if !vis { continue; }
+
         if overview {
-            // Strategic overview: draw a screen-size-stable dot (radius = 3 screen px).
             let dot_r = 3.0 / cam_scale;
             draw_circle(pos.0.x, pos.0.y, dot_r, r.tint);
-        } else {
-            let src = sprites.unit_rect(r.sprite);
-            draw_texture_ex(
-                &sprites.atlas,
-                pos.0.x - r.size * 0.5,
-                pos.0.y - r.size * 0.5,
-                r.tint,
-                DrawTextureParams {
-                    dest_size: Some(vec2(r.size, r.size)),
-                    source: Some(src),
-                    rotation: head.0 + std::f32::consts::FRAC_PI_2,
-                    ..Default::default()
-                },
-            );
+            continue;
         }
+
+        let x    = pos.0.x - r.size * 0.5;
+        let y    = pos.0.y - r.size * 0.5;
+        let size = vec2(r.size, r.size);
+        let hull_rot = head.0 + std::f32::consts::FRAC_PI_2;
+
+        if real_sprites && !r.hull_sprite.is_empty() {
+            // Hull sprite — rotates with body heading.
+            if let Some(hull_tex) = sprites.hull(&r.hull_sprite, is_enemy) {
+                draw_texture_ex(hull_tex, x, y, WHITE,
+                    DrawTextureParams { dest_size: Some(size), rotation: hull_rot, ..Default::default() });
+            }
+            // Turret sprite — rotates with Turret.angle independently.
+            if let Some(turret) = turret_opt {
+                if !r.turret_sprite.is_empty() {
+                    if let Some(turret_tex) = sprites.turret(&r.turret_sprite, is_enemy) {
+                        let turret_rot = turret.angle + std::f32::consts::FRAC_PI_2;
+                        draw_texture_ex(turret_tex, x, y, WHITE,
+                            DrawTextureParams { dest_size: Some(size), rotation: turret_rot, ..Default::default() });
+                    }
+                }
+            }
+        } else {
+            // Fallback: placeholder atlas sprite with faction tint.
+            let src = sprites.unit_rect(r.sprite);
+            draw_texture_ex(&sprites.atlas, x, y, r.tint,
+                DrawTextureParams { dest_size: Some(size), source: Some(src), rotation: hull_rot, ..Default::default() });
+        }
+    }
+}
+
+/// Depot buildings: tan square + supply-range ring. Distinct from placeable buildings.
+fn draw_depots(world: &hecs::World) {
+    use crate::depot::Depot;
+    use crate::components::Faction;
+    let ts = map::TILE_SIZE;
+    let sz = ts * 2.2;
+    for (_e, (pos, depot, fac)) in world.query::<(&Position, &Depot, &Faction)>().iter() {
+        let fill = if fac.0 == crate::PLAYER_FACTION {
+            Color::new(0.55, 0.48, 0.30, 0.90)
+        } else {
+            Color::new(0.50, 0.22, 0.22, 0.85)
+        };
+        let x = pos.0.x - sz * 0.5;
+        let y = pos.0.y - sz * 0.5;
+        draw_rectangle(x, y, sz, sz, fill);
+        draw_rectangle_lines(x, y, sz, sz, 2.5, Color::new(1.0, 0.88, 0.55, 0.85));
+        draw_circle_lines(pos.0.x, pos.0.y, depot.supply_range, 1.0, Color::new(1.0, 0.88, 0.55, 0.18));
+        // Small inner marker square.
+        let m = sz * 0.3;
+        draw_rectangle(pos.0.x - m * 0.5, pos.0.y - m * 0.5, m, m, Color::new(1.0, 0.88, 0.55, 0.65));
     }
 }
 

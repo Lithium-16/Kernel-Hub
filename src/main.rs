@@ -100,7 +100,13 @@ fn spawn_army(
             Heading(-std::f32::consts::FRAC_PI_2),
             MoveState { last: pos, stall: 0 },
             Mobility { speed: unit.speed, turn_rate: unit.turn_rate },
-            Renderable { sprite, tint, size: unit.radius * 2.6 },
+            Renderable {
+                sprite,
+                tint,
+                size: unit.radius * 2.6,
+                hull_sprite: unit.hull_sprite.clone(),
+                turret_sprite: unit.turret_sprite.clone(),
+            },
             Faction(faction.to_string()),
             components::UnitKind { id: unit.id.clone(), name: unit.name.clone() },
             stance::Stance::Aggressive,
@@ -317,9 +323,9 @@ async fn main() {
     let capture_path = std::env::var("COLDWAR_CAPTURE").ok();
     let mut frame: u32 = 0;
 
-    let sprites = Sprites::load();
+    let mut sprites = Sprites::load();
     let defs = data::load_definitions();
-    let (map, regions) = map::TileMap::generate(256, 256);
+    let (map, _regions) = map::TileMap::generate(256, 256);
     let map_px = map.size_px();
     let mut nav = NavGrid::from_map(&map);
     let mut flow_cache = FlowCache::new(64);
@@ -527,7 +533,15 @@ async fn main() {
         std::process::exit(0);
     }
 
+    let mut loop_frame: u32 = 0;
     loop {
+        // Load hull/turret sprites on frame 1 — after the first next_frame().await.
+        // By then macroquad's font atlas has been created by the first draw_text call
+        // in frame 0, so loading extra textures no longer corrupts the GL font state.
+        if loop_frame == 1 && !sprites.has_hull_turrets() {
+            sprites.load_hull_turrets(&defs.units);
+        }
+
         let (mx, my) = mouse_position();
         let mp = vec2(mx, my);
         let sw = screen_width();
@@ -882,6 +896,7 @@ async fn main() {
         }
 
         next_frame().await;
+        loop_frame = loop_frame.saturating_add(1);
 
         if let Some(path) = &capture_path {
             frame += 1;

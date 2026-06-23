@@ -64,6 +64,13 @@ pub struct UnitDef {
     /// Fuel burn rate (units per world-pixel moved). 0 = use default (0.05).
     #[serde(default)]
     pub fuel_burn_rate: f32,
+    /// Hull sprite base name. e.g. "hull_tank" → hull_tank_player.png + hull_tank_enemy.png.
+    /// Empty string = use placeholder atlas sprite.
+    #[serde(default)]
+    pub hull_sprite: String,
+    /// Turret sprite base name. e.g. "turret_tank". Empty = no separate turret sprite.
+    #[serde(default)]
+    pub turret_sprite: String,
 }
 
 /// Load and validate the bundled definitions.
