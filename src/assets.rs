@@ -42,9 +42,10 @@ fn unit_idx(name: &str) -> usize {
 // ── Texture loader helper ─────────────────────────────────────────────────────
 
 fn load_tex(bytes: &[u8]) -> Texture2D {
-    let t = Texture2D::from_file_with_format(bytes, Some(ImageFormat::Png));
-    t.set_filter(FilterMode::Linear);
-    t
+    // Do NOT call set_filter — it can corrupt macroquad's internal GL texture state
+    // (specifically the font atlas) when called during startup. Macroquad's default
+    // filter is adequate for 256×256 game sprites.
+    Texture2D::from_file_with_format(bytes, Some(ImageFormat::Png))
 }
 
 // ── Sprites struct ────────────────────────────────────────────────────────────

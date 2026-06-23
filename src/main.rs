@@ -646,9 +646,10 @@ async fn main() {
                 } else {
                     to_sel = selection::in_rect(&world, Rect::new(minx, miny, maxx - minx, maxy - miny));
                 }
-                // Only the player's own units are selectable.
+                // Only player's own units are selectable — buildings/depots (no Renderable) excluded.
                 to_sel.retain(|&e| {
                     world.get::<&Faction>(e).map(|f| f.0 == PLAYER_FACTION).unwrap_or(false)
+                        && world.get::<&components::Renderable>(e).is_ok()
                 });
                 for e in to_sel {
                     let _ = world.insert_one(e, Selected);

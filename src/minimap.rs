@@ -67,6 +67,8 @@ impl Minimap {
         let enemy_dot  = Color::new(1.0, 0.45, 0.45, 1.0);
         let sel_dot    = Color::new(0.45, 1.0, 0.55, 1.0);
         for (e, (pos, fac)) in world.query::<(&Position, &Faction)>().iter() {
+            // Skip non-unit entities (depots, buildings) — they have no Renderable.
+            if world.get::<&crate::components::Renderable>(e).is_err() { continue; }
             let is_player = fac.0 == crate::PLAYER_FACTION;
             // Enemy dots hidden in fog.
             if !is_player && !fog.visible_world(pos.0) { continue; }
