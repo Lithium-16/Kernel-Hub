@@ -467,6 +467,124 @@ fn draw_selection_panel(ui: &mut Ui, world: &World, r: Rect) {
     }
 }
 
+// ─── Building Context Panel ──────────────────────────────────────────────────
+
+/// Unified right-click context panel for any building entity.
+/// Shows type, health, depot stocks, extractor/processor status, blueprint progress.
+/// Returns true when the close button is pressed.
+pub fn draw_building_context(
+    ui: &mut Ui,
+    building_e: hecs::Entity,
+    world: &World,
+    sw: f32,
+    sh: f32,
+) -> bool {
+    use crate::components::{Blueprint, BuildingKind, Health, IsBuilding, UnitKind};
+    use crate::depot::{Depot, ResourceType};
+
+    // Panel: right-side, 220×240, anchored above bottom bar
+    let pw = 220.0_f32;
+    let ph = 240.0_f32;
+    let r = Rect::new(sw - pw - 8.0, sh - BAR_H - 8.0 - ph, pw, ph);
+    ui.panel(r);
+
+    let mut closed = false;
+    if ui.button(Rect::new(r.x + r.w - 26.0, r.y + 6.0, 20.0, 16.0), "X") {
+        closed = true;
+    }
+
+    let mut y = r.y + 20.0;
+
+    // ── Title ────────────────────────────────────────────────────────────────
+    // Check if this is actually a unit (engineer with IsBuilding) or a building
+    if let Ok(uk) = world.get::<&UnitKind>(building_e) {
+        ui.label(vec2(r.x + 8.0, y), &uk.name.to_uppercase());
+        y += 14.0;
+        if let Ok(ib) = world.get::<&IsBuilding>(building_e) {
+            if let Ok(bp) = world.get::<&Blueprint>(ib.blueprint) {
+                let pct = (bp.progress * 100.0) as u32;
+                ui.label(vec2(r.x + 8.0, y + 12.0), &format!("Building: {}%", pct));
+                let bw = r.w - 16.0;
+                draw_rectangle(r.x + 8.0, y + 16.0, bw, 6.0, Color::new(0.15,0.17,0.20,1.0));
+                draw_rectangle(r.x + 8.0, y + 16.0, bw * bp.progress, 6.0, Color::new(0.4,0.8,0.4,1.0));
+                y += 28.0;
+                ui.label(vec2(r.x + 8.0, y + 12.0), &format!("Supplies used: {}/{}", bp.supplies_consumed, bp.required_supplies));
+            }
+        }
+        return closed;
+    }
+
+    let kind = world.get::<&BuildingKind>(building_e)
+        .map(|k| k.0.replace('_', " ").to_uppercase())
+        .unwrap_or_else(|_| "BUILDING".into());
+    ui.label(vec2(r.x + 8.0, y), &kind);
+    y += 14.0;
+
+    // ── Health ───────────────────────────────────────────────────────────────
+    if let Ok(h) = world.get::<&Health>(building_e) {
+        let frac = (h.cur / h.max).clamp(0.0, 1.0);
+        let hcol = if frac > 0.5 { Color::new(0.35,0.9,0.4,1.0) }
+                   else if frac > 0.25 { Color::new(0.95,0.85,0.3,1.0) }
+                   else { Color::new(0.95,0.35,0.3,1.0) };
+        let bw = r.w - 16.0;
+        draw_rectangle(r.x + 8.0, y, bw, 6.0, Color::new(0.15,0.17,0.20,1.0));
+        draw_rectangle(r.x + 8.0, y, bw * frac, 6.0, hcol);
+        ui.label(vec2(r.x + 8.0, y + 14.0), &format!("HP: {:.0}/{:.0}", h.cur, h.max));
+        y += 22.0;
+    }
+
+    // ── Depot stocks ─────────────────────────────────────────────────────────
+    if let Ok(depot) = world.get::<&Depot>(building_e) {
+        let res_list = [
+            (ResourceType::Ammo,             "Ammo",  Color::new(1.0,0.80,0.20,1.0)),
+            (ResourceType::Fuel,             "Fuel",  Color::new(0.3,0.80,1.00,1.0)),
+            (ResourceType::BuildingSupplies, "Supp",  Color::new(0.8,0.65,0.35,1.0)),
+            (ResourceType::WeaponParts,      "Parts", Color::new(0.75,0.40,1.00,1.0)),
+        ];
+        for (res, name, col) in &res_list {
+            let val = depot.get(*res);
+            draw_rectangle(r.x + 8.0, y, 5.0, 12.0, *col);
+            let tcol = if val == 0 { Color::new(1.0,0.3,0.3,1.0) }
+                       else if val < 200 { Color::new(1.0,0.72,0.25,1.0) }
+                       else { ui.theme.text };
+            ui.label_colored(vec2(r.x + 18.0, y + 11.0), &format!("{name}: {val}"), tcol);
+            let bw = r.w - 26.0;
+            draw_rectangle(r.x + 18.0, y + 13.0, bw, 3.0, Color::new(0.15,0.17,0.20,1.0));
+            let fw = (val as f32 / 2000.0).clamp(0.0,1.0) * bw;
+            draw_rectangle(r.x + 18.0, y + 13.0, fw, 3.0, *col);
+            y += 20.0;
+        }
+    }
+
+    // ── Extractor status ─────────────────────────────────────────────────────
+    if let Ok(ext) = world.get::<&crate::extraction::Extractor>(building_e) {
+        let res = ext.kind.output_resource();
+        let amt = ext.kind.output_amount();
+        let cycle = ext.kind.cycle_secs();
+        let next = (cycle - ext.cooldown.min(cycle)).max(0.0);
+        ui.label(vec2(r.x + 8.0, y + 12.0),
+            &format!("Produces {:?}×{} every {:.0}s", res, amt, cycle));
+        ui.label(vec2(r.x + 8.0, y + 26.0), &format!("Next: {:.1}s", next));
+        y += 36.0;
+    }
+
+    // ── Processor status ─────────────────────────────────────────────────────
+    if let Ok(proc) = world.get::<&crate::processing::Processor>(building_e) {
+        let (out_res, out_amt) = proc.kind.output();
+        let cycle = proc.kind.cycle_secs();
+        let next = (cycle - proc.cooldown.min(cycle)).max(0.0);
+        if let Some((in_res, in_amt)) = proc.kind.input() {
+            ui.label(vec2(r.x + 8.0, y + 12.0),
+                &format!("{:?}({})->  {:?}({})", in_res, in_amt, out_res, out_amt));
+        } else {
+            ui.label(vec2(r.x + 8.0, y + 12.0), &format!("Produces {:?}×{}", out_res, out_amt));
+        }
+        ui.label(vec2(r.x + 8.0, y + 26.0), &format!("Next: {:.1}s  / {:.0}s", next, cycle));
+    }
+
+    closed
+}
+
 // ─── Depot Inspection Panel ──────────────────────────────────────────────────
 
 /// Floating info panel showing a depot's current stock levels.

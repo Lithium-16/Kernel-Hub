@@ -426,6 +426,8 @@ async fn main() {
     let mut route_resource_idx: usize = 0;
     // Selected depot for inspection panel (None = panel closed)
     let mut selected_depot: Option<hecs::Entity> = None;
+    // Building/unit selected for context panel (right-click)
+    let mut context_entity: Option<hecs::Entity> = None;
 
     let mut sim = sim::Sim::new();
     let tick_dt = 1.0 / sim::TICK_RATE as f32;
@@ -820,40 +822,65 @@ async fn main() {
 
         // --- Move / Attack-move order (right mouse) ---
         // Right-click ground → formation move.
-        // Right-click enemy unit → attack-move to that position (unit advances and fires en route).
-        // Shift+RMB → queue waypoint (if already moving).
+        // Right-click: open building context panel OR issue move order.
         if is_mouse_button_pressed(MouseButton::Right) && !over_ui && !placing_active {
             let click = cam2d.screen_to_world(mp);
-            let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
-            let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
-            // Detect if clicking on an enemy unit (attack-move).
-            let attack_target = {
-                let mut found = false;
-                let mut best_d = 24.0f32 * 24.0;
-                for (_e, (pos, fac)) in world.query::<(&Position, &Faction)>().iter() {
-                    if fac.0 == PLAYER_FACTION { continue; }
-                    let d2 = pos.0.distance_squared(click);
-                    if d2 < best_d { best_d = d2; found = true; }
+
+            // Check if click is on a Building entity or engineer with IsBuilding.
+            let hit_building: Option<hecs::Entity> = {
+                let mut found = None;
+                let mut best = f32::MAX;
+                // Buildings (footprint centre within 80px)
+                for (e, pos) in world.query::<(&components::Position, &components::Building)>()
+                    .iter().map(|(e,(p,_))|(e,p))
+                {
+                    let d = pos.0.distance(click);
+                    if d < 80.0 && d < best { best = d; found = Some(e); }
+                }
+                // Engineers with IsBuilding
+                for (e, (pos, uk)) in world.query::<(&components::Position, &components::UnitKind)>().iter() {
+                    if uk.id != "engineer" { continue; }
+                    if world.get::<&components::IsBuilding>(e).is_err() { continue; }
+                    let d = pos.0.distance(click);
+                    if d < 40.0 && d < best { best = d; found = Some(e); }
                 }
                 found
             };
-            let has_active = sel.iter().any(|&e| {
-                world.get::<&MoveOrder>(e).is_ok()
-                    || world.get::<&components::OrderQueue>(e).map(|q| !q.anchors.is_empty()).unwrap_or(false)
-            });
-            if shift && has_active {
-                for &e in &sel {
-                    if let Ok(q) = world.query_one_mut::<&mut components::OrderQueue>(e) {
-                        q.anchors.push_back(click);
-                    } else {
-                        let mut anchors = std::collections::VecDeque::new();
-                        anchors.push_back(click);
-                        let _ = world.insert_one(e, components::OrderQueue { anchors });
-                    }
-                }
+            if let Some(e) = hit_building {
+                context_entity = Some(e);
             } else {
-                event_log.move_order(sel.len(), click);
-                issue_move_with_flags(&mut world, &nav, &mut flow_cache, &sel, click, attack_target);
+                context_entity = None;
+                // No building hit — process as a move/attack order
+                let shift = is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift);
+                let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
+                let attack_target = {
+                    let mut found = false;
+                    let mut best_d = 24.0f32 * 24.0;
+                    for (_e, (pos, fac)) in world.query::<(&Position, &Faction)>().iter() {
+                        if fac.0 == PLAYER_FACTION { continue; }
+                        let d2 = pos.0.distance_squared(click);
+                        if d2 < best_d { best_d = d2; found = true; }
+                    }
+                    found
+                };
+                let has_active = sel.iter().any(|&e| {
+                    world.get::<&MoveOrder>(e).is_ok()
+                        || world.get::<&components::OrderQueue>(e).map(|q| !q.anchors.is_empty()).unwrap_or(false)
+                });
+                if shift && has_active {
+                    for &e in &sel {
+                        if let Ok(q) = world.query_one_mut::<&mut components::OrderQueue>(e) {
+                            q.anchors.push_back(click);
+                        } else {
+                            let mut anchors = std::collections::VecDeque::new();
+                            anchors.push_back(click);
+                            let _ = world.insert_one(e, components::OrderQueue { anchors });
+                        }
+                    }
+                } else {
+                    event_log.move_order(sel.len(), click);
+                    issue_move_with_flags(&mut world, &nav, &mut flow_cache, &sel, click, attack_target);
+                }
             }
         }
 
@@ -1199,15 +1226,27 @@ async fn main() {
         // Route management panel
         if let Some(del_id) = hud::draw_route_panel(&mut ui, &routes, &world, route_mode_active, route_resource_idx, &hud_layout) {
             routes.remove(del_id);
+            // Despawn any trucks still driving this route — cargo is lost.
+            let stale: Vec<hecs::Entity> = world.query::<&truck::Truck>()
+                .iter()
+                .filter(|(_, t)| t.route_id == del_id)
+                .map(|(e, _)| e)
+                .collect();
+            for e in stale { let _ = world.despawn(e); }
         }
 
-        // Depot inspection panel
+        // Depot inspection panel (left-click)
         if let Some(depot_e) = selected_depot {
-            if !world.contains(depot_e) {
-                selected_depot = None; // depot was destroyed
-            } else if hud::draw_depot_panel(&mut ui, depot_e, &world, &hud_layout) {
-                selected_depot = None; // X clicked
-            }
+            let gone = !world.contains(depot_e);
+            let closed = !gone && hud::draw_depot_panel(&mut ui, depot_e, &world, &hud_layout);
+            if gone || closed { selected_depot = None; }
+        }
+
+        // Building/engineer context panel (right-click)
+        if let Some(ctx_e) = context_entity {
+            let gone = !world.contains(ctx_e);
+            let closed = !gone && hud::draw_building_context(&mut ui, ctx_e, &world, sw, sh);
+            if gone || closed { context_entity = None; }
         }
 
         // --- Win/lose banner (only once a battle has been spawned) ---

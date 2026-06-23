@@ -16,7 +16,11 @@ use crate::depot::{Depot, ResourceType};
 pub const TRUCK_CAPACITY: u32 = 100;
 
 /// Maximum trucks simultaneously active on a single route.
-pub const MAX_TRUCKS_PER_ROUTE: u32 = 3;
+pub const MAX_TRUCKS_PER_ROUTE: u32 = 2;
+
+/// Maximum trucks that can be outbound from a single depot at once (across all routes).
+/// Prevents one rich depot from flooding the map with trucks.
+pub const MAX_TRUCKS_PER_DEPOT: u32 = 4;
 
 // ---------------------------------------------------------------------------
 // Route types
@@ -143,12 +147,24 @@ pub fn dispatch_needed(
     });
 
     let mut dispatches = Vec::new();
+    // Track trucks dispatched per origin depot this tick to enforce per-depot cap.
+    let mut depot_trucks_this_tick: std::collections::HashMap<Entity, u32> = std::collections::HashMap::new();
 
     for idx in indices {
         let route = &registry.routes[idx];
 
-        // Guard: slot available?
+        // Guard: per-route slot available?
         if route.active_trucks >= MAX_TRUCKS_PER_ROUTE {
+            continue;
+        }
+
+        // Guard: per-depot cap (count existing active trucks from this origin).
+        let origin_active: u32 = registry.routes.iter()
+            .filter(|r| r.origin == route.origin)
+            .map(|r| r.active_trucks)
+            .sum::<u32>()
+            + *depot_trucks_this_tick.get(&route.origin).unwrap_or(&0);
+        if origin_active >= MAX_TRUCKS_PER_DEPOT {
             continue;
         }
 
@@ -193,6 +209,7 @@ pub fn dispatch_needed(
 
         // Commit: increment active truck counter and record the dispatch.
         registry.routes[idx].active_trucks += 1;
+        *depot_trucks_this_tick.entry(origin_ent).or_default() += 1;
         dispatches.push((route_id, origin_ent, dest_ent, resource, TRUCK_CAPACITY));
     }
 
