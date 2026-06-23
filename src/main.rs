@@ -580,7 +580,8 @@ async fn main() {
         // gate world input on them, so clicks on any panel never fall through to the world.
         let input_layout = {
             let base = hud::HudLayout::compute(&world, sw, sh);
-            if build_panel_open { base.with_build_panel(defs.buildings.len(), sw, sh) } else { base }
+            let base = if build_panel_open { base.with_build_panel(defs.buildings.len(), sw, sh) } else { base };
+            base.with_route_panel(routes.all().len(), route_origin.is_some(), sh)
         };
         let over_ui = input_layout.contains(mp);
 
@@ -1074,9 +1075,8 @@ async fn main() {
         // Recompute layout after this frame's input so panels reflect current selection.
         let hud_layout = {
             let base = hud::HudLayout::compute(&world, sw, sh);
-            if build_panel_open {
-                base.with_build_panel(defs.buildings.len(), sw, sh)
-            } else { base }
+            let base = if build_panel_open { base.with_build_panel(defs.buildings.len(), sw, sh) } else { base };
+            base.with_route_panel(routes.all().len(), route_origin.is_some(), sh)
         };
         match hud::draw(&mut ui, &world, &economy, &ai, &groups, &hud_layout, &hud::BuildState { buildings: &defs.buildings, placing, panel_open: build_panel_open }) {
             hud::HudAction::Stop => {
@@ -1145,7 +1145,7 @@ async fn main() {
         minimap.draw(&world, &fog, view, hud_layout.minimap);
 
         // Route management panel
-        if let Some(del_id) = hud::draw_route_panel(&mut ui, &routes, &world, route_mode_active, route_resource_idx, sw, sh) {
+        if let Some(del_id) = hud::draw_route_panel(&mut ui, &routes, &world, route_mode_active, route_resource_idx, &hud_layout) {
             routes.remove(del_id);
         }
 

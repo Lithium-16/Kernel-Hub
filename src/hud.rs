@@ -42,6 +42,7 @@ pub struct HudLayout {
     pub command: Option<Rect>,
     pub minimap: Rect,
     pub build_panel: Option<Rect>,
+    pub route_panel: Option<Rect>,
 }
 
 /// Minimap panel size (square), anchored top-right under the resource bar.
@@ -69,8 +70,21 @@ impl HudLayout {
             selection,
             command,
             minimap,
-            build_panel: None, // set by compute_with_build when panel is open
+            build_panel: None,
+            route_panel: None,
         }
+    }
+
+    /// Add route panel rect when routes exist or route mode is active.
+    pub fn with_route_panel(mut self, num_routes: usize, route_mode: bool, sh: f32) -> Self {
+        if num_routes > 0 || route_mode {
+            let panel_w = 220.0;
+            let row_h   = 36.0;
+            let n_rows  = num_routes.max(1) as f32;
+            let panel_h = 28.0 + n_rows * row_h + if route_mode { 44.0 } else { 0.0 };
+            self.route_panel = Some(Rect::new(8.0, sh - BAR_H - 8.0 - panel_h, panel_w, panel_h));
+        }
+        self
     }
 
     /// Recompute including the build panel (call when build_open is true).
@@ -94,6 +108,7 @@ impl HudLayout {
             || self.selection.is_some_and(|r| r.contains(p))
             || self.command.is_some_and(|r| r.contains(p))
             || self.build_panel.is_some_and(|r| r.contains(p))
+            || self.route_panel.is_some_and(|r| r.contains(p))
     }
 }
 
@@ -453,24 +468,16 @@ pub fn draw_route_panel(
     world: &World,
     route_mode_active: bool,
     route_resource_idx: usize,
-    _sw: f32,
-    sh: f32,
+    layout: &HudLayout,
 ) -> Option<u32> {
     use crate::depot::ResourceType;
-    use crate::supply_route::SupplyRoute;
 
-    if routes.all().is_empty() && !route_mode_active { return None; }
-
-    let panel_w = 220.0;
-    let row_h   = 36.0;
-    let n_rows  = routes.all().len().max(1) as f32;
-    let panel_h = 28.0 + n_rows * row_h + if route_mode_active { 44.0 } else { 0.0 };
-    let px = 8.0;
-    let py = sh - crate::hud::BAR_H - 8.0 - panel_h;
-    let panel = Rect::new(px, py, panel_w, panel_h);
+    let panel = layout.route_panel?;
     ui.panel(panel);
 
-    let mut y = py + 18.0;
+    let (px, row_h) = (panel.x, 36.0_f32);
+    let panel_w = panel.w;
+    let mut y = panel.y + 18.0;
     ui.label(vec2(px + 8.0, y), "Supply Routes");
     y += 12.0;
 
@@ -496,17 +503,14 @@ pub fn draw_route_panel(
         let ri = res_idx(route.resource);
         let col = res_colors[ri];
 
-        // Colour swatch
         draw_rectangle(px + 8.0, y, 8.0, 24.0, col);
 
-        // Resource name + truck count
         let dest_stock = world.get::<&crate::depot::Depot>(route.destination)
             .map(|d| d.get(route.resource)).unwrap_or(0);
         let label = format!("{} {}/{} ({} trucks)", res_names[ri], dest_stock, route.desired_stock, route.active_trucks);
         ui.label(vec2(px + 22.0, y + 16.0), &label);
 
-        // Delete button
-        if ui.button(Rect::new(px + panel_w - 30.0, y + 4.0, 22.0, 18.0), "X") {
+        if ui.button(Rect::new(px + panel_w - 30.0, y + 6.0, 22.0, 20.0), "X") {
             delete_id = Some(route.id);
         }
         y += row_h;
