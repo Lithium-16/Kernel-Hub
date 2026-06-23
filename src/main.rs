@@ -424,6 +424,8 @@ async fn main() {
     let mut route_origin: Option<Option<hecs::Entity>> = None;
     // Resource type cycling for new routes
     let mut route_resource_idx: usize = 0;
+    // Selected depot for inspection panel (None = panel closed)
+    let mut selected_depot: Option<hecs::Entity> = None;
 
     let mut sim = sim::Sim::new();
     let tick_dt = 1.0 / sim::TICK_RATE as f32;
@@ -607,7 +609,8 @@ async fn main() {
         let input_layout = {
             let base = hud::HudLayout::compute(&world, sw, sh);
             let base = if build_panel_open { base.with_build_panel(defs.buildings.len(), sw, sh) } else { base };
-            base.with_route_panel(routes.all().len(), route_origin.is_some(), sh)
+            let base = base.with_route_panel(routes.all().len(), route_origin.is_some(), sh);
+            if selected_depot.is_some() { base.with_depot_panel(sw, sh) } else { base }
         };
         let over_ui = input_layout.contains(mp);
 
@@ -714,7 +717,8 @@ async fn main() {
                         route_origin = Some(Some(depot_e));
                     }
                     Some(Some(origin_e)) if origin_e != depot_e => {
-                        // Second click: create route for current resource
+                        // Second click: create route with default desired stock 500.
+                        // Player can adjust in the route panel later.
                         let res = [
                             depot::ResourceType::Ammo,
                             depot::ResourceType::Fuel,
@@ -731,6 +735,27 @@ async fn main() {
         }
         if route_mode_active && is_mouse_button_pressed(MouseButton::Right) {
             route_origin = None;
+        }
+
+        // --- Depot click (normal mode, not route mode) ---
+        // Left-clicking near a depot opens its inspection panel.
+        if is_mouse_button_pressed(MouseButton::Left) && !over_ui && !placing_active && !route_mode_active {
+            let click = cam2d.screen_to_world(mp);
+            let hit: Option<hecs::Entity> = {
+                let mut found = None;
+                let mut best = f32::MAX;
+                for (e, pos) in world.query::<(&components::Position, &depot::Depot)>().iter().map(|(e,(p,_))|(e,p)) {
+                    let d = pos.0.distance(click);
+                    if d < 80.0 && d < best { best = d; found = Some(e); }
+                }
+                found
+            };
+            if let Some(depot_e) = hit {
+                selected_depot = Some(depot_e);
+            } else if selected_depot.is_some() {
+                // Click elsewhere closes the panel
+                selected_depot = None;
+            }
         }
 
         // --- Selection (left mouse) ---
@@ -1102,7 +1127,8 @@ async fn main() {
         let hud_layout = {
             let base = hud::HudLayout::compute(&world, sw, sh);
             let base = if build_panel_open { base.with_build_panel(defs.buildings.len(), sw, sh) } else { base };
-            base.with_route_panel(routes.all().len(), route_origin.is_some(), sh)
+            let base = base.with_route_panel(routes.all().len(), route_origin.is_some(), sh);
+            if selected_depot.is_some() { base.with_depot_panel(sw, sh) } else { base }
         };
         match hud::draw(&mut ui, &world, &economy, &ai, &groups, &hud_layout, &hud::BuildState { buildings: &defs.buildings, placing, panel_open: build_panel_open }) {
             hud::HudAction::Stop => {
@@ -1173,6 +1199,15 @@ async fn main() {
         // Route management panel
         if let Some(del_id) = hud::draw_route_panel(&mut ui, &routes, &world, route_mode_active, route_resource_idx, &hud_layout) {
             routes.remove(del_id);
+        }
+
+        // Depot inspection panel
+        if let Some(depot_e) = selected_depot {
+            if !world.contains(depot_e) {
+                selected_depot = None; // depot was destroyed
+            } else if hud::draw_depot_panel(&mut ui, depot_e, &world, &hud_layout) {
+                selected_depot = None; // X clicked
+            }
         }
 
         // --- Win/lose banner (only once a battle has been spawned) ---

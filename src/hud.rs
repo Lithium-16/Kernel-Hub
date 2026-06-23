@@ -43,6 +43,7 @@ pub struct HudLayout {
     pub minimap: Rect,
     pub build_panel: Option<Rect>,
     pub route_panel: Option<Rect>,
+    pub depot_panel: Option<Rect>,
 }
 
 /// Minimap panel size (square), anchored top-right under the resource bar.
@@ -72,10 +73,17 @@ impl HudLayout {
             minimap,
             build_panel: None,
             route_panel: None,
+            depot_panel: None,
         }
     }
 
     /// Add route panel rect when routes exist or route mode is active.
+    pub fn with_depot_panel(mut self, sw: f32, sh: f32) -> Self {
+        // Depot panel: 200×160, centre of screen just above the bottom bar
+        self.depot_panel = Some(Rect::new(sw * 0.5 - 100.0, sh - BAR_H - 8.0 - 168.0, 200.0, 168.0));
+        self
+    }
+
     pub fn with_route_panel(mut self, num_routes: usize, route_mode: bool, sh: f32) -> Self {
         if num_routes > 0 || route_mode {
             let panel_w = 220.0;
@@ -109,6 +117,7 @@ impl HudLayout {
             || self.command.is_some_and(|r| r.contains(p))
             || self.build_panel.is_some_and(|r| r.contains(p))
             || self.route_panel.is_some_and(|r| r.contains(p))
+            || self.depot_panel.is_some_and(|r| r.contains(p))
     }
 }
 
@@ -458,6 +467,65 @@ fn draw_selection_panel(ui: &mut Ui, world: &World, r: Rect) {
     }
 }
 
+// ─── Depot Inspection Panel ──────────────────────────────────────────────────
+
+/// Floating info panel showing a depot's current stock levels.
+/// Call when `layout.depot_panel` is Some (depot is selected).
+/// Returns true if the close button was clicked.
+pub fn draw_depot_panel(
+    ui: &mut Ui,
+    depot_e: hecs::Entity,
+    world: &World,
+    layout: &HudLayout,
+) -> bool {
+    use crate::depot::{Depot, ResourceType};
+
+    let r = match layout.depot_panel { Some(r) => r, None => return false };
+    ui.panel(r);
+
+    // Title: depot kind if available
+    let kind = world.get::<&crate::components::BuildingKind>(depot_e)
+        .map(|k| k.0.replace('_', " ").to_uppercase())
+        .unwrap_or_else(|_| "DEPOT".into());
+    ui.label(vec2(r.x + 8.0, r.y + 18.0), &kind);
+
+    let mut closed = false;
+    if ui.button(Rect::new(r.x + r.w - 26.0, r.y + 6.0, 20.0, 16.0), "X") {
+        closed = true;
+    }
+
+    let depot = match world.get::<&Depot>(depot_e) {
+        Ok(d) => d,
+        Err(_) => return closed,
+    };
+
+    let res_list = [
+        (ResourceType::Ammo,             "Ammo",     Color::new(1.0, 0.80, 0.20, 1.0)),
+        (ResourceType::Fuel,             "Fuel",     Color::new(0.3, 0.80, 1.00, 1.0)),
+        (ResourceType::BuildingSupplies, "Supplies", Color::new(0.8, 0.65, 0.35, 1.0)),
+        (ResourceType::WeaponParts,      "Parts",    Color::new(0.75, 0.40, 1.00, 1.0)),
+    ];
+
+    let mut y = r.y + 32.0;
+    for (res, name, col) in &res_list {
+        let val = depot.get(*res);
+        draw_rectangle(r.x + 8.0, y, 6.0, 14.0, *col);
+        let label = format!("{name}: {val}");
+        let text_col = if val == 0 { Color::new(1.0, 0.3, 0.3, 1.0) }
+                       else if val < 200 { Color::new(1.0, 0.72, 0.25, 1.0) }
+                       else { ui.theme.text };
+        ui.label_colored(vec2(r.x + 20.0, y + 12.0), &label, text_col);
+        // Mini bar
+        let bw = r.w - 24.0;
+        let cap = 2000u32;
+        draw_rectangle(r.x + 8.0, y + 16.0, bw, 4.0, Color::new(0.15, 0.17, 0.20, 1.0));
+        let fill_w = (val as f32 / cap as f32).clamp(0.0, 1.0) * bw;
+        draw_rectangle(r.x + 8.0, y + 16.0, fill_w, 4.0, *col);
+        y += 34.0;
+    }
+    closed
+}
+
 // ─── Supply Route Panel ───────────────────────────────────────────────────────
 
 /// Draw the supply route management panel on the left side when routes exist or
@@ -503,12 +571,18 @@ pub fn draw_route_panel(
         let ri = res_idx(route.resource);
         let col = res_colors[ri];
 
-        draw_rectangle(px + 8.0, y, 8.0, 24.0, col);
-
+        // Health dot: green = healthy, amber = low (<40%), red = empty
         let dest_stock = world.get::<&crate::depot::Depot>(route.destination)
             .map(|d| d.get(route.resource)).unwrap_or(0);
-        let label = format!("{} {}/{} ({} trucks)", res_names[ri], dest_stock, route.desired_stock, route.active_trucks);
-        ui.label(vec2(px + 22.0, y + 16.0), &label);
+        let fill_frac = if route.desired_stock > 0 { dest_stock as f32 / route.desired_stock as f32 } else { 1.0 };
+        let health_col = if fill_frac >= 0.4 { Color::new(0.3, 0.9, 0.3, 1.0) }
+                         else if fill_frac > 0.0 { Color::new(1.0, 0.72, 0.25, 1.0) }
+                         else { Color::new(1.0, 0.3, 0.3, 1.0) };
+        draw_circle(px + 10.0, y + 12.0, 5.0, health_col);
+        draw_rectangle(px + 20.0, y, 4.0, 24.0, col);
+
+        let label = format!("{} {}/{} ({}🚛)", res_names[ri], dest_stock, route.desired_stock, route.active_trucks);
+        ui.label(vec2(px + 28.0, y + 16.0), &label);
 
         if ui.button(Rect::new(px + panel_w - 30.0, y + 6.0, 22.0, 20.0), "X") {
             delete_id = Some(route.id);
