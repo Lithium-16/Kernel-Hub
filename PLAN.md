@@ -4,15 +4,13 @@
 > *actionable build plan*: milestones, the systems each phase delivers, concrete tasks, key
 > data types, and acceptance criteria. Update checkboxes and notes as work progresses.
 >
-> **Last updated:** 2026-06-22 · **Status:** M0 + Phase 1 + Phase 2 done; Phase 2.5 UI substantially
-> done; Phase 3 core (combat groups, buildings, combat, minimap, debug suite) in progress.
+> **Last updated:** 2026-06-22 · **Status:** M0 + Phase 1 + Phase 2 + Phase 3 done. Phase 4 next.
 >
-> **DIRECTION UPDATE 2026-06-22** — Game is now a tile-based operational RTS. Primary interface is
-> Combat Groups, not individual units. Logistics is intent-based (player defines routes/depots,
-> system executes). Expansion is the core progression loop. See PROJECT.md §2, §3, §7.17-7.19, and
-> Decision Log entry 2026-06-22 for the full update. Existing code (movement, combat, ECS, buildings)
-> is compatible — new build priorities are the Combat Group layer, logistics intent UI, expansion flow,
-> and geographic terrain. See "Next phase priorities" section below.
+> **LOGISTICS DESIGN (2026-06-22)** — Resources are fully physical. No teleportation. Every resource
+> exists at a location, must be driven to its destination by a truck, and can be intercepted or
+> destroyed en route. The player manages *routes, priorities, stockpiles, infrastructure* — the
+> game manages individual trucks, deliveries, loading/unloading, and route execution. The player
+> should never feel like they're playing Factorio. See "Logistics System" section below.
 
 ## How to use this plan
 - Phases are **sequential** and each ends in a **verifiable, runnable build**. Do not start a phase
@@ -199,57 +197,121 @@ Fog of war makes geography matter.
 
 ---
 
-## Phase 4 — Physical Resources + Extraction
-**Goal:** the first economic loop. Resources are physical quantities in the world, not numbers in a spreadsheet. Weapons stop firing when ammo runs out. Vehicles stop when fuel runs out.
+## Logistics System (canonical design — governs Phases 4–6)
 
-**Build:**
-- [ ] **Resource types** — Ore, Oil (strategic); Ammo, Fuel, Building Supplies, Weapon Parts (logistics). All stored as integer quantities in depots.
-- [ ] **Extraction buildings** — Mine (on Ore Basin tile), Oil Pump (on Oil Field tile). Engineers build them from blueprints. Produce resource over time into nearest depot.
-- [ ] **Processing buildings** — Processing Facility (Ore → Building Supplies + Weapon Parts), Fuel Refinery (Oil → Fuel), Ammo Factory (Weapon Parts → Ammo). Engineers build from blueprints.
-- [ ] **Depot** — stores all resource types; visible stockpile bar per resource (amber=low, red=empty); supply radius around it.
-- [ ] **Ammo consumption** — units draw ammo from nearby depot before firing; weapons stop when ammo=0.
-- [ ] **Fuel consumption** — vehicles consume fuel on movement; stop when fuel=0.
-- [ ] **Geographic resource regions** — Ore Basin, Oil Field as named tile regions; visible on map and Region View.
-- [ ] **Construction from blueprints** — Engineer Group assigned to blueprint auto-paths to it and builds, consuming Building Supplies from nearest depot.
+> **Core philosophy: resources are physical.** Every resource exists at a specific location.
+> It must be driven through the world by a truck. It can be stored, transported, intercepted,
+> or destroyed. Nothing teleports.
 
-**Key types:** `ResourceType`, `Stockpile`, `Depot`, `Extractor`, `ProcessingBuilding`, `OreBasin`, `OilField`.
+### What the player manages
+- **Routes** — origin depot → destination depot, resource type, priority (High/Med/Low)
+- **Desired stockpiles** — per depot per resource (e.g. Eastern Pass Depot: Ammo desired 5000, current 2700); the system sends trucks to fill the gap
+- **Infrastructure** — roads determine convoy speed and throughput; damaged roads choke supply
+- **Depot placement** — every region should have a depot; depots are regional warehouses
 
-**Acceptance:** place a mine blueprint, assign engineers, mine builds and ore flows into depot; ammo factory consumes weapon parts and produces ammo; a unit runs out of ammo and stops firing; a vehicle runs out of fuel and stops moving; depot bars visible and accurate.
+### What the game manages automatically
+- Individual trucks (spawned, routed, loaded, driven, unloaded, returned)
+- Convoy grouping (multiple trucks on same route naturally form a convoy)
+- Loading/unloading at depot
+- Route execution and rerouting around damage
+
+### Resource types
+
+| Resource | Produced by | Consumed by | When exhausted |
+|---|---|---|---|
+| Ore | Mine (on OreBasin tile) | Processing Facility | no Parts/Supplies output |
+| Oil | Oil Pump (on OilField tile) | Fuel Refinery | no Fuel output |
+| Ammo | Ammo Factory (Parts→Ammo) | All armed units (per shot, from onboard storage) | unit cannot fire |
+| Fuel | Fuel Refinery (Oil→Fuel) | Trucks, tanks, vehicles (continuous burn while moving) | vehicle stranded |
+| Building Supplies | Processing Facility (Ore→Supplies) | Construction, repairs, roads | no building/repair |
+| Weapon Parts | Processing Facility (Ore→Parts) | Ammo Factory input, reinforcements | no replacement units |
+
+### Per-unit onboard storage (physical, not a depot gate)
+- Every armed unit has `AmmoStorage { shots: u32, capacity: u32 }` — its own shells onboard
+- Every vehicle has `FuelTank { fuel: f32, capacity: f32 }` — its own fuel onboard
+- Unit fires → `shots -= 1`; unit moves → `fuel -= burn_rate * dt`
+- When `shots == 0`: gun is physically empty; unit cannot fire until restocked
+- When `fuel == 0.0`: engine dead; unit cannot move until refueled
+- **Restocking**: unit drives within range of a Depot → depot transfers a batch to the unit's storage. OR a supply truck drives to the unit. The depot must have stock; the resource must have physically arrived there by truck.
+
+### Trucks
+- Physical vehicles with `Health`, `Position`, `Faction`, `Cargo { resource: ResourceType, amount: u32 }`
+- Follow flow-field routes between depots; visible on map; can be destroyed
+- On arrival at destination: transfer cargo to depot's stockpile
+- Return to origin when empty
+- Multiple trucks on same route → natural convoy; can be escorted by combat groups
+
+### Throughput model
+- Road tile quality determines convoy speed (already in nav: off-road 1×, pass 0.5×)
+- Damaged road tiles (future: artillery craters) reduce speed further → throughput drops
+- Throughput = trucks/minute × cargo per truck; if consumption > throughput, depot drains
+
+### Logistics warfare
+- Attack roads → trucks slow, throughput drops, frontline depot drains
+- Attack convoys → cargo lost, trucks gone
+- Attack depots → stockpile destroyed
+- Player defends by: escorts, alternate routes, QRF response, road repair engineers
 
 ---
 
-## Phase 5 — Roads + Supply Routes + Trucks
-**Goal:** the logistics layer. The player draws routes; the system executes. A cut road immediately reduces throughput.
+## Phase 4 — Per-unit Storage + Depots + Extraction
+**Goal:** resources exist physically. Units carry onboard ammo/fuel and run dry. Depots store resources. Extractors produce into local depots. No trucks yet — starting stock only.
 
 **Build:**
-- [ ] **Road blueprint tool** — player clicks two points, ghost preview shown, confirm places road tiles; engineers auto-claim and build using Building Supplies.
-- [ ] **Road tiers** — off-road (1× speed), dirt road (2×), paved (3×); road tile type determines convoy speed.
-- [ ] **Road damage + repair** — artillery damages road segments; damaged road reverts toward off-road speed; engineers auto-repair if Building Supplies available and repair job assigned.
-- [ ] **Supply Route tool** — player selects origin depot, destination depot, resource type, priority; system creates the route.
-- [ ] **Truck system** — trucks spawn from origin depot, follow road network (pathfind along road tiles), deliver resource to destination, return; visible as vehicle sprites.
-- [ ] **Route display** — active routes shown as colored lines on map; alert icon when route disrupted (road cut, depot empty, trucks destroyed).
-- [ ] **Convoy ambush** — enemy units can attack trucks; destroyed truck loses cargo; player sees notification.
+- [x] **Resource types defined** — `ResourceType` enum (Ammo/Fuel/BuildingSupplies/WeaponParts) in depot.rs. ✓
+- [x] **Depot entity** — `Depot` struct with stockpile HashMap, supply_range, faction. `depot.rs` complete. ✓
+- [ ] **Per-unit ammo storage** — `AmmoStorage { shots: u32, capacity: u32 }` component on all armed units; spawned with full load; `combat::step` decrements on each shot; at 0 gun cannot fire.
+- [ ] **Per-unit fuel tank** — `FuelTank { fuel: f32, capacity: f32 }` on all mobile units; `movement::step` burns fuel proportional to speed; at 0 unit cannot move.
+- [ ] **Depot resupply radius** — unit within `supply_range` of same-faction Depot with stock → transfers batch to unit's AmmoStorage/FuelTank (once per ~5s per unit, not per tick).
+- [ ] **Starting depot spawn** — one Depot per side near HQ with starting stock (Ammo 2000, Fuel 1500, Supplies 500, Parts 200); HUD top bar shows real totals from nearest player depot.
+- [ ] **Extraction buildings** — Mine (OreBasin tile) → produces Ore into its attached local depot every 8s; Oil Pump (OilField) → produces Oil every 10s. Both require Engineers to build.
+- [ ] **Processing buildings** — Processing Facility (Ore→Supplies+Parts, 15s), Fuel Refinery (Oil→Fuel, 12s), Ammo Factory (Parts→Ammo, 10s). Each attached to a local depot.
+- [ ] **HUD depot panel** — click a Depot to see per-resource stockpile bars (current vs desired); amber <25%, red =0.
 
-**Key types:** `RoadTile`, `RoadTier`, `SupplyRoute`, `Truck`, `RouteAlert`.
+**Key types:** `AmmoStorage`, `FuelTank`, `Extractor { kind, attached_depot: Entity, cooldown }`, `Processor { kind, attached_depot: Entity, cooldown }`.
 
-**Acceptance:** player draws a road, engineers build it; player creates a route, trucks drive it; artillery damages the road, throughput drops, player sees alert; engineers repair the road, throughput recovers; trucks can be destroyed.
+**Acceptance (COLDWAR_ASSERT scenarios to add):**
+- `ammo_drains`: armed unit fires until AmmoStorage.shots==0, then stops firing for 10 ticks.
+- `fuel_drains`: vehicle moves until FuelTank.fuel==0.0, then stops.
+- `depot_resupply`: unit near depot gets ammo transferred after 5s.
 
 ---
 
-## Phase 6 — Reinforcements + Region System + Interdiction
-**Goal:** the operational layer. Groups track losses, regions appear on the strategic map, supply lines can be interdicted.
+## Phase 5 — Supply Routes + Trucks + Roads
+**Goal:** the physical logistics layer. Player draws routes between depots; system dispatches trucks; trucks drive, deliver, return. Roads determine throughput. Cutting a road starves a depot.
 
 **Build:**
-- [ ] **Loss tracking** — Combat Group card shows current/original strength (34/50 tanks); tracks kills against the group's roster.
-- [ ] **Reinforce panel** — player clicks Reinforce on a group; panel shows available sources (factories, reserve depots, build queues) with travel time estimates; player chooses; replacement units path to group automatically.
-- [ ] **Region system** — named strategic areas (Ore Basin, Mountain Pass, Oil Field, Valley, etc.); zoom out past threshold → Region View; each region shows ownership, military presence, stockpile levels, threat level, resource output.
-- [ ] **Region ownership** — region controlled by faction with military presence + a depot there; contested when both factions present; losing a region cuts resource output immediately.
-- [ ] **Logistics interdiction** — Artillery Group can be ordered to fire on road segments (destroying them); Recon and light groups can attack convoys; enemy can do the same.
-- [ ] **Alternate route** — if primary road cut, player can draw alternate route around it; system switches trucks automatically.
+- [ ] **Supply Route** — `SupplyRoute { id, origin: Entity, destination: Entity, resource: ResourceType, priority: Priority }`. Player creates via UI: click origin depot → click destination depot → pick resource + priority. Stored in a `RouteRegistry`.
+- [ ] **Desired stockpile UI** — per depot, player sets desired amount per resource. System compares current vs desired and triggers dispatch when deficit > truck_capacity.
+- [ ] **Truck entity** — `Truck { cargo_type: ResourceType, cargo_amount: u32, route_id: u32, state: TruckState }` with `Health`, `Position`, `Faction`, `Renderable`. TruckState: `{ Idle, DrivingToPickup, Loading, DrivingToDelivery, Unloading, Returning }`.
+- [ ] **Truck dispatch** — each tick, RouteRegistry checks all routes: if destination below desired and origin has stock → spawn Truck at origin; truck uses flow-field to drive to destination.
+- [ ] **Cargo transfer** — on arrival: `origin_depot.withdraw(resource, amount)` → `truck.cargo_amount`; on delivery: `destination_depot.add(resource, amount)`.
+- [ ] **Convoy grouping** — trucks on same route dispatched within 10s of each other auto-form a convoy (shared flow field, travel together).
+- [ ] **Route display** — active routes shown as colored lines on world map; trucks visible as sprites driving along them; click route → show throughput stats.
+- [ ] **Truck destruction** — enemy units attack trucks; on death, cargo is lost; notification fires.
+- [ ] **Road blueprint tool** — player draws road between two points; Engineers auto-build using Building Supplies; improves convoy speed on those tiles.
+- [ ] **Route alert** — if truck destroyed or depot runs dry, amber alert on route line + notification.
 
-**Key types:** `CombatGroupRoster`, `ReinforceSource`, `Region`, `RegionOwnership`, `InterdictionTarget`.
+**Key types:** `SupplyRoute`, `RouteRegistry`, `Truck`, `TruckState`, `Convoy`, `RouteAlert`.
 
-**Acceptance:** group takes losses and card shows reduced strength; player reinforces from a factory and units arrive; zooming out shows Region View with cards; enemy cuts a road and trucks slow; player creates alternate route and trucks reroute.
+**Acceptance:** create a route, trucks dispatch, cargo transfers; destroy a truck and cargo is lost; depot below desired triggers new dispatch; route line visible on map.
+
+---
+
+## Phase 6 — Interdiction + Region Ownership + Reinforcements
+**Goal:** logistics warfare and the operational layer. Players attack and defend supply lines. Regions have ownership. Losses can be replaced if the supply chain is intact.
+
+**Build:**
+- [ ] **Loss tracking** — Combat Group card: current/original strength (34/50 tanks).
+- [ ] **Reinforcement** — player presses Reinforce on group; system finds nearest factory/reserve with stock; replacement units physically drive from factory to group via road network.
+- [ ] **Region ownership** — region held by faction with military presence + a depot; contested when both present; losing region → extraction stops.
+- [ ] **Road damage** — artillery can target road tiles; damaged tiles reduce convoy speed; engineers repair using Building Supplies.
+- [ ] **Alternate routes** — if route's road is severed, player draws alternate; trucks reroute automatically.
+- [ ] **Convoy escort** — player assigns a combat group as escort for a route; escort follows convoys and engages attackers.
+- [ ] **AI logistics** — enemy AI builds supply routes, dispatches trucks, attacks player supply lines when advantageous.
+- [ ] **Region View** — zoom out past threshold → regional overlay showing ownership, stockpile levels, threat level per region.
+
+**Key types:** `RoadDamage`, `RegionOwnership`, `ConvoyEscort`, `ReinforceJob`, `AiLogisticsPlanner`.
 
 ---
 
