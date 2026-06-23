@@ -38,6 +38,7 @@ mod resupply;
 mod selection;
 mod sim;
 mod spatial;
+mod processing;
 mod spawn_building;
 mod stance;
 mod ui;
@@ -812,6 +813,7 @@ async fn main() {
             grid.rebuild(&world);
             combat::step(&mut world, &grid, tick_dt, PLAYER_FACTION);
             extraction::step(&mut world, tick_dt);
+            processing::step(&mut world, tick_dt);
             resupply_tracker.step(&mut world);
             // Construction: engineers advance blueprints toward completion.
             let completed_blueprints = construction::step(&mut world, tick_dt);
@@ -835,7 +837,63 @@ async fn main() {
                 // Despawn the blueprint, then spawn the real building.
                 let _ = world.despawn(bp_entity);
                 if let Some(def) = defs.buildings.iter().find(|b| b.id == building_id) {
-                    spawn_building::spawn_building(&mut world, def, btx, bty, &bfaction);
+                    let bx = (btx as f32 + def.w as f32 * 0.5) * map::TILE_SIZE;
+                    let by = (bty as f32 + def.h as f32 * 0.5) * map::TILE_SIZE;
+                    let building_e = spawn_building::spawn_building(&mut world, def, btx, bty, &bfaction);
+
+                    // Attach extraction/processing components that need a co-located depot.
+                    match building_id.as_str() {
+                        "mine" | "oil_pump" => {
+                            // Spawn a small local depot next to the extractor.
+                            let local_depot = world.spawn((
+                                components::Position(vec2(bx, by)),
+                                components::Faction(bfaction.clone()),
+                                depot::Depot::new(&bfaction, 300.0),
+                            ));
+                            let kind = if building_id == "mine" {
+                                extraction::ExtractorKind::Mine
+                            } else {
+                                extraction::ExtractorKind::OilPump
+                            };
+                            let _ = world.insert_one(building_e, extraction::Extractor {
+                                kind, attached_depot: local_depot, cooldown: 0.0,
+                            });
+                        }
+                        "processing" => {
+                            let local_depot = world.spawn((
+                                components::Position(vec2(bx, by)),
+                                components::Faction(bfaction.clone()),
+                                depot::Depot::new(&bfaction, 300.0),
+                            ));
+                            let _ = world.insert_one(building_e, processing::Processor {
+                                kind: processing::ProcessorKind::ProcessingFacility,
+                                attached_depot: local_depot, cooldown: 0.0,
+                            });
+                        }
+                        "refinery" => {
+                            let local_depot = world.spawn((
+                                components::Position(vec2(bx, by)),
+                                components::Faction(bfaction.clone()),
+                                depot::Depot::new(&bfaction, 300.0),
+                            ));
+                            let _ = world.insert_one(building_e, processing::Processor {
+                                kind: processing::ProcessorKind::FuelRefinery,
+                                attached_depot: local_depot, cooldown: 0.0,
+                            });
+                        }
+                        "ammo_factory" => {
+                            let local_depot = world.spawn((
+                                components::Position(vec2(bx, by)),
+                                components::Faction(bfaction.clone()),
+                                depot::Depot::new(&bfaction, 300.0),
+                            ));
+                            let _ = world.insert_one(building_e, processing::Processor {
+                                kind: processing::ProcessorKind::AmmoFactory,
+                                attached_depot: local_depot, cooldown: 0.0,
+                            });
+                        }
+                        _ => {}
+                    }
                 }
             }
             // AI brain tick — uses same systems as player
