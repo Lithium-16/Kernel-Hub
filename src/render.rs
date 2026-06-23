@@ -45,6 +45,8 @@ pub fn present(
     if !sprites.has_hull_turrets() {
         draw_turret_barrels_fogged(world, fog, camera.scale);
     }
+    draw_building_turrets(world, fog);
+    draw_engineer_beams(world);
     draw_tracers(world);
     draw_health_bars_fogged(world, fog);
     draw_hitboxes(world);
@@ -447,4 +449,71 @@ fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &S
         map.height,
     );
     draw_text(&info, 16.0, sh - 66.0, 22.0, Color::new(0.80, 0.80, 0.80, 1.0));
+}
+
+/// Turret barrels for buildings — buildings have Turret+Position but not Renderable,
+/// so they're skipped by draw_turret_barrels_fogged. Draw their barrels here.
+fn draw_building_turrets(world: &hecs::World, fog: &crate::fog::FogGrid) {
+    use crate::components::{Building, Faction, Turret};
+    for (_e, (pos, b, turret, fac)) in
+        world.query::<(&Position, &Building, &Turret, &Faction)>().iter()
+    {
+        // Hide enemy building turrets in fog
+        if fac.0 != crate::PLAYER_FACTION && !fog.visible_world(pos.0) { continue; }
+
+        let ts = map::TILE_SIZE;
+        let building_w = b.w as f32 * ts;
+        let building_h = b.h as f32 * ts;
+
+        // Turret base: dark circle in the building centre
+        let base_r = (building_w.min(building_h) * 0.28).clamp(6.0, 20.0);
+        draw_circle(pos.0.x, pos.0.y, base_r, Color::new(0.18, 0.20, 0.22, 1.0));
+        draw_circle_lines(pos.0.x, pos.0.y, base_r, 1.5, Color::new(0.40, 0.44, 0.50, 1.0));
+
+        // Barrel: line from centre outward along turret angle
+        let barrel_len = base_r + (building_w.min(building_h) * 0.30).clamp(8.0, 24.0);
+        let barrel_w   = (base_r * 0.40).clamp(2.5, 6.0);
+        let cos = turret.angle.cos();
+        let sin = turret.angle.sin();
+        let tip  = pos.0 + vec2(cos, sin) * barrel_len;
+        let base = pos.0 + vec2(cos, sin) * base_r * 0.4;
+        draw_line(base.x, base.y, tip.x, tip.y, barrel_w, Color::new(0.22, 0.25, 0.28, 1.0));
+        // Muzzle cap
+        draw_circle(tip.x, tip.y, barrel_w * 0.7, Color::new(0.30, 0.34, 0.38, 1.0));
+    }
+}
+
+/// Animated construction beams from Engineers to their claimed Blueprint.
+/// A pulsing cyan line gives clear visual feedback that building is in progress.
+fn draw_engineer_beams(world: &hecs::World) {
+    use crate::components::{IsBuilding, UnitKind};
+    let t = get_time() as f32;
+
+    for (_e, (pos, ib, kind)) in world.query::<(&Position, &IsBuilding, &UnitKind)>().iter() {
+        if kind.id != "engineer" { continue; }
+
+        // Get blueprint position
+        let bp_pos = match world.get::<&Position>(ib.blueprint) {
+            Ok(p) => p.0,
+            Err(_) => continue,
+        };
+
+        let dist = pos.0.distance(bp_pos);
+        // Only show beam when engineer is close enough to actually be building
+        if dist > 120.0 { continue; }
+
+        // Pulse: alpha oscillates between 0.4 and 1.0
+        let pulse = ((t * 4.0).sin() * 0.5 + 0.5) * 0.6 + 0.4;
+        let beam  = Color::new(0.35, 1.0, 0.80, pulse);
+        let glow  = Color::new(0.35, 1.0, 0.80, pulse * 0.25);
+
+        // Outer glow (wide, faint)
+        draw_line(pos.0.x, pos.0.y, bp_pos.x, bp_pos.y, 5.0, glow);
+        // Core beam (narrow, bright)
+        draw_line(pos.0.x, pos.0.y, bp_pos.x, bp_pos.y, 1.5, beam);
+
+        // Spark at the blueprint end — small circle that pulses
+        let spark_r = 3.0 + ((t * 6.0).sin() * 1.5).abs();
+        draw_circle(bp_pos.x, bp_pos.y, spark_r, Color::new(0.5, 1.0, 0.9, pulse));
+    }
 }
