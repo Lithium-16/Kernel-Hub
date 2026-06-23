@@ -300,7 +300,7 @@ async fn main() {
 
     let sprites = Sprites::load();
     let defs = data::load_definitions();
-    let (map, _regions) = map::TileMap::generate(256, 256);
+    let (map, regions) = map::TileMap::generate(256, 256);
     let map_px = map.size_px();
     let mut nav = NavGrid::from_map(&map);
     let mut flow_cache = FlowCache::new(64);
@@ -759,7 +759,7 @@ async fn main() {
         combat::update_turrets(&mut world, &grid, get_frame_time());
 
         let drag_box = drag_start.map(|s| (s, mp));
-        render::present(&world, &map, &fog, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
+        render::present(&world, &map, &regions, &fog, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
         // Recompute layout after this frame's input so panels reflect current selection.
         let hud_layout = hud::HudLayout::compute(&world, sw, sh);
         match hud::draw(&mut ui, &world, &economy, &ai, &groups, &hud_layout) {
@@ -860,7 +860,7 @@ async fn main() {
             frame += 1;
             if frame >= capture_frames {
                 let rt = render_target(screen_width() as u32, screen_height() as u32);
-                render::present(&world, &map, &fog, &cam, &sim, &sprites, None, None, tick_ms, Some(rt.clone()));
+                render::present(&world, &map, &regions, &fog, &cam, &sim, &sprites, None, None, tick_ms, Some(rt.clone()));
                 let mut uicam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh));
                 uicam.render_target = Some(rt.clone());
                 set_camera(&uicam);

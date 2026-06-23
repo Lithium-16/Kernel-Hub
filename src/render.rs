@@ -7,7 +7,7 @@ use macroquad::prelude::*;
 use crate::assets::Sprites;
 use crate::camera::GameCamera;
 use crate::components::{Heading, MoveOrder, Position, Renderable, Selected};
-use crate::map::{self, TileMap};
+use crate::map::{self, Region, RegionKind, TileMap};
 use crate::sim::Sim;
 
 const BG: Color = Color::new(0.07, 0.085, 0.11, 1.0);
@@ -17,6 +17,7 @@ const BG: Color = Color::new(0.07, 0.085, 0.11, 1.0);
 pub fn present(
     world: &hecs::World,
     map: &TileMap,
+    regions: &[Region],
     fog: &crate::fog::FogGrid,
     camera: &GameCamera,
     sim: &Sim,
@@ -46,6 +47,7 @@ pub fn present(
     draw_hitboxes(world);
     draw_range_circles(world);
     draw_fog_overlay(fog, view);
+    draw_region_labels(regions, fog, camera.scale);
 
     // Placement ghost (world space): green = valid, red = blocked.
     if let Some((r, valid)) = ghost {
@@ -302,16 +304,52 @@ fn draw_hitboxes(world: &hecs::World) {
     }
 }
 
+/// Region icons + names drawn in world space.
+/// Always rendered (the map is "known" — only unit positions are hidden by fog).
+/// At overview zoom each icon scales up to remain legible.
+fn draw_region_labels(regions: &[Region], _fog: &crate::fog::FogGrid, cam_scale: f32) {
+    let ts = map::TILE_SIZE;
+    for r in regions {
+        let cx = r.cx as f32 * ts + ts * 0.5;
+        let cy = r.cy as f32 * ts + ts * 0.5;
+        let (icon, color) = match r.kind {
+            RegionKind::OreBasin    => ("●", Color::new(0.85, 0.65, 0.20, 0.92)), // amber ore
+            RegionKind::OilField    => ("◆", Color::new(0.45, 0.35, 0.90, 0.92)), // purple oil
+            RegionKind::Pass        => ("⛰", Color::new(0.72, 0.68, 0.62, 0.85)), // grey pass
+            RegionKind::Valley      => ("▽", Color::new(0.40, 0.75, 0.40, 0.80)), // green valley
+            RegionKind::Chokepoint  => ("✖", Color::new(0.95, 0.40, 0.30, 0.80)), // red choke
+        };
+        // Icon size: stable at ~18 screen px regardless of zoom (scales with 1/cam_scale).
+        let icon_sz = (18.0 / cam_scale).clamp(20.0, 200.0);
+        let label_sz = (14.0 / cam_scale).clamp(16.0, 100.0);
+        let d = measure_text(icon, None, icon_sz as u16, 1.0);
+        draw_text(icon, cx - d.width * 0.5, cy + d.height * 0.5, icon_sz, color);
+        // Name label below the icon; only shown when not too zoomed in (would clutter).
+        if cam_scale < 1.0 {
+            let ld = measure_text(r.name, None, label_sz as u16, 1.0);
+            let bg = Color::new(0.0, 0.0, 0.0, 0.5);
+            draw_rectangle(
+                cx - ld.width * 0.5 - 4.0,
+                cy + icon_sz * 0.6,
+                ld.width + 8.0,
+                label_sz + 4.0,
+                bg,
+            );
+            draw_text(r.name, cx - ld.width * 0.5, cy + icon_sz * 0.6 + label_sz, label_sz, color);
+        }
+    }
+}
+
 fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &Sim, tick_ms: f32, sh: f32) {
     let selected = world.query::<&Selected>().iter().count();
     let moving = world.query::<&crate::components::MoveOrder>().iter().count();
     let _ = sim;
     // Below the top resource bar so the two don't overlap.
     draw_text(
-        "Drag-select, RMB move (Shift=queue), dbl-click=type, Ctrl+1-9 group, B=build, R=restart  (WASD pan)",
+        "Drag-select · RMB move (Shift=queue) · dbl-click=type · Ctrl+1-9 group · G=cycle group · B=build · R=restart  (WASD pan, scroll zoom)",
         16.0,
         crate::hud::TOP_H + 24.0,
-        24.0,
+        22.0,
         WHITE,
     );
     let info = format!(
