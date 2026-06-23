@@ -47,7 +47,8 @@ pub fn present(
     draw_hitboxes(world);
     draw_range_circles(world);
     draw_fog_overlay(fog, view);
-    draw_region_labels(regions, fog, camera.scale);
+    // Region icons: dot markers drawn in world space (symmetric shapes — not affected by Y-flip).
+    draw_region_dots(regions, camera.scale);
 
     // Placement ghost (world space): green = valid, red = blocked.
     if let Some((r, valid)) = ghost {
@@ -72,6 +73,8 @@ pub fn present(
         let r = Rect::new(a.x.min(b.x), a.y.min(b.y), (b.x - a.x).abs(), (b.y - a.y).abs());
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, Color::new(0.5, 1.0, 0.6, 0.9));
     }
+    // Region name labels in screen space — text must not go through the Y-flipping world camera.
+    draw_region_labels_screen(regions, view, sw, sh, camera.scale);
     draw_overlay(world, map, camera, sim, tick_ms, sh);
     set_default_camera();
 }
@@ -304,38 +307,76 @@ fn draw_hitboxes(world: &hecs::World) {
     }
 }
 
-/// Region icons + names drawn in world space.
-/// Always rendered (the map is "known" — only unit positions are hidden by fog).
-/// At overview zoom each icon scales up to remain legible.
-fn draw_region_labels(regions: &[Region], _fog: &crate::fog::FogGrid, cam_scale: f32) {
+/// Convert a world-space position to screen pixels, accounting for the Y-flip in the world camera.
+/// view = world-space rect visible on screen; (sw, sh) = screen dimensions.
+fn world_to_screen(world_pos: Vec2, view: Rect, sw: f32, sh: f32) -> Vec2 {
+    let nx = (world_pos.x - view.x) / view.w;
+    let ny = 1.0 - (world_pos.y - view.y) / view.h; // flip Y back
+    vec2(nx * sw, ny * sh)
+}
+
+/// World-space coloured dots for each region (circles are symmetric — no Y-flip artifact).
+/// Called while the world camera is active.
+fn draw_region_dots(regions: &[Region], cam_scale: f32) {
     let ts = map::TILE_SIZE;
     for r in regions {
         let cx = r.cx as f32 * ts + ts * 0.5;
         let cy = r.cy as f32 * ts + ts * 0.5;
-        let (icon, color) = match r.kind {
-            RegionKind::OreBasin    => ("●", Color::new(0.85, 0.65, 0.20, 0.92)), // amber ore
-            RegionKind::OilField    => ("◆", Color::new(0.45, 0.35, 0.90, 0.92)), // purple oil
-            RegionKind::Pass        => ("⛰", Color::new(0.72, 0.68, 0.62, 0.85)), // grey pass
-            RegionKind::Valley      => ("▽", Color::new(0.40, 0.75, 0.40, 0.80)), // green valley
-            RegionKind::Chokepoint  => ("✖", Color::new(0.95, 0.40, 0.30, 0.80)), // red choke
+        let color = match r.kind {
+            RegionKind::OreBasin   => Color::new(0.85, 0.65, 0.20, 0.92),
+            RegionKind::OilField   => Color::new(0.45, 0.35, 0.90, 0.92),
+            RegionKind::Pass       => Color::new(0.72, 0.68, 0.62, 0.85),
+            RegionKind::Valley     => Color::new(0.40, 0.75, 0.40, 0.80),
+            RegionKind::Chokepoint => Color::new(0.95, 0.40, 0.30, 0.80),
         };
-        // Icon size: stable at ~18 screen px regardless of zoom (scales with 1/cam_scale).
-        let icon_sz = (18.0 / cam_scale).clamp(20.0, 200.0);
-        let label_sz = (14.0 / cam_scale).clamp(16.0, 100.0);
-        let d = measure_text(icon, None, icon_sz as u16, 1.0);
-        draw_text(icon, cx - d.width * 0.5, cy + d.height * 0.5, icon_sz, color);
-        // Name label below the icon; only shown when not too zoomed in (would clutter).
-        if cam_scale < 1.0 {
+        // Dot radius stable at ~6 screen px.
+        let r_px = (6.0 / cam_scale).clamp(8.0, 80.0);
+        draw_circle(cx, cy, r_px, color);
+        draw_circle_lines(cx, cy, r_px, (1.5 / cam_scale).clamp(1.0, 6.0), Color::new(1.0, 1.0, 1.0, 0.5));
+    }
+}
+
+/// Region name labels drawn in screen space (called after set_default_camera).
+/// Text rendered through the Y-flipping world camera appears mirrored — screen space avoids this.
+fn draw_region_labels_screen(regions: &[Region], view: Rect, sw: f32, sh: f32, cam_scale: f32) {
+    let ts = map::TILE_SIZE;
+    let label_sz = 14.0_f32;
+    let icon_sz  = 16.0_f32;
+
+    for r in regions {
+        let world_pos = vec2(r.cx as f32 * ts + ts * 0.5, r.cy as f32 * ts + ts * 0.5);
+        let sp = world_to_screen(world_pos, view, sw, sh);
+
+        // Skip if off-screen.
+        if sp.x < -100.0 || sp.x > sw + 100.0 || sp.y < -40.0 || sp.y > sh + 40.0 {
+            continue;
+        }
+
+        let (symbol, color) = match r.kind {
+            RegionKind::OreBasin   => ("ORE",   Color::new(0.85, 0.65, 0.20, 1.0)),
+            RegionKind::OilField   => ("OIL",   Color::new(0.55, 0.45, 1.00, 1.0)),
+            RegionKind::Pass       => ("PASS",  Color::new(0.85, 0.82, 0.75, 1.0)),
+            RegionKind::Valley     => ("VLY",   Color::new(0.50, 0.90, 0.50, 1.0)),
+            RegionKind::Chokepoint => ("CHOKE", Color::new(1.00, 0.45, 0.35, 1.0)),
+        };
+
+        // Symbol tag above dot.
+        let sd = measure_text(symbol, None, icon_sz as u16, 1.0);
+        draw_text(symbol, sp.x - sd.width * 0.5, sp.y - 10.0, icon_sz, color);
+
+        // Region name below dot — only when zoomed in enough to read it.
+        if cam_scale > 0.18 {
             let ld = measure_text(r.name, None, label_sz as u16, 1.0);
-            let bg = Color::new(0.0, 0.0, 0.0, 0.5);
+            let bg = Color::new(0.0, 0.0, 0.0, 0.60);
+            let pad = 3.0;
             draw_rectangle(
-                cx - ld.width * 0.5 - 4.0,
-                cy + icon_sz * 0.6,
-                ld.width + 8.0,
-                label_sz + 4.0,
+                sp.x - ld.width * 0.5 - pad,
+                sp.y + 10.0,
+                ld.width + pad * 2.0,
+                label_sz + pad * 2.0,
                 bg,
             );
-            draw_text(r.name, cx - ld.width * 0.5, cy + icon_sz * 0.6 + label_sz, label_sz, color);
+            draw_text(r.name, sp.x - ld.width * 0.5, sp.y + 10.0 + label_sz, label_sz, color);
         }
     }
 }
