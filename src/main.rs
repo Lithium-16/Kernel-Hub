@@ -41,6 +41,8 @@ mod spatial;
 mod processing;
 mod spawn_building;
 mod stance;
+mod supply_route;
+mod truck;
 mod ui;
 
 use assets::Sprites;
@@ -391,6 +393,7 @@ async fn main() {
     let mut control_groups = groups::ControlGroups::new();
 
     let mut resupply_tracker = resupply::ResupplyTracker::new();
+    let mut routes = supply_route::RouteRegistry::new();
 
     let mut sim = sim::Sim::new();
     let tick_dt = 1.0 / sim::TICK_RATE as f32;
@@ -775,6 +778,7 @@ async fn main() {
             flow_cache.clear();
             placing = None;
             groups.clear();
+            routes.clear();
             ai = ai_brain::AiBrain::new(ENEMY_FACTION, PLAYER_FACTION);
             spawn_scenario(&mut world, &mut nav, &mut groups, &defs, &sprites, &map, count, player_tint, enemy_tint);
         }
@@ -815,6 +819,83 @@ async fn main() {
             extraction::step(&mut world, tick_dt);
             processing::step(&mut world, tick_dt);
             resupply_tracker.step(&mut world);
+
+            // ── Truck dispatch ────────────────────────────────────────────
+            let dispatches = supply_route::dispatch_needed(&mut routes, &world);
+            for (route_id, origin_e, dest_e, resource, amount) in dispatches {
+                // Get origin position for truck spawn
+                let spawn_pos = match world.get::<&components::Position>(origin_e) {
+                    Ok(p) => p.0,
+                    Err(_) => continue,
+                };
+                let faction = world.get::<&components::Faction>(origin_e)
+                    .map(|f| f.0.clone())
+                    .unwrap_or_else(|_| PLAYER_FACTION.to_string());
+                let tint = if faction == PLAYER_FACTION {
+                    Color::new(0.85, 0.92, 1.0, 1.0)
+                } else {
+                    Color::new(1.0, 0.55, 0.55, 1.0)
+                };
+                let truck_e = truck::spawn_truck(
+                    &mut world, &sprites, route_id,
+                    resource, amount, origin_e, dest_e,
+                    spawn_pos, &faction, tint,
+                );
+                // Issue move to destination
+                let dest_pos = world.get::<&components::Position>(dest_e)
+                    .map(|p| p.0)
+                    .ok();
+                if let Some(target) = dest_pos {
+                    issue_move(&mut world, &nav, &mut flow_cache, &[truck_e], target);
+                }
+            }
+
+            // ── Truck step — handle arrivals and destruction ───────────────
+            let truck_events = truck::step(&mut world);
+            let mut trucks_to_despawn: Vec<hecs::Entity> = Vec::new();
+            for (truck_e, event) in truck_events {
+                match event {
+                    truck::TruckEvent::Delivered { route_id, resource, amount, dest } => {
+                        // Transfer cargo to destination depot
+                        if let Ok(dest_ref) = world.entity(dest) {
+                            if let Some(mut depot) = dest_ref.get::<&mut depot::Depot>() {
+                                depot.add(resource, amount);
+                            }
+                        }
+                        // Issue return trip
+                        let origin_pos = {
+                            let origin = world.get::<&truck::Truck>(truck_e)
+                                .map(|t| t.origin)
+                                .ok();
+                            origin.and_then(|o| world.get::<&components::Position>(o).map(|p| p.0).ok())
+                        };
+                        if let Some(target) = origin_pos {
+                            issue_move(&mut world, &nav, &mut flow_cache, &[truck_e], target);
+                        }
+                        if let Ok(mut t) = world.get::<&mut truck::Truck>(truck_e) {
+                            t.state = truck::TruckState::DrivingBack;
+                            t.cargo_amount = 0;
+                        }
+                        let _ = route_id; // bookkeeping via active_trucks; decremented on Returned
+                    }
+                    truck::TruckEvent::Returned { route_id } => {
+                        trucks_to_despawn.push(truck_e);
+                        if let Some(r) = routes.get_mut(route_id) {
+                            r.active_trucks = r.active_trucks.saturating_sub(1);
+                        }
+                    }
+                    truck::TruckEvent::Destroyed { route_id } => {
+                        trucks_to_despawn.push(truck_e);
+                        if let Some(r) = routes.get_mut(route_id) {
+                            r.active_trucks = r.active_trucks.saturating_sub(1);
+                        }
+                    }
+                }
+            }
+            for e in trucks_to_despawn {
+                let _ = world.despawn(e);
+            }
+
             // Construction: engineers advance blueprints toward completion.
             let completed_blueprints = construction::step(&mut world, tick_dt);
             for bp_entity in completed_blueprints {

@@ -406,14 +406,14 @@ all 6 existing ASSERT scenarios still pass.
 **Goal:** the physical logistics layer. Player draws routes between depots; system dispatches trucks; trucks drive, deliver, return. Roads determine throughput. Cutting a road starves a depot.
 
 **Build:**
-- [ ] **Supply Route** — `SupplyRoute { id, origin: Entity, destination: Entity, resource: ResourceType, priority: Priority }`. Player creates via UI: click origin depot → click destination depot → pick resource + priority. Stored in a `RouteRegistry`.
+- [x] **Supply Route** — `SupplyRoute { id, origin: Entity, destination: Entity, resource: ResourceType, priority: Priority }`. Player creates via UI: click origin depot → click destination depot → pick resource + priority. Stored in a `RouteRegistry`. (`src/supply_route.rs`)
 - [ ] **Desired stockpile UI** — per depot, player sets desired amount per resource. System compares current vs desired and triggers dispatch when deficit > truck_capacity.
-- [ ] **Truck entity** — `Truck { cargo_type: ResourceType, cargo_amount: u32, route_id: u32, state: TruckState }` with `Health`, `Position`, `Faction`, `Renderable`. TruckState: `{ Idle, DrivingToPickup, Loading, DrivingToDelivery, Unloading, Returning }`.
-- [ ] **Truck dispatch** — each tick, RouteRegistry checks all routes: if destination below desired and origin has stock → spawn Truck at origin; truck uses flow-field to drive to destination.
-- [ ] **Cargo transfer** — on arrival: `origin_depot.withdraw(resource, amount)` → `truck.cargo_amount`; on delivery: `destination_depot.add(resource, amount)`.
+- [x] **Truck entity** — `Truck { cargo_resource, cargo_amount, route_id, state, origin, destination }` with `Health`, `Position`, `Faction`, `Renderable`, `FuelTank`. `TruckState`: `DrivingToDestination | DrivingBack`. (`src/truck.rs`)
+- [x] **Truck dispatch** — each sim tick, `dispatch_needed()` checks all routes: if destination below desired and origin has stock → cargo withdrawn from origin (in-transit), Truck spawned at origin, MoveOrder issued. Max 3 trucks per route.
+- [x] **Cargo transfer** — on arrival: `destination_depot.add(resource, amount)`; on return: truck despawned. On death: cargo lost, route counter decremented.
 - [ ] **Convoy grouping** — trucks on same route dispatched within 10s of each other auto-form a convoy (shared flow field, travel together).
 - [ ] **Route display** — active routes shown as colored lines on world map; trucks visible as sprites driving along them; click route → show throughput stats.
-- [ ] **Truck destruction** — enemy units attack trucks; on death, cargo is lost; notification fires.
+- [x] **Truck destruction** — enemy units attack trucks (they have `Health`); on death (`TruckEvent::Destroyed`), cargo is lost; route active-truck counter decremented.
 - [ ] **Road blueprint tool** — player draws road between two points; Engineers auto-build using Building Supplies; improves convoy speed on those tiles.
 - [ ] **Route alert** — if truck destroyed or depot runs dry, amber alert on route line + notification.
 
