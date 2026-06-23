@@ -179,44 +179,90 @@ fn draw_command_card(ui: &mut Ui, world: &World, r: Rect) -> Option<HudAction> {
     action
 }
 
-/// Group summary panel: shows player combat groups as clickable cards across the bottom bar.
-/// Clicking a card returns SelectGroup(id) so the main loop can select members + center camera.
+/// Group summary panel: clickable cards showing strength, avg ammo %, avg fuel %.
 fn draw_group_panel(ui: &mut Ui, groups: &crate::combat_group::GroupRegistry, world: &World, bottom: Rect) -> Option<HudAction> {
-    let mut x = bottom.x + 250.0; // start after Stop/Clear buttons
+    use crate::components::{AmmoStorage, FuelTank};
+
+    let mut x = bottom.x + 262.0;
     let player_faction = crate::PLAYER_FACTION;
     let mut action = None;
     let accent = Color::new(0.45, 1.0, 0.55, 0.95);
+
     for g in groups.all() {
         if g.faction != player_faction { continue; }
-        let w = 140.0;
-        let r = Rect::new(x, bottom.y + 4.0, w, 48.0);
-        // Highlight if any member is selected.
+        let card_w = 148.0;
+        let card_h = 50.0;
+        let r = Rect::new(x, bottom.y + 3.0, card_w, card_h);
+
         let selected = g.any_selected(world);
         if selected {
-            draw_rectangle(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0, Color::new(0.45, 1.0, 0.55, 0.18));
+            draw_rectangle(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0,
+                Color::new(0.45, 1.0, 0.55, 0.18));
         }
         ui.panel(r);
         if selected {
             draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, accent);
         }
-        // Clicking the card selects the group.
         if ui.button(r, "") {
             action = Some(HudAction::SelectGroup(g.id));
         }
-        ui.label(vec2(r.x + 6.0, r.y + 16.0), &g.name);
+
+        // ── Name ─────────────────────────────────────────────────────────
+        ui.label(vec2(r.x + 6.0, r.y + 14.0), &g.name);
+
+        // ── Strength bar ─────────────────────────────────────────────────
         let strength = g.strength();
         let orig = g.original_strength.max(1);
         let frac = strength as f32 / orig as f32;
-        let bar_r = Rect::new(r.x + 6.0, r.y + 24.0, r.w - 12.0, 8.0);
-        let fill = if frac > 0.6 { Color::new(0.4, 0.9, 0.4, 1.0) }
-                   else if frac > 0.3 { Color::new(0.9, 0.8, 0.3, 1.0) }
-                   else { Color::new(0.9, 0.3, 0.3, 1.0) };
-        ui.bar(bar_r, frac, fill);
-        let label = format!("{}/{}", strength, orig);
+        let bar_w = r.w - 12.0;
+        let str_bar = Rect::new(r.x + 6.0, r.y + 19.0, bar_w, 5.0);
+        let str_fill = if frac > 0.6 { Color::new(0.4, 0.9, 0.4, 1.0) }
+                       else if frac > 0.3 { Color::new(0.9, 0.8, 0.3, 1.0) }
+                       else { Color::new(0.9, 0.3, 0.3, 1.0) };
+        ui.bar(str_bar, frac, str_fill);
+
+        // ── Ammo + fuel averages (only for members that have storage) ────
+        let (mut ammo_sum, mut ammo_n) = (0.0f32, 0u32);
+        let (mut fuel_sum, mut fuel_n) = (0.0f32, 0u32);
+        for &e in &g.members {
+            if let Ok(a) = world.get::<&AmmoStorage>(e) {
+                ammo_sum += a.shots as f32 / a.capacity.max(1) as f32;
+                ammo_n += 1;
+            }
+            if let Ok(f) = world.get::<&FuelTank>(e) {
+                fuel_sum += f.fuel / f.capacity.max(0.001);
+                fuel_n += 1;
+            }
+        }
+
+        let mut bar_y = r.y + 27.0;
+
+        if ammo_n > 0 {
+            let avg = ammo_sum / ammo_n as f32;
+            let ammo_bar = Rect::new(r.x + 6.0, bar_y, bar_w, 4.0);
+            let ammo_col = if avg > 0.4 { Color::new(1.0, 0.85, 0.3, 1.0) }
+                           else if avg > 0.1 { Color::new(1.0, 0.55, 0.2, 1.0) }
+                           else { Color::new(1.0, 0.25, 0.25, 1.0) };
+            ui.bar(ammo_bar, avg, ammo_col);
+            bar_y += 6.0;
+        }
+
+        if fuel_n > 0 {
+            let avg = fuel_sum / fuel_n as f32;
+            let fuel_bar = Rect::new(r.x + 6.0, bar_y, bar_w, 4.0);
+            let fuel_col = if avg > 0.4 { Color::new(0.35, 0.75, 1.0, 1.0) }
+                           else if avg > 0.1 { Color::new(0.5, 0.5, 1.0, 1.0) }
+                           else { Color::new(1.0, 0.25, 0.25, 1.0) };
+            ui.bar(fuel_bar, avg, fuel_col);
+        }
+
+        // Strength count bottom-right
         let fs = ui.theme.font_size as u16;
+        let label = format!("{}/{}", strength, orig);
         let d = measure_text(&label, None, fs, 1.0);
-        ui.label(vec2(r.x + r.w - 6.0 - d.width, r.y + 44.0), &label);
-        x += w + 6.0;
+        ui.label(vec2(r.x + r.w - 6.0 - d.width, r.y + card_h - 4.0), &label);
+
+        x += card_w + 5.0;
     }
     action
 }
