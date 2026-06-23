@@ -1144,6 +1144,11 @@ async fn main() {
 
         minimap.draw(&world, &fog, view, hud_layout.minimap);
 
+        // Route management panel
+        if let Some(del_id) = hud::draw_route_panel(&mut ui, &routes, &world, route_mode_active, route_resource_idx, sw, sh) {
+            routes.remove(del_id);
+        }
+
         // --- Win/lose banner (only once a battle has been spawned) ---
         if count > 0 {
             let mut player_alive = 0usize;

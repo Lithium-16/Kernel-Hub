@@ -442,3 +442,88 @@ fn draw_selection_panel(ui: &mut Ui, world: &World, r: Rect) {
         ui.label(vec2(r.x + r.w - 14.0 - d.width, y), &count);
     }
 }
+
+// ─── Supply Route Panel ───────────────────────────────────────────────────────
+
+/// Draw the supply route management panel on the left side when routes exist or
+/// route mode is active. Returns the id of any route whose Delete button was clicked.
+pub fn draw_route_panel(
+    ui: &mut Ui,
+    routes: &crate::supply_route::RouteRegistry,
+    world: &World,
+    route_mode_active: bool,
+    route_resource_idx: usize,
+    _sw: f32,
+    sh: f32,
+) -> Option<u32> {
+    use crate::depot::ResourceType;
+    use crate::supply_route::SupplyRoute;
+
+    if routes.all().is_empty() && !route_mode_active { return None; }
+
+    let panel_w = 220.0;
+    let row_h   = 36.0;
+    let n_rows  = routes.all().len().max(1) as f32;
+    let panel_h = 28.0 + n_rows * row_h + if route_mode_active { 44.0 } else { 0.0 };
+    let px = 8.0;
+    let py = sh - crate::hud::BAR_H - 8.0 - panel_h;
+    let panel = Rect::new(px, py, panel_w, panel_h);
+    ui.panel(panel);
+
+    let mut y = py + 18.0;
+    ui.label(vec2(px + 8.0, y), "Supply Routes");
+    y += 12.0;
+
+    let res_names = ["Ammo", "Fuel", "Supplies", "Parts"];
+    let res_colors = [
+        Color::new(1.0, 0.80, 0.20, 1.0),
+        Color::new(0.3, 0.80, 1.00, 1.0),
+        Color::new(0.8, 0.65, 0.35, 1.0),
+        Color::new(0.75, 0.40, 1.00, 1.0),
+    ];
+
+    fn res_idx(r: ResourceType) -> usize {
+        match r {
+            ResourceType::Ammo             => 0,
+            ResourceType::Fuel             => 1,
+            ResourceType::BuildingSupplies => 2,
+            ResourceType::WeaponParts      => 3,
+        }
+    }
+
+    let mut delete_id = None;
+    for route in routes.all() {
+        let ri = res_idx(route.resource);
+        let col = res_colors[ri];
+
+        // Colour swatch
+        draw_rectangle(px + 8.0, y, 8.0, 24.0, col);
+
+        // Resource name + truck count
+        let dest_stock = world.get::<&crate::depot::Depot>(route.destination)
+            .map(|d| d.get(route.resource)).unwrap_or(0);
+        let label = format!("{} {}/{} ({} trucks)", res_names[ri], dest_stock, route.desired_stock, route.active_trucks);
+        ui.label(vec2(px + 22.0, y + 16.0), &label);
+
+        // Delete button
+        if ui.button(Rect::new(px + panel_w - 30.0, y + 4.0, 22.0, 18.0), "X") {
+            delete_id = Some(route.id);
+        }
+        y += row_h;
+    }
+
+    if routes.all().is_empty() {
+        ui.label(vec2(px + 8.0, y + 16.0), "No routes. T=draw route");
+        y += row_h;
+    }
+
+    if route_mode_active {
+        let ri = route_resource_idx % 4;
+        let mode_label = format!("Drawing: {} (Tab to change)", res_names[ri]);
+        draw_rectangle(px + 6.0, y + 4.0, panel_w - 12.0, 32.0, Color::new(0.45, 1.0, 0.55, 0.12));
+        draw_rectangle_lines(px + 6.0, y + 4.0, panel_w - 12.0, 32.0, 1.5, Color::new(0.45, 1.0, 0.55, 0.8));
+        ui.label_colored(vec2(px + 12.0, y + 22.0), &mode_label, Color::new(0.45, 1.0, 0.55, 1.0));
+    }
+
+    delete_id
+}
