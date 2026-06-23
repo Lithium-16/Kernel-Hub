@@ -1,33 +1,31 @@
-//! Economy stub (Phase 2.5 UI hook). A minimal resource pool so the HUD has real
-//! numbers to display and the bar widgets have something to bind to. The production /
-//! supply-network systems that actually drive these values arrive in Phase 4; for now
-//! it's a static starting stockpile.
+//! Economy aggregator (Phase 2.5+). Sums the stockpiles of all Depot entities
+//! belonging to a given faction so the HUD top bar can display live totals.
+//! Production / supply-network logic arrives in Phase 4; right now the numbers
+//! drain as combat consumes resources and refill only via truck delivery (Phase 5).
 
-#[derive(Clone, Copy, Debug)]
+use hecs::World;
+
+use crate::components::Faction;
+use crate::depot::{Depot, ResourceType};
+
+/// Aggregated resource totals for one faction, derived from all its depots.
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Economy {
-    pub metal: i32,
-    pub fuel: i32,
-    pub components: i32,
-    pub power_used: i32,
-    pub power_cap: i32,
+    pub ammo:     u32,
+    pub fuel:     u32,
+    pub supplies: u32,
+    pub parts:    u32,
 }
 
-impl Default for Economy {
-    fn default() -> Self {
-        Self { metal: 500, fuel: 300, components: 0, power_used: 20, power_cap: 100 }
+/// Walk every `(Depot, Faction)` entity and sum the stockpiles that match `faction`.
+pub fn aggregate(world: &World, faction: &str) -> Economy {
+    let mut eco = Economy::default();
+    for (_e, (depot, fac)) in world.query::<(&Depot, &Faction)>().iter() {
+        if fac.0 != faction { continue; }
+        eco.ammo     += depot.get(ResourceType::Ammo);
+        eco.fuel     += depot.get(ResourceType::Fuel);
+        eco.supplies += depot.get(ResourceType::BuildingSupplies);
+        eco.parts    += depot.get(ResourceType::WeaponParts);
     }
-}
-
-impl Economy {
-    /// Fraction of power capacity currently drawn (0..1+, can exceed 1 when overdrawn).
-    pub fn power_frac(&self) -> f32 {
-        if self.power_cap <= 0 {
-            return 1.0;
-        }
-        self.power_used as f32 / self.power_cap as f32
-    }
-
-    pub fn overdrawn(&self) -> bool {
-        self.power_used > self.power_cap
-    }
+    eco
 }

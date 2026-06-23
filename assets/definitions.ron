@@ -22,8 +22,10 @@ Definitions(
     // Placeholder buildings (footprint in tiles). Drawn as colored footprints for now;
     // sprites + production/logistics roles arrive with the building systems.
     buildings: [
-        (id: "hq",    name: "Headquarters", color: (96, 116, 156), w: 3, h: 3),
-        (id: "depot", name: "Supply Depot", color: (132, 108, 74),  w: 2, h: 2),
-        (id: "power", name: "Power Plant",  color: (74, 128, 96),   w: 2, h: 2),
+        (id: "hq",       name: "Headquarters", color: (96, 116, 156),  w: 3, h: 3),
+        (id: "depot",    name: "Supply Depot", color: (132, 108, 74),   w: 2, h: 2),
+        (id: "power",    name: "Power Plant",  color: (74, 128, 96),    w: 2, h: 2),
+        (id: "mine",     name: "Mine",         color: (160, 130, 60),   w: 2, h: 2),
+        (id: "oil_pump", name: "Oil Pump",     color: (50, 45, 35),     w: 2, h: 2),
     ],
 )

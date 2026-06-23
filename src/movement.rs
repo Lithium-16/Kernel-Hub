@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use hecs::{Entity, World};
 use macroquad::prelude::*;
 
-use crate::components::{Heading, Mobility, MoveOrder, MoveState, Position, Velocity};
+use crate::components::{FuelTank, Heading, Mobility, MoveOrder, MoveState, Position, Velocity};
 use crate::map::TILE_SIZE;
 use crate::nav::NavGrid;
 use crate::spatial::SpatialGrid;
@@ -69,72 +69,130 @@ fn wrap_angle(a: f32) -> f32 {
 /// turn the hull toward it at the unit's turn rate, then drive forward scaled by how
 /// aligned the hull is — so slow-turning units (tanks) pivot before moving. Arrival is
 /// handled by `settle_arrivals`.
+///
+/// FuelTank rule: if fuel <= 0 the unit's velocity is zeroed and it does not move this
+/// tick. If fuel > 0 and the unit actually displaced > 0.5 px, fuel is decremented by
+/// burn_rate * displacement and clamped to 0.0.
 pub fn step(world: &mut World, grid: &SpatialGrid, nav: &NavGrid, map_px: Vec2, dt: f32) {
-    for (e, (pos, vel, head, state, mob, order)) in world
-        .query::<(&mut Position, &mut Velocity, &mut Heading, &mut MoveState, &Mobility, &MoveOrder)>()
+    // Collect entity list first to avoid aliasing issues when we need mutable FuelTank
+    // access alongside other component borrows.
+    let entities: Vec<Entity> = world
+        .query::<(&Position, &Velocity, &Heading, &MoveState, &Mobility, &MoveOrder)>()
         .iter()
-    {
-        state.last = pos.0; // pre-move position; settle_arrivals compares against it
-        let facing = vec2(head.0.cos(), head.0.sin());
+        .map(|(e, _)| e)
+        .collect();
 
-        // Base direction: follow the shared flow field until we reach the formation
-        // anchor's neighbourhood, then seek our OWN slot directly. The switch is keyed on
-        // distance to the anchor (sized to the formation in `issue_move`), not to the
-        // slot — otherwise outer-slot units funnel into the central pile and never get
-        // close enough to their slot to break away. Distinct slots → the group fans into
-        // a block instead of crushing one point → no packed-group jitter.
-        let to_goal = order.goal - pos.0;
-        let dist_goal = to_goal.length();
-        let near_formation = pos.0.distance(order.anchor) < order.seek;
-        let base_dir = if near_formation && dist_goal > 0.001 {
-            to_goal / dist_goal
-        } else {
-            order.flow.dir_at(pos.0)
-        };
-        let mut sep = Vec2::ZERO;
-        let mut around = Vec2::ZERO;
-        grid.for_neighbors(pos.0, AVOID_R, |other, op| {
-            if other == e {
-                return;
+    for e in entities {
+        // Check fuel before doing any movement work.
+        let out_of_fuel = world
+            .get::<&FuelTank>(e)
+            .map(|ft| ft.fuel <= 0.0)
+            .unwrap_or(false);
+
+        if out_of_fuel {
+            // Engine stopped: zero velocity, skip movement this tick.
+            if let Ok(vel) = world.query_one_mut::<&mut Velocity>(e) {
+                vel.0 = Vec2::ZERO;
             }
-            let d = pos.0 - op;
-            let dist = d.length();
-            if dist > 0.001 && dist < AVOID_R {
-                let w = (AVOID_R - dist) / AVOID_R;
-                sep += d / dist * w;
-                // If the neighbour is ahead of us, steer sideways to go around it.
-                let to_other = -d / dist;
-                let ahead = facing.dot(to_other);
-                if ahead > 0.2 {
-                    let perp = vec2(-facing.y, facing.x);
-                    let side = if perp.dot(to_other) > 0.0 { -1.0 } else { 1.0 };
-                    around += perp * (side * w * ahead);
+            continue;
+        }
+
+        // --- steering (mirrors the original loop body) ---
+        let (desired_dir, speed, old_pos) = {
+            // Immutable borrow scope.
+            let mut q = world
+                .query_one::<(&Position, &Velocity, &Heading, &mut MoveState, &Mobility, &MoveOrder)>(e)
+                .expect("entity must still exist");
+            let (pos, vel, head, state, _mob, order) = q.get().expect("components must exist");
+
+            state.last = pos.0;
+            let facing = vec2(head.0.cos(), head.0.sin());
+
+            let to_goal = order.goal - pos.0;
+            let dist_goal = to_goal.length();
+            let near_formation = pos.0.distance(order.anchor) < order.seek;
+            let base_dir = if near_formation && dist_goal > 0.001 {
+                to_goal / dist_goal
+            } else {
+                order.flow.dir_at(pos.0)
+            };
+
+            let mut sep = Vec2::ZERO;
+            let mut around = Vec2::ZERO;
+            grid.for_neighbors(pos.0, AVOID_R, |other, op| {
+                if other == e { return; }
+                let d = pos.0 - op;
+                let dist = d.length();
+                if dist > 0.001 && dist < AVOID_R {
+                    let w = (AVOID_R - dist) / AVOID_R;
+                    sep += d / dist * w;
+                    let to_other = -d / dist;
+                    let ahead = facing.dot(to_other);
+                    if ahead > 0.2 {
+                        let perp = vec2(-facing.y, facing.x);
+                        let side = if perp.dot(to_other) > 0.0 { -1.0 } else { 1.0 };
+                        around += perp * (side * w * ahead);
+                    }
                 }
-            }
-        });
-        let desired = base_dir + sep * SEP_WEIGHT + around * AROUND_WEIGHT;
-        let desired_dir = if desired.length_squared() > 1e-4 {
-            desired.normalize()
-        } else {
-            facing
+            });
+
+            let desired = base_dir + sep * SEP_WEIGHT + around * AROUND_WEIGHT;
+            let desired_dir = if desired.length_squared() > 1e-4 {
+                desired.normalize()
+            } else {
+                facing
+            };
+
+            let cur_speed = vel.0.length();
+            (desired_dir, cur_speed, pos.0)
         };
 
-        // Turn toward the desired direction at the unit's turn rate (tanks pivot first).
-        let target_angle = desired_dir.y.atan2(desired_dir.x);
-        let diff = wrap_angle(target_angle - head.0);
-        let max_turn = mob.turn_rate * dt;
-        head.0 = wrap_angle(head.0 + diff.clamp(-max_turn, max_turn));
+        // Apply heading turn.
+        let new_angle = {
+            let mut q = world
+                .query_one::<(&Heading, &Mobility, &MoveOrder)>(e)
+                .expect("entity must exist");
+            let (head, mob, _order) = q.get().expect("components must exist");
+            let target_angle = desired_dir.y.atan2(desired_dir.x);
+            let diff = wrap_angle(target_angle - head.0);
+            let max_turn = mob.turn_rate * dt;
+            wrap_angle(head.0 + diff.clamp(-max_turn, max_turn))
+        };
+        if let Ok(head) = world.query_one_mut::<&mut Heading>(e) {
+            head.0 = new_angle;
+        }
 
-        // Drive forward along the (new) facing, scaled by alignment → turn-then-move.
-        let new_facing = vec2(head.0.cos(), head.0.sin());
-        let align = new_facing.dot(desired_dir).max(0.0);
-        let target_speed = mob.speed * align * align;
-        let cur = vel.0.length();
-        let speed = cur + (target_speed - cur) * (ACCEL * dt).min(1.0);
-        vel.0 = new_facing * speed;
+        // Compute new velocity and move.
+        let (new_vel, new_pos) = {
+            let mut q = world
+                .query_one::<(&Position, &Mobility, &MoveOrder)>(e)
+                .expect("entity must exist");
+            let (pos, mob, _order) = q.get().expect("components must exist");
+            let new_facing = vec2(new_angle.cos(), new_angle.sin());
+            let align = new_facing.dot(desired_dir).max(0.0);
+            let target_speed = mob.speed * align * align;
+            let new_speed = speed + (target_speed - speed) * (ACCEL * dt).min(1.0);
+            let new_vel = new_facing * new_speed;
+            let target = (pos.0 + new_vel * dt).clamp(Vec2::ZERO, map_px);
+            let new_pos = try_move(nav, pos.0, target);
+            (new_vel, new_pos)
+        };
 
-        let target = (pos.0 + vel.0 * dt).clamp(Vec2::ZERO, map_px);
-        pos.0 = try_move(nav, pos.0, target);
+        // Write back velocity and position.
+        if let Ok(vel) = world.query_one_mut::<&mut Velocity>(e) {
+            vel.0 = new_vel;
+        }
+        if let Ok(pos) = world.query_one_mut::<&mut Position>(e) {
+            pos.0 = new_pos;
+        }
+
+        // Fuel consumption: burn proportional to actual displacement.
+        let displacement = new_pos.distance(old_pos);
+        if displacement > 0.5 {
+            if let Ok(ft) = world.query_one_mut::<&mut FuelTank>(e) {
+                ft.fuel = (ft.fuel - ft.burn_rate * displacement).max(0.0);
+            }
+        }
     }
 }
 

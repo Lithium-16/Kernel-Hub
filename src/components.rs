@@ -129,3 +129,32 @@ pub struct Formation {
 pub struct OrderQueue {
     pub anchors: VecDeque<Vec2>,
 }
+
+/// Onboard ammo for armed units. Gun cannot fire when shots == 0.
+pub struct AmmoStorage {
+    pub shots: u32,
+    pub capacity: u32,
+}
+
+impl AmmoStorage {
+    pub fn new(capacity: u32) -> Self {
+        Self { shots: capacity, capacity }
+    }
+    pub fn is_full(&self) -> bool { self.shots >= self.capacity }
+    pub fn free(&self) -> u32 { self.capacity.saturating_sub(self.shots) }
+}
+
+/// Onboard fuel for vehicles. Engine stops when fuel <= 0.
+pub struct FuelTank {
+    pub fuel: f32,
+    pub capacity: f32,
+    pub burn_rate: f32,   // fuel units consumed per world-pixel travelled
+}
+
+impl FuelTank {
+    pub fn new(capacity: f32) -> Self {
+        Self { fuel: capacity, capacity, burn_rate: 0.05 }
+    }
+    pub fn is_full(&self) -> bool { self.fuel >= self.capacity }
+    pub fn free(&self) -> f32 { (self.capacity - self.fuel).max(0.0) }
+}

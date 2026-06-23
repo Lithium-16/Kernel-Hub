@@ -6,7 +6,7 @@
 use hecs::{Entity, World};
 use macroquad::prelude::{Color, Vec2};
 
-use crate::components::{Faction, Health, Position, Tracer, Turret, Weapon, TRACER_TTL};
+use crate::components::{AmmoStorage, Faction, Health, Position, Tracer, Turret, Weapon, TRACER_TTL};
 use crate::spatial::SpatialGrid;
 
 fn wrap_angle(a: f32) -> f32 {
@@ -54,6 +54,7 @@ pub fn update_turrets(world: &mut World, grid: &SpatialGrid, dt: f32) {
 /// One combat tick: age tracers, decrement weapon cooldowns, fire discrete shots (one
 /// tracer per shot — no continuous spray), remove the dead.
 /// Units with a Turret only fire once the barrel is aimed within ~12° of the target.
+/// Units with AmmoStorage only fire if shots > 0; each shot decrements shots by 1.
 pub fn step(world: &mut World, grid: &SpatialGrid, dt: f32, player_faction: &str) {
     // Age and retire old tracers.
     let mut expired: Vec<Entity> = Vec::new();
@@ -92,6 +93,12 @@ pub fn step(world: &mut World, grid: &SpatialGrid, dt: f32, player_faction: &str
             wrap_angle(desired - turret.angle).abs() < 0.21
         } else { true };
         if !aimed { continue; }
+        // Check ammo: if AmmoStorage exists and is empty, skip this shot entirely.
+        let has_ammo = match world.get::<&AmmoStorage>(e) {
+            Ok(ammo) => ammo.shots > 0,
+            Err(_) => true, // no AmmoStorage component → fire freely (backward compat)
+        };
+        if !has_ammo { continue; }
         // Muzzle origin = turret tip (barrel length ≈ half sprite radius ahead).
         let muzzle = if let Ok(turret) = world.get::<&Turret>(e) {
             let barrel = 14.0; // world px from center to barrel tip
@@ -101,10 +108,14 @@ pub fn step(world: &mut World, grid: &SpatialGrid, dt: f32, player_faction: &str
         ready.push((e, target, muzzle, best_pos, color, wpn.damage));
     }
 
-    // Step 2: apply cooldown resets and collect shot data.
+    // Step 2: apply cooldown resets, decrement ammo, and collect shot data.
     for (shooter, target, from, to, color, damage) in ready {
         if let Ok(wpn) = world.query_one_mut::<&mut Weapon>(shooter) {
             wpn.cooldown = 1.0 / wpn.fire_rate; // reset cooldown
+        }
+        // Decrement ammo if the unit has AmmoStorage.
+        if let Ok(ammo) = world.query_one_mut::<&mut AmmoStorage>(shooter) {
+            ammo.shots = ammo.shots.saturating_sub(1);
         }
         shots.push(Shot { target, damage, from, to, color });
     }
@@ -132,6 +143,7 @@ pub fn step(world: &mut World, grid: &SpatialGrid, dt: f32, player_faction: &str
 mod tests {
     use super::*;
     use macroquad::prelude::vec2;
+    use crate::components::AmmoStorage;
 
     fn grid_for(world: &World) -> SpatialGrid {
         let mut g = SpatialGrid::new(vec2(256.0, 256.0), 24.0);
@@ -236,5 +248,55 @@ mod tests {
         let grid = grid_for(&world);
         step(&mut world, &grid, 1.0, "a");
         assert_eq!(world.get::<&Health>(far).unwrap().cur, 20.0, "out-of-range enemy must be untouched");
+    }
+
+    #[test]
+    fn empty_ammo_prevents_firing() {
+        let mut world = World::new();
+        world.spawn((
+            Position(vec2(0.0, 0.0)),
+            Faction("a".into()),
+            Weapon { range: 50.0, damage: 10.0, fire_rate: 1.0, cooldown: 0.0 },
+            Health { cur: 100.0, max: 100.0 },
+            AmmoStorage { shots: 0, capacity: 10 },
+        ));
+        let target = world.spawn((Position(vec2(20.0, 0.0)), Faction("b".into()), Health { cur: 30.0, max: 30.0 }));
+
+        let grid = grid_for(&world);
+        step(&mut world, &grid, 1.0, "a");
+        assert_eq!(world.get::<&Health>(target).unwrap().cur, 30.0, "unit with 0 ammo must not fire");
+        let tracers = world.query::<&Tracer>().iter().count();
+        assert_eq!(tracers, 0, "no tracer when ammo is empty");
+    }
+
+    #[test]
+    fn ammo_decrements_on_fire_and_blocks_when_exhausted() {
+        let mut world = World::new();
+        let shooter = world.spawn((
+            Position(vec2(0.0, 0.0)),
+            Faction("a".into()),
+            Weapon { range: 50.0, damage: 1.0, fire_rate: 1.0, cooldown: 0.0 },
+            Health { cur: 100.0, max: 100.0 },
+            AmmoStorage { shots: 2, capacity: 2 },
+        ));
+        let target = world.spawn((Position(vec2(20.0, 0.0)), Faction("b".into()), Health { cur: 100.0, max: 100.0 }));
+
+        // Tick 1: fires, ammo goes 2→1
+        let grid = grid_for(&world);
+        step(&mut world, &grid, 1.0, "a");
+        assert_eq!(world.get::<&AmmoStorage>(shooter).unwrap().shots, 1);
+        assert!((world.get::<&Health>(target).unwrap().cur - 99.0).abs() < 0.001);
+
+        // Tick 2: fires, ammo goes 1→0
+        let grid = grid_for(&world);
+        step(&mut world, &grid, 1.0, "a");
+        assert_eq!(world.get::<&AmmoStorage>(shooter).unwrap().shots, 0);
+        assert!((world.get::<&Health>(target).unwrap().cur - 98.0).abs() < 0.001);
+
+        // Tick 3: ammo == 0, must not fire
+        let grid = grid_for(&world);
+        step(&mut world, &grid, 1.0, "a");
+        assert_eq!(world.get::<&AmmoStorage>(shooter).unwrap().shots, 0);
+        assert!((world.get::<&Health>(target).unwrap().cur - 98.0).abs() < 0.001, "no more damage after ammo depleted");
     }
 }

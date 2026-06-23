@@ -182,12 +182,19 @@ fn draw_group_panel(ui: &mut Ui, groups: &crate::combat_group::GroupRegistry, wo
     action
 }
 
-/// Top bar: resource readouts with hover tooltips + AI prep timer.
-fn draw_top_bar(ui: &mut Ui, _eco: &Economy, ai: &crate::ai_brain::AiBrain, r: Rect) {
+/// Top bar: resource readouts with colour-coded values + AI prep timer.
+///
+/// Colour rules per value:
+/// - `> 200` → white (healthy)
+/// - `1..=200` → amber (low)
+/// - `== 0` → red (empty / critical)
+fn draw_top_bar(ui: &mut Ui, eco: &Economy, ai: &crate::ai_brain::AiBrain, r: Rect) {
     ui.panel(r);
     let mp: Vec2 = mouse_position().into();
     let fs = ui.theme.font_size as u16;
-    let amber = Color::new(1.0, 0.72, 0.25, 1.0);
+    let white  = WHITE;
+    let amber  = Color::new(1.0, 0.72, 0.25, 1.0);
+    let red    = Color::new(1.0, 0.25, 0.25, 1.0);
 
     // AI prep countdown — shown right-aligned in the top bar.
     if ai.is_preparing() {
@@ -203,25 +210,29 @@ fn draw_top_bar(ui: &mut Ui, _eco: &Economy, ai: &crate::ai_brain::AiBrain, r: R
         ui.label_colored(vec2(r.x + r.w - d.width - 14.0, r.y + 23.0), "ENEMY ADVANCING", Color::new(1.0, 0.35, 0.35, 1.0));
     }
 
-    let segments = [
-        ("Ammo", "—", false, "Ammo — consumed by combat. Flows from depots (Phase 4)."),
-        ("Fuel", "—", false, "Fuel — consumed by vehicles. Flows from refineries (Phase 4)."),
-        ("Supplies", "—", false, "Building Supplies — used for construction and repairs (Phase 4)."),
-        ("Parts", "—", false, "Weapon Parts — enables production and reinforcement (Phase 4)."),
+    /// Pick the display colour for a resource quantity.
+    fn res_color(v: u32, white: Color, amber: Color, red: Color) -> Color {
+        if v == 0          { red }
+        else if v <= 200   { amber }
+        else               { white }
+    }
+
+    let segments: [(&str, u32, &str); 4] = [
+        ("Ammo",     eco.ammo,     "Ammo — consumed by combat. Flows from depots."),
+        ("Fuel",     eco.fuel,     "Fuel — consumed by vehicles. Flows from refineries."),
+        ("Supplies", eco.supplies, "Building Supplies — used for construction and repairs."),
+        ("Parts",    eco.parts,    "Weapon Parts — enables production and reinforcement."),
     ];
 
     let mut x = r.x + 14.0;
     let mut tip: Option<(&str, Vec2)> = None;
-    for (name, val, warn, help) in &segments {
+    for (name, val, help) in &segments {
         let text = format!("{name} {val}");
+        let color = res_color(*val, white, amber, red);
         let w = measure_text(&text, None, fs, 1.0).width;
         let seg = Rect::new(x - 6.0, r.y + 3.0, w + 12.0, r.h - 6.0);
         let pos = vec2(x, r.y + 23.0);
-        if *warn {
-            ui.label_colored(pos, &text, amber);
-        } else {
-            ui.label(pos, &text);
-        }
+        ui.label_colored(pos, &text, color);
         if seg.contains(mp) {
             tip = Some((help, vec2(mp.x, r.y + r.h + 6.0)));
         }

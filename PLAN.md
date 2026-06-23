@@ -260,11 +260,11 @@ Fog of war makes geography matter.
 **Build:**
 - [x] **Resource types defined** — `ResourceType` enum (Ammo/Fuel/BuildingSupplies/WeaponParts) in depot.rs. ✓
 - [x] **Depot entity** — `Depot` struct with stockpile HashMap, supply_range, faction. `depot.rs` complete. ✓
-- [ ] **Per-unit ammo storage** — `AmmoStorage { shots: u32, capacity: u32 }` component on all armed units; spawned with full load; `combat::step` decrements on each shot; at 0 gun cannot fire.
-- [ ] **Per-unit fuel tank** — `FuelTank { fuel: f32, capacity: f32 }` on all mobile units; `movement::step` burns fuel proportional to speed; at 0 unit cannot move.
-- [ ] **Depot resupply radius** — unit within `supply_range` of same-faction Depot with stock → transfers batch to unit's AmmoStorage/FuelTank (once per ~5s per unit, not per tick).
-- [ ] **Starting depot spawn** — one Depot per side near HQ with starting stock (Ammo 2000, Fuel 1500, Supplies 500, Parts 200); HUD top bar shows real totals from nearest player depot.
-- [ ] **Extraction buildings** — Mine (OreBasin tile) → produces Ore into its attached local depot every 8s; Oil Pump (OilField) → produces Oil every 10s. Both require Engineers to build.
+- [x] **Per-unit ammo storage** — `AmmoStorage { shots: u32, capacity: u32 }` component on all armed units; spawned with full load; `combat::step` decrements on each shot; at 0 gun cannot fire. ✓ 2026-06-22
+- [x] **Per-unit fuel tank** — `FuelTank { fuel: f32, capacity: f32 }` on all mobile units; `movement::step` burns fuel proportional to speed; at 0 unit cannot move. ✓ 2026-06-22
+- [x] **Depot resupply radius** — unit within `supply_range` of same-faction Depot with stock → transfers batch to unit's AmmoStorage/FuelTank (once per ~5s per unit, not per tick). ✓ 2026-06-22
+- [x] **Starting depot spawn** — one Depot per side near HQ with starting stock (Ammo 2000, Fuel 1500, Supplies 800, Parts 400); HUD top bar shows real totals from player depots (amber <200, red =0). ✓ 2026-06-22
+- [x] **Extraction buildings** — Mine → produces BuildingSupplies into attached depot every 8s; Oil Pump → produces Fuel every 10s. Placed via `extraction::Extractor` component; no Engineers required yet. ✓ 2026-06-22
 - [ ] **Processing buildings** — Processing Facility (Ore→Supplies+Parts, 15s), Fuel Refinery (Oil→Fuel, 12s), Ammo Factory (Parts→Ammo, 10s). Each attached to a local depot.
 - [ ] **HUD depot panel** — click a Depot to see per-resource stockpile bars (current vs desired); amber <25%, red =0.
 
@@ -379,7 +379,7 @@ Standing practice (owner, 2026-06-21): continuously test/compare features and co
 well-known RTS games (see PROJECT.md §12) and pull the next-most-impactful idea from here each
 iteration. Keep this list fresh — add as we learn, check off as we ship.
 
-**Have:** flow-field movement · formation slots with push-through · control groups 1–9 · shift-add/double-click-type · command card + stances · waypoint queueing · minimap · building placement (ghost+snap) · discrete combat (turrets aim, per-shot tracers, range circles) · health bars · win/lose + restart · geographic terrain (mountains, river, passes, chokepoints) with flow-field terrain cost · fog of war (Hidden/LastSeen/Visible per tile) · combat groups with clickable HUD cards (G key cycles) · attack-move · AI brain with 5-min prep → group advance · Recon Group (scout unit, 3× vision, spawns per side) · strategic zoom (0.08–5.0 scale, colored-dot overview below 0.22) · debug suite (COLDWAR_ASSERT/QUERY/EVENTLOG).
+**Have:** flow-field movement · formation slots with push-through · control groups 1–9 · shift-add/double-click-type · command card + stances · waypoint queueing · minimap · building placement (ghost+snap) · discrete combat (turrets aim, per-shot tracers, range circles) · health bars · win/lose + restart · geographic terrain (mountains, river, passes, chokepoints) with flow-field terrain cost · fog of war (Hidden/LastSeen/Visible per tile) · combat groups with clickable HUD cards (G key cycles) · attack-move · AI brain with 5-min prep → group advance · Recon Group (scout unit, 3× vision, spawns per side) · strategic zoom (0.08–5.0 scale, colored-dot overview below 0.22) · debug suite (COLDWAR_ASSERT/QUERY/EVENTLOG) · per-unit AmmoStorage (shots decrement per fire; gun empties) · per-unit FuelTank (burns per pixel moved; engine stops at 0) · ResupplyTracker (batch ammo/fuel transfer from depot within supply_range every 5s) · starting depots (Ammo 2000, Fuel 1500, Supplies 800, Parts 400 per side) · extraction buildings (Mine→Supplies, OilPump→Fuel into attached depot) · live HUD economy bar from depot aggregation (amber/red color thresholds).
 
 **High-impact gaps vs reference games (reprioritized for operational RTS direction):**
 ~~1. Combat Groups~~ ✓ · ~~2. Geographic terrain~~ ✓ · ~~3. Fog of war / recon~~ ✓ · ~~6. Attack-move~~ ✓ · ~~8. Strategic zoom~~ ✓

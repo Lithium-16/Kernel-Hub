@@ -21,8 +21,10 @@ mod debug;
 mod components;
 mod data;
 mod depot;
+mod depot_spawn;
 mod ecs;
 mod economy;
+mod extraction;
 mod fog;
 mod groups;
 mod hud;
@@ -31,6 +33,7 @@ mod minimap;
 mod movement;
 mod nav;
 mod render;
+mod resupply;
 mod selection;
 mod sim;
 mod spatial;
@@ -155,6 +158,9 @@ fn spawn_scenario(
     groups.add("1st Enemy Armored Group", ENEMY_FACTION, e_armor);
     groups.add("1st Enemy Engineer Group", ENEMY_FACTION, e_eng);
     groups.add("1st Enemy Recon Group", ENEMY_FACTION, e_recon);
+
+    // Spawn starting depots for both sides (Phase 4: physical resource storage).
+    let _ = depot_spawn::spawn_starting_depots(world, p_spawn, e_spawn, PLAYER_FACTION, ENEMY_FACTION);
 }
 
 fn clear_selection(world: &mut hecs::World) {
@@ -341,8 +347,9 @@ async fn main() {
     let mut event_log = debug::EventLog::new();
     let mut stats = debug::Stats::new();
     let mut ui = ui::Ui::new();
-    let economy = economy::Economy::default();
     let mut control_groups = groups::ControlGroups::new();
+
+    let mut resupply_tracker = resupply::ResupplyTracker::new();
 
     let mut sim = sim::Sim::new();
     let tick_dt = 1.0 / sim::TICK_RATE as f32;
@@ -742,6 +749,8 @@ async fn main() {
             movement::settle_arrivals(&mut world);
             grid.rebuild(&world);
             combat::step(&mut world, &grid, tick_dt, PLAYER_FACTION);
+            extraction::step(&mut world, tick_dt);
+            resupply_tracker.step(&mut world);
             // AI brain tick — uses same systems as player
             ai.tick(&mut world, &mut groups);
             groups.prune_all(&world);
@@ -760,6 +769,8 @@ async fn main() {
 
         let drag_box = drag_start.map(|s| (s, mp));
         render::present(&world, &map, &regions, &fog, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
+        // Aggregate live economy from all player depots for the HUD top bar.
+        let economy = economy::aggregate(&world, PLAYER_FACTION);
         // Recompute layout after this frame's input so panels reflect current selection.
         let hud_layout = hud::HudLayout::compute(&world, sw, sh);
         match hud::draw(&mut ui, &world, &economy, &ai, &groups, &hud_layout) {
@@ -865,7 +876,8 @@ async fn main() {
                 uicam.render_target = Some(rt.clone());
                 set_camera(&uicam);
                 let cap_layout = hud::HudLayout::compute(&world, sw, sh);
-                let _ = hud::draw(&mut ui, &world, &economy, &ai, &groups, &cap_layout);
+                let cap_economy = economy::aggregate(&world, PLAYER_FACTION);
+                let _ = hud::draw(&mut ui, &world, &cap_economy, &ai, &groups, &cap_layout);
                 minimap.draw(&world, &fog, cam.view_rect(sw, sh), cap_layout.minimap);
                 set_default_camera();
                 rt.texture.get_texture_data().export_png(path);
