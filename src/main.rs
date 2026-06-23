@@ -394,6 +394,10 @@ async fn main() {
 
     let mut resupply_tracker = resupply::ResupplyTracker::new();
     let mut routes = supply_route::RouteRegistry::new();
+    // Route-drawing state: None=idle, Some(None)=picking origin, Some(Some(e))=origin chosen
+    let mut route_origin: Option<Option<hecs::Entity>> = None;
+    // Resource type cycling for new routes
+    let mut route_resource_idx: usize = 0;
 
     let mut sim = sim::Sim::new();
     let tick_dt = 1.0 / sim::TICK_RATE as f32;
@@ -650,8 +654,60 @@ async fn main() {
         }
         let placing_active = placing.is_some();
 
+        // --- Route drawing mode (T key) ---
+        // T: toggle route mode. Click depot A → origin, click depot B → create route.
+        // Tab cycles the resource type. Escape cancels.
+        if is_key_pressed(KeyCode::T) {
+            route_origin = if route_origin.is_none() { Some(None) } else { None };
+        }
+        if is_key_pressed(KeyCode::Tab) {
+            route_resource_idx = (route_resource_idx + 1) % 4;
+        }
+        let route_mode_active = route_origin.is_some();
+        if route_mode_active && is_key_pressed(KeyCode::Escape) {
+            route_origin = None;
+        }
+        if route_mode_active && is_mouse_button_pressed(MouseButton::Left) && !over_ui {
+            let click = cam2d.screen_to_world(mp);
+            // Find which depot was clicked (within 80px of depot centre).
+            let hit_depot: Option<hecs::Entity> = {
+                let mut found = None;
+                let mut best = f32::MAX;
+                for (e, (pos, _depot, fac)) in world.query::<(&components::Position, &depot::Depot, &components::Faction)>().iter() {
+                    if fac.0 != PLAYER_FACTION { continue; }
+                    let d = pos.0.distance(click);
+                    if d < 80.0 && d < best { best = d; found = Some(e); }
+                }
+                found
+            };
+            if let Some(depot_e) = hit_depot {
+                match route_origin {
+                    Some(None) => {
+                        // First click: set origin
+                        route_origin = Some(Some(depot_e));
+                    }
+                    Some(Some(origin_e)) if origin_e != depot_e => {
+                        // Second click: create route for current resource
+                        let res = [
+                            depot::ResourceType::Ammo,
+                            depot::ResourceType::Fuel,
+                            depot::ResourceType::BuildingSupplies,
+                            depot::ResourceType::WeaponParts,
+                        ][route_resource_idx];
+                        routes.add(origin_e, depot_e, res, 500, supply_route::RoutePriority::High);
+                        route_origin = Some(None); // stay in mode for another route
+                    }
+                    _ => {}
+                }
+            }
+            // Right-click cancels route mode
+        }
+        if route_mode_active && is_mouse_button_pressed(MouseButton::Right) {
+            route_origin = None;
+        }
+
         // --- Selection (left mouse) ---
-        if is_mouse_button_pressed(MouseButton::Left) && !over_ui && !placing_active {
+        if is_mouse_button_pressed(MouseButton::Left) && !over_ui && !placing_active && !route_mode_active {
             drag_start = Some(mp);
         }
         if is_mouse_button_released(MouseButton::Left) && !placing_active {
@@ -1010,7 +1066,8 @@ async fn main() {
 
         let drag_box = drag_start.map(|s| (s, mp));
         render::present(&world, &map, &fog, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
-        // present() exits with set_default_camera() — correct for HUD text.
+        // Draw supply routes + route-drawing overlay in world space before switching to screen cam.
+        render::draw_route_overlay(&world, &routes, route_origin, &cam, sw, sh);
 
         // Aggregate live economy from all player depots for the HUD top bar.
         let economy = economy::aggregate(&world, PLAYER_FACTION);

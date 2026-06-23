@@ -431,7 +431,7 @@ fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &S
     let _ = sim;
     // Below the top resource bar so the two don't overlap.
     draw_text(
-        "Drag-select, RMB move (Shift=queue), dbl-click=type, Ctrl+1-9 group, B=build, R=restart  (WASD pan)",
+        "Drag-select · RMB move · Ctrl+1-9 groups · G=cycle · B=build · T=route (Tab=resource) · R=restart",
         16.0,
         crate::hud::TOP_H + 24.0,
         24.0,
@@ -516,4 +516,93 @@ fn draw_engineer_beams(world: &hecs::World) {
         let spark_r = 3.0 + ((t * 6.0).sin() * 1.5).abs();
         draw_circle(bp_pos.x, bp_pos.y, spark_r, Color::new(0.5, 1.0, 0.9, pulse));
     }
+}
+
+/// Draw active supply routes as coloured lines in world space, plus route-drawing
+/// mode overlay. Called after present() so it runs on the world camera.
+///
+/// Route colours by resource:
+///   Ammo             → yellow-orange
+///   Fuel             → cyan-blue
+///   BuildingSupplies → tan
+///   WeaponParts      → purple
+pub fn draw_route_overlay(
+    world: &hecs::World,
+    routes: &crate::supply_route::RouteRegistry,
+    route_origin: Option<Option<hecs::Entity>>,
+    camera: &GameCamera,
+    sw: f32,
+    sh: f32,
+) {
+    use crate::components::Position;
+    use crate::depot::ResourceType;
+
+    // Switch to world camera for line drawing.
+    let view = camera.view_rect(sw, sh);
+    let world_cam = Camera2D::from_display_rect(view);
+    set_camera(&world_cam);
+
+    fn resource_color(r: ResourceType) -> Color {
+        match r {
+            ResourceType::Ammo             => Color::new(1.00, 0.80, 0.20, 0.85),
+            ResourceType::Fuel             => Color::new(0.30, 0.80, 1.00, 0.85),
+            ResourceType::BuildingSupplies => Color::new(0.80, 0.65, 0.35, 0.85),
+            ResourceType::WeaponParts      => Color::new(0.75, 0.40, 1.00, 0.85),
+        }
+    }
+
+    // Draw each route as a line with an arrowhead at the midpoint.
+    for route in routes.all() {
+        let origin_pos = match world.get::<&Position>(route.origin) {
+            Ok(p) => p.0, Err(_) => continue,
+        };
+        let dest_pos = match world.get::<&Position>(route.destination) {
+            Ok(p) => p.0, Err(_) => continue,
+        };
+        let col = resource_color(route.resource);
+
+        // Main line
+        draw_line(origin_pos.x, origin_pos.y, dest_pos.x, dest_pos.y, 2.5, col);
+
+        // Arrowhead at 60% along the line
+        let mid = origin_pos + (dest_pos - origin_pos) * 0.6;
+        let dir = (dest_pos - origin_pos).normalize_or_zero();
+        let perp = vec2(-dir.y, dir.x);
+        let arrow_len = 18.0;
+        let arrow_w = 8.0;
+        draw_triangle(
+            mid + dir * arrow_len,
+            mid - dir * (arrow_len * 0.3) + perp * arrow_w,
+            mid - dir * (arrow_len * 0.3) - perp * arrow_w,
+            col,
+        );
+
+        // Small dot at origin and destination
+        draw_circle(origin_pos.x, origin_pos.y, 5.0, col);
+        draw_circle_lines(dest_pos.x, dest_pos.y, 7.0, 2.0, col);
+    }
+
+    // Route-drawing mode: highlight depots + show pending origin.
+    if let Some(origin_opt) = route_origin {
+        let pending   = Color::new(1.0, 0.9, 0.2, 0.9);
+
+        // Pulse all player depots to show they're clickable.
+        let t = get_time() as f32;
+        let pulse = ((t * 3.0).sin() * 0.3 + 0.7) as f32;
+        for (_e, pos) in world.query::<(&Position, &crate::depot::Depot)>().iter().map(|(_, (p, _))| ((), p)) {
+            draw_circle_lines(pos.0.x, pos.0.y, 40.0 + pulse * 8.0, 2.0,
+                Color::new(0.45, 1.0, 0.55, pulse * 0.6));
+        }
+
+        // Highlight selected origin in bright yellow.
+        if let Some(origin_e) = origin_opt {
+            if let Ok(p) = world.get::<&Position>(origin_e) {
+                draw_circle_lines(p.0.x, p.0.y, 50.0, 3.0, pending);
+                draw_circle(p.0.x, p.0.y, 8.0, pending);
+            }
+        }
+    }
+
+    // Back to screen camera.
+    set_default_camera();
 }
