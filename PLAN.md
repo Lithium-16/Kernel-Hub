@@ -260,19 +260,19 @@ with `Health` in weapon range. Buildings with `Health + Faction + Position` are 
 valid targets. Units will attack enemy buildings they encounter while advancing.
 
 **Build:**
-- [ ] **BuildingDef extended** — add `hp`, turret fields, depot fields, `vision_range`, sprite names to BuildingDef; update definitions.ron with all building types.
-- [ ] **BuildingKind component** — `pub struct BuildingKind(pub String)` in components.rs; all placed buildings get this.
-- [ ] **Health on buildings** — all placed buildings get `Health { cur, max }` from BuildingDef.hp; health bar drawn for damaged buildings.
-- [ ] **Position on buildings** — centre-of-footprint Vec2; needed for range queries and turret aiming.
-- [ ] **Armed buildings** — buildings with `has_turret: true` get `Turret + Weapon + AmmoStorage`; existing `combat::step` handles firing automatically.
-- [ ] **Depot buildings** — buildings with `has_depot: true` get `Depot` component; resupply system works unchanged.
-- [ ] **Radar buildings** — buildings with `vision_range > 0` get `VisionRange`; fog system works unchanged.
-- [ ] **`spawn_building()` function** — reads BuildingDef, spawns entity with all appropriate components, nav-blocks footprint.
-- [ ] **HQ entities** — spawned at scenario start for both factions; player HQ health shown in HUD.
-- [ ] **Building render** — draw health bars on damaged buildings; future: hull sprites from BuildingDef.
+- [x] **BuildingDef extended** — add `hp`, turret fields, depot fields, `vision_range`, sprite names to BuildingDef; update definitions.ron with all building types. ✓ 2026-06-23
+- [x] **BuildingKind component** — `pub struct BuildingKind(pub String)` in components.rs; all placed buildings get this. ✓ 2026-06-23
+- [x] **Health on buildings** — all placed buildings get `Health { cur, max }` from BuildingDef.hp; health bar drawn for damaged buildings. ✓ 2026-06-23
+- [x] **Position on buildings** — centre-of-footprint Vec2; needed for range queries and turret aiming. ✓ 2026-06-23
+- [x] **Armed buildings** — buildings with `has_turret: true` get `Turret + Weapon + AmmoStorage`; existing `combat::step` handles firing automatically. ✓ 2026-06-23
+- [x] **Depot buildings** — buildings with `has_depot: true` get `Depot` component; resupply system works unchanged. ✓ 2026-06-23
+- [x] **Radar buildings** — buildings with `vision_range > 0` get `VisionRange`; fog system works unchanged. ✓ 2026-06-23
+- [x] **`spawn_building()` function** — reads BuildingDef, spawns entity with all appropriate components, nav-blocks footprint. ✓ 2026-06-23
+- [x] **HQ entities** — spawned at scenario start for both factions; player HQ health shown in HUD. ✓ 2026-06-23
+- [x] **Building render** — draw health bars on damaged buildings; future: hull sprites from BuildingDef. ✓ 2026-06-23
 - [ ] **Building select + info** — clicking a building shows its type, health, and (if depot) stockpile in the selection panel.
-- [ ] **`COLDWAR_ASSERT=hq_targetable`** — unit attacks enemy HQ, HQ health decreases.
-- [ ] **`COLDWAR_ASSERT=turret_fires`** — gun turret auto-fires at enemy unit in range.
+- [x] **`COLDWAR_ASSERT=hq_targetable`** — unit attacks enemy HQ, HQ health decreases. ✓ 2026-06-23
+- [x] **`COLDWAR_ASSERT=turret_fires`** — gun turret auto-fires at enemy unit in range. ✓ 2026-06-23
 
 ### Blueprint → Engineer construction
 
@@ -305,13 +305,13 @@ Blueprint {
 ```
 
 **Build:**
-- [ ] **Blueprint component + entity** — spawned when player commits a ghost placement (replaces the immediate `spawn_building` call for player-placed buildings; HQ/starting depots still spawn directly).
-- [ ] **Engineer auto-claim** — idle Engineers of the same faction within map range pathfind to nearest unclaimed Blueprint and begin building.
-- [ ] **Build progress system** — `construction::step()` per sim tick: for each Blueprint with an adjacent Builder engineer, increment progress, withdraw Building Supplies from nearest depot.
-- [ ] **Blueprint render** — translucent footprint + progress bar; colour shifts from ghost-white to faction colour as progress increases.
-- [ ] **Completion** — on `progress >= 1.0`, despawn Blueprint, call `spawn_building()`.
-- [ ] **Supply gate** — if no Building Supplies available at nearest depot, progress halts; amber warning icon on blueprint.
-- [ ] **`COLDWAR_ASSERT=blueprint_builds`** — place blueprint, spawn engineer near it with depot stocked, verify building exists after N ticks.
+- [x] **Blueprint component + entity** — spawned when player commits a ghost placement (replaces the immediate `spawn_building` call for player-placed buildings; HQ/starting depots still spawn directly). ✓ 2026-06-23
+- [x] **Engineer auto-claim** — idle Engineers of the same faction within map range pathfind to nearest unclaimed Blueprint and begin building. ✓ 2026-06-23
+- [x] **Build progress system** — `construction::step()` per sim tick: for each Blueprint with an adjacent Builder engineer, increment progress, withdraw Building Supplies from nearest depot. ✓ 2026-06-23
+- [x] **Blueprint render** — translucent footprint + progress bar; colour shifts from ghost-white to faction colour as progress increases. ✓ 2026-06-23
+- [x] **Completion** — on `progress >= 1.0`, despawn Blueprint, call `spawn_building()`. ✓ 2026-06-23
+- [x] **Supply gate** — if no Building Supplies available at nearest depot, progress halts; amber warning icon on blueprint. ✓ 2026-06-23
+- [x] **`COLDWAR_ASSERT=blueprint_builds`** — place blueprint, spawn engineer near it with depot stocked, verify building exists after N ticks. ✓ 2026-06-23
 
 **Key types:** `Blueprint`, `construction::step()`.
 

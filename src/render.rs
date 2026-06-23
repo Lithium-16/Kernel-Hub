@@ -49,6 +49,7 @@ pub fn present(
     draw_health_bars_fogged(world, fog);
     draw_hitboxes(world);
     draw_range_circles(world);
+    draw_blueprints(world);
     draw_fog_overlay(fog, view);
 
     // Placement ghost (world space): green = valid, red = blocked.
@@ -174,14 +175,80 @@ fn draw_fog_overlay(fog: &crate::fog::FogGrid, view: Rect) {
     }
 }
 
+/// Draw all placed buildings, with health bars for any that have taken damage.
+///
+/// Buildings with a Health component show a bar above the footprint when cur < max.
+/// Bar width = footprint width * 0.8, positioned 6px above the building top edge.
 fn draw_buildings(world: &hecs::World) {
+    use crate::components::{BuildingKind, Health};
     let ts = map::TILE_SIZE;
     let edge = Color::new(0.05, 0.06, 0.08, 1.0);
-    for (_e, b) in world.query::<&crate::components::Building>().iter() {
+    for (_e, (b, health_opt, _kind_opt)) in
+        world.query::<(&crate::components::Building, Option<&Health>, Option<&BuildingKind>)>().iter()
+    {
         let (x, y) = (b.tx as f32 * ts, b.ty as f32 * ts);
         let (w, h) = (b.w as f32 * ts, b.h as f32 * ts);
         draw_rectangle(x, y, w, h, b.color);
         draw_rectangle_lines(x, y, w, h, 2.0, edge);
+
+        // Health bar: only shown when damaged.
+        if let Some(hp) = health_opt {
+            if hp.cur < hp.max && hp.max > 0.0 {
+                let frac = (hp.cur / hp.max).clamp(0.0, 1.0);
+                let bar_w = w * 0.8;
+                let bar_x = x + (w - bar_w) * 0.5;
+                let bar_y = y - 6.0;
+                let fill = if frac > 0.5 {
+                    Color::new(0.35, 0.9, 0.4, 0.95)
+                } else if frac > 0.25 {
+                    Color::new(0.95, 0.85, 0.3, 0.95)
+                } else {
+                    Color::new(0.95, 0.35, 0.3, 0.95)
+                };
+                draw_rectangle(bar_x, bar_y, bar_w, 4.0, Color::new(0.0, 0.0, 0.0, 0.7));
+                draw_rectangle(bar_x, bar_y, bar_w * frac, 4.0, fill);
+            }
+        }
+    }
+}
+
+/// Draw all Blueprint entities: translucent faction-tinted footprint + bright outline +
+/// green progress bar below. Called BEFORE draw_fog_overlay so fog can mask them.
+fn draw_blueprints(world: &hecs::World) {
+    use crate::components::{Blueprint, Building, Faction};
+    let ts = map::TILE_SIZE;
+    for (_e, (bp, b, fac)) in
+        world.query::<(&Blueprint, &Building, &Faction)>().iter()
+    {
+        let (x, y) = (b.tx as f32 * ts, b.ty as f32 * ts);
+        let (w, h) = (b.w as f32 * ts, b.h as f32 * ts);
+
+        // Faction tint: blue for player, red for enemy.
+        let (fill_tint, edge_tint) = if fac.0 == crate::PLAYER_FACTION {
+            (
+                Color::new(0.3, 0.55, 1.0, 0.35),
+                Color::new(0.4, 0.7, 1.0, 0.90),
+            )
+        } else {
+            (
+                Color::new(1.0, 0.3, 0.3, 0.35),
+                Color::new(1.0, 0.45, 0.45, 0.90),
+            )
+        };
+
+        // Translucent footprint fill.
+        draw_rectangle(x, y, w, h, fill_tint);
+        // Bright outline.
+        draw_rectangle_lines(x, y, w, h, 2.0, edge_tint);
+
+        // Progress bar below the footprint.
+        let bar_w = w * 0.8;
+        let bar_h = 5.0;
+        let bar_x = x + (w - bar_w) * 0.5;
+        let bar_y = (b.ty + b.h) as f32 * ts + 4.0;
+        let frac = bp.progress.clamp(0.0, 1.0);
+        draw_rectangle(bar_x, bar_y, bar_w, bar_h, Color::new(0.1, 0.1, 0.1, 0.75));
+        draw_rectangle(bar_x, bar_y, bar_w * frac, bar_h, Color::new(0.25, 0.95, 0.35, 0.92));
     }
 }
 

@@ -17,6 +17,7 @@ mod building;
 mod camera;
 mod combat;
 mod combat_group;
+mod construction;
 mod debug;
 mod components;
 mod data;
@@ -37,6 +38,7 @@ mod resupply;
 mod selection;
 mod sim;
 mod spatial;
+mod spawn_building;
 mod stance;
 mod ui;
 
@@ -151,6 +153,7 @@ fn spawn_army(
 #[allow(clippy::too_many_arguments)]
 fn spawn_scenario(
     world: &mut hecs::World,
+    nav: &mut NavGrid,
     groups: &mut combat_group::GroupRegistry,
     defs: &Definitions,
     sprites: &Sprites,
@@ -178,7 +181,24 @@ fn spawn_scenario(
     groups.add("1st Enemy Engineer Group", ENEMY_FACTION, e_eng);
     groups.add("1st Enemy Recon Group", ENEMY_FACTION, e_recon);
 
-    // Spawn starting depots for both sides (Phase 4: physical resource storage).
+    // Spawn HQ buildings for both sides. HQ includes a Depot pre-stocked with starting resources.
+    if let Some(hq_def) = defs.buildings.iter().find(|b| b.id == "hq") {
+        // Player HQ: offset from spawn so it doesn't block units.
+        let phq_pos = p_spawn + vec2(0.0, 200.0);
+        let ptx = ((phq_pos.x / map::TILE_SIZE) as usize).saturating_sub(hq_def.w / 2);
+        let pty = ((phq_pos.y / map::TILE_SIZE) as usize).saturating_sub(hq_def.h / 2);
+        spawn_building::spawn_hq(world, hq_def, phq_pos, PLAYER_FACTION, 2000, 1500, 800, 400);
+        for dy in 0..hq_def.h { for dx in 0..hq_def.w { nav.set_blocked(ptx + dx, pty + dy); } }
+
+        // Enemy HQ
+        let ehq_pos = e_spawn + vec2(0.0, -200.0);
+        let etx = ((ehq_pos.x / map::TILE_SIZE) as usize).saturating_sub(hq_def.w / 2);
+        let ety = ((ehq_pos.y / map::TILE_SIZE) as usize).saturating_sub(hq_def.h / 2);
+        spawn_building::spawn_hq(world, hq_def, ehq_pos, ENEMY_FACTION, 2000, 1500, 800, 400);
+        for dy in 0..hq_def.h { for dx in 0..hq_def.w { nav.set_blocked(etx + dx, ety + dy); } }
+    }
+
+    // Spawn forward supply depots for both sides (supplements the HQ depots).
     let _ = depot_spawn::spawn_starting_depots(world, p_spawn, e_spawn, PLAYER_FACTION, ENEMY_FACTION);
 }
 
@@ -350,7 +370,7 @@ async fn main() {
     let mut groups = combat_group::GroupRegistry::new();
     let mut ai = ai_brain::AiBrain::new(ENEMY_FACTION, PLAYER_FACTION);
 
-    spawn_scenario(&mut world, &mut groups, &defs, &sprites, &map, count, player_tint, enemy_tint);
+    spawn_scenario(&mut world, &mut nav, &mut groups, &defs, &sprites, &map, count, player_tint, enemy_tint);
 
     let mut cam = camera::GameCamera { center: map.player_spawn(), scale: 1.0 };
     if let Ok(z) = std::env::var("COLDWAR_ZOOM") {
@@ -590,21 +610,34 @@ async fn main() {
             ghost = Some((foot, valid));
 
             if is_mouse_button_pressed(MouseButton::Left) && !over_ui && valid {
-                let color = Color::from_rgba(def.color.0, def.color.1, def.color.2, 255);
-                world.spawn((components::Building {
-                    tx: tx as usize,
-                    ty: ty as usize,
-                    w: def.w,
-                    h: def.h,
-                    color,
-                },));
+                let btx = tx as usize;
+                let bty = ty as usize;
+                let bp_color = Color::from_rgba(def.color.0, def.color.1, def.color.2, 120);
+                let bp_cx = (btx as f32 + def.w as f32 * 0.5) * map::TILE_SIZE;
+                let bp_cy = (bty as f32 + def.h as f32 * 0.5) * map::TILE_SIZE;
+                // Spawn a Blueprint entity instead of an instant building.
+                // Engineers will auto-claim it and build it.
+                world.spawn((
+                    components::Building { tx: btx, ty: bty, w: def.w, h: def.h, color: bp_color },
+                    components::Blueprint {
+                        building_id: def.id.clone(),
+                        tx: btx, ty: bty, w: def.w, h: def.h,
+                        progress: 0.0,
+                        required_supplies: def.required_supplies,
+                        supplies_consumed: 0,
+                        faction: PLAYER_FACTION.to_string(),
+                        supply_timer: 0.0,
+                    },
+                    components::Faction(PLAYER_FACTION.to_string()),
+                    components::Position(vec2(bp_cx, bp_cy)),
+                ));
                 for dy in 0..def.h {
                     for dx in 0..def.w {
-                        nav.set_blocked(tx as usize + dx, ty as usize + dy);
+                        nav.set_blocked(btx + dx, bty + dy);
                     }
                 }
                 flow_cache.clear(); // nav changed: stale routes must not be reused
-                event_log.building(&def.id, tx as usize, ty as usize);
+                event_log.building(&def.id, btx, bty);
             }
             if is_mouse_button_pressed(MouseButton::Right) || is_key_pressed(KeyCode::Escape) {
                 placing = None;
@@ -741,7 +774,7 @@ async fn main() {
             placing = None;
             groups.clear();
             ai = ai_brain::AiBrain::new(ENEMY_FACTION, PLAYER_FACTION);
-            spawn_scenario(&mut world, &mut groups, &defs, &sprites, &map, count, player_tint, enemy_tint);
+            spawn_scenario(&mut world, &mut nav, &mut groups, &defs, &sprites, &map, count, player_tint, enemy_tint);
         }
 
         // --- AI brain tick (runs on fixed sim cadence, not render) ---
@@ -779,6 +812,31 @@ async fn main() {
             combat::step(&mut world, &grid, tick_dt, PLAYER_FACTION);
             extraction::step(&mut world, tick_dt);
             resupply_tracker.step(&mut world);
+            // Construction: engineers advance blueprints toward completion.
+            let completed_blueprints = construction::step(&mut world, tick_dt);
+            for bp_entity in completed_blueprints {
+                // Collect blueprint data before despawning.
+                let bp_data = {
+                    let Ok(bp)  = world.get::<&components::Blueprint>(bp_entity) else { continue; };
+                    let Ok(bld) = world.get::<&components::Building>(bp_entity) else { continue; };
+                    let Ok(fac) = world.get::<&components::Faction>(bp_entity) else { continue; };
+                    (bp.building_id.clone(), bld.tx, bld.ty, fac.0.clone())
+                };
+                let (building_id, btx, bty, bfaction) = bp_data;
+                // Clear IsBuilding from any engineers assigned to this blueprint.
+                let clear_engineers: Vec<hecs::Entity> = world
+                    .query::<&components::IsBuilding>()
+                    .iter()
+                    .filter(|(_, ib)| ib.blueprint == bp_entity)
+                    .map(|(e, _)| e)
+                    .collect();
+                for e in clear_engineers { let _ = world.remove_one::<components::IsBuilding>(e); }
+                // Despawn the blueprint, then spawn the real building.
+                let _ = world.despawn(bp_entity);
+                if let Some(def) = defs.buildings.iter().find(|b| b.id == building_id) {
+                    spawn_building::spawn_building(&mut world, def, btx, bty, &bfaction);
+                }
+            }
             // AI brain tick — uses same systems as player
             ai.tick(&mut world, &mut groups);
             groups.prune_all(&world);
@@ -791,6 +849,21 @@ async fn main() {
         }
         advance_queues(&mut world, &nav, &mut flow_cache);
         let tick_ms = ((get_time() - t0) * 1000.0) as f32;
+
+        // Engineer auto-move: engineers with IsBuilding but no MoveOrder walk to their blueprint.
+        {
+            let engineer_moves: Vec<(hecs::Entity, Vec2)> = world
+                .query::<(&components::IsBuilding, &components::Position)>()
+                .without::<&MoveOrder>()
+                .iter()
+                .filter_map(|(e, (ib, _pos))| {
+                    world.get::<&components::Position>(ib.blueprint).ok().map(|bp_pos| (e, bp_pos.0))
+                })
+                .collect();
+            for (e, target) in engineer_moves {
+                issue_move(&mut world, &nav, &mut flow_cache, &[e], target);
+            }
+        }
 
         // Turrets track enemies every render frame for smooth rotation.
         combat::update_turrets(&mut world, &grid, get_frame_time());

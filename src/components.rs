@@ -149,6 +149,38 @@ impl AmmoStorage {
     pub fn free(&self) -> u32 { self.capacity.saturating_sub(self.shots) }
 }
 
+/// The building type this entity represents (e.g. "hq", "gun_turret", "depot").
+/// Drives combat targeting (buildings are valid targets when this is present + Health).
+pub struct BuildingKind(pub String);
+
+/// A placed blueprint waiting to be constructed. Engineers claim this and advance
+/// `progress` toward 1.0, withdrawing BuildingSupplies from the nearest depot along
+/// the way. When progress reaches 1.0 the blueprint despawns and the real building spawns.
+pub struct Blueprint {
+    /// Which building definition to spawn on completion.
+    pub building_id: String,
+    /// Footprint tile origin (mirrors the co-located Building component).
+    pub tx: usize,
+    pub ty: usize,
+    pub w: usize,
+    pub h: usize,
+    /// Construction progress 0.0 → 1.0.
+    pub progress: f32,
+    /// Total building supplies required to complete.
+    pub required_supplies: u32,
+    /// Building supplies already consumed.
+    pub supplies_consumed: u32,
+    /// Which faction owns this blueprint.
+    pub faction: String,
+    /// Seconds since last supply withdrawal (triggers withdrawal every SUPPLY_INTERVAL seconds).
+    pub supply_timer: f32,
+}
+
+/// Marker placed on an Engineer entity to indicate it is actively working on a blueprint.
+pub struct IsBuilding {
+    pub blueprint: hecs::Entity,
+}
+
 /// Onboard fuel for vehicles. Engine stops when fuel <= 0.
 pub struct FuelTank {
     pub fuel: f32,

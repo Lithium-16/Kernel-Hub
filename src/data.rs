@@ -24,6 +24,58 @@ pub struct BuildingDef {
     /// Footprint size in tiles.
     pub w: usize,
     pub h: usize,
+
+    /// Health pool; 0 = indestructible.
+    #[serde(default)]
+    pub hp: f32,
+
+    /// Whether this building has a defensive turret.
+    #[serde(default)]
+    pub has_turret: bool,
+
+    /// Turret weapon range in world pixels.
+    #[serde(default)]
+    pub turret_range: f32,
+
+    /// Turret damage per shot.
+    #[serde(default)]
+    pub turret_damage: f32,
+
+    /// Turret shots per second.
+    #[serde(default)]
+    pub turret_fire_rate: f32,
+
+    /// Turret rotation speed (rad/s).
+    #[serde(default)]
+    pub turret_turn_rate: f32,
+
+    /// Whether this building acts as a supply depot.
+    #[serde(default)]
+    pub has_depot: bool,
+
+    /// Depot resupply radius in world pixels; 0 = use default 600.0.
+    #[serde(default)]
+    pub depot_supply_range: f32,
+
+    /// Vision radius in tiles for radar/observation; 0 = no radar.
+    #[serde(default)]
+    pub vision_range_tiles: f32,
+
+    /// Building Supplies required to construct; 0 = instant (HQ / scenario-start buildings).
+    #[serde(default)]
+    pub required_supplies: u32,
+
+    /// Construction progress per engineer per second (0.0 = use default 0.1).
+    #[serde(default)]
+    pub build_rate: f32,
+
+    /// Hull sprite base name (future rendering use). Empty = placeholder rectangle.
+    #[serde(default)]
+    pub hull_sprite: String,
+
+    /// Turret sprite base name (future rendering use). Empty = no separate turret sprite.
+    #[serde(default)]
+    pub turret_sprite: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
