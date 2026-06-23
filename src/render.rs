@@ -7,7 +7,7 @@ use macroquad::prelude::*;
 use crate::assets::Sprites;
 use crate::camera::GameCamera;
 use crate::components::{Heading, MoveOrder, Position, Renderable, Selected};
-use crate::map::{self, Region, RegionKind, TileMap};
+use crate::map::{self, TileMap};
 use crate::sim::Sim;
 
 const BG: Color = Color::new(0.07, 0.085, 0.11, 1.0);
@@ -17,7 +17,6 @@ const BG: Color = Color::new(0.07, 0.085, 0.11, 1.0);
 pub fn present(
     world: &hecs::World,
     map: &TileMap,
-    regions: &[Region],
     fog: &crate::fog::FogGrid,
     camera: &GameCamera,
     sim: &Sim,
@@ -37,18 +36,16 @@ pub fn present(
     clear_background(BG);
     draw_tiles(map, view, sprites);
     draw_buildings(world);
-    draw_depots(world);
     draw_move_orders(world);
     draw_selection_rings(world, sprites);
-    // Units: hull + turret sprites, fogged for enemy.
+    // Only draw entities visible through fog.
     draw_entities_fogged(world, fog, sprites, camera.scale);
+    draw_turret_barrels_fogged(world, fog, camera.scale);
     draw_tracers(world);
     draw_health_bars_fogged(world, fog);
     draw_hitboxes(world);
     draw_range_circles(world);
     draw_fog_overlay(fog, view);
-    // Region icons: symmetric dots in world space (no Y-flip artifact).
-    draw_region_dots(regions, camera.scale);
 
     // Placement ghost (world space): green = valid, red = blocked.
     if let Some((r, valid)) = ghost {
@@ -61,9 +58,6 @@ pub fn present(
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 2.0, edge);
     }
 
-    // Restore the correct screen-space camera for all 2D overlay/text drawing.
-    // set_default_camera() is the right call here — it is what made HUD text render
-    // correctly before region labels were added. from_display_rect breaks draw_text.
     match &target {
         None => set_default_camera(),
         Some(_) => {
@@ -72,13 +66,10 @@ pub fn present(
             set_camera(&ui);
         }
     }
-
     if let Some((a, b)) = drag {
         let r = Rect::new(a.x.min(b.x), a.y.min(b.y), (b.x - a.x).abs(), (b.y - a.y).abs());
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, Color::new(0.5, 1.0, 0.6, 0.9));
     }
-    // Region labels in screen space (world_to_screen converts coords — avoids Y-flip).
-    draw_region_labels_screen(regions, view, sw, sh, camera.scale);
     draw_overlay(world, map, camera, sim, tick_ms, sh);
     set_default_camera();
 }
@@ -212,48 +203,30 @@ fn draw_selection_rings(world: &hecs::World, sprites: &Sprites) {
 /// Below this zoom level units render as colored dots for legibility.
 const OVERVIEW_ZOOM: f32 = 0.22;
 
-/// Draw all units visible through fog. Each unit draws two sprites:
-///   1. Hull — rotates with the entity's Heading (body direction).
-///   2. Turret — rotates with the Turret.angle (tracks target independently).
-/// Both are 256×256 with the same canvas pivot, so they overlay perfectly.
 fn draw_entities_fogged(world: &hecs::World, fog: &crate::fog::FogGrid, sprites: &Sprites, cam_scale: f32) {
-    use crate::components::{Faction, Turret};
+    use crate::components::Faction;
     let overview = cam_scale < OVERVIEW_ZOOM;
-
-    for (_e, (pos, r, head, fac, turret_opt)) in
-        world.query::<(&Position, &Renderable, &Heading, &Faction, Option<&Turret>)>().iter()
-    {
-        let is_enemy = fac.0 != crate::PLAYER_FACTION;
-        let vis = !is_enemy || fog.visible_world(pos.0);
+    for (_e, (pos, r, head, fac)) in world.query::<(&Position, &Renderable, &Heading, &Faction)>().iter() {
+        let vis = fac.0 == crate::PLAYER_FACTION || fog.visible_world(pos.0);
         if !vis { continue; }
-
         if overview {
+            // Strategic overview: draw a screen-size-stable dot (radius = 3 screen px).
             let dot_r = 3.0 / cam_scale;
             draw_circle(pos.0.x, pos.0.y, dot_r, r.tint);
-            continue;
-        }
-
-        let x    = pos.0.x - r.size * 0.5;
-        let y    = pos.0.y - r.size * 0.5;
-        let size = vec2(r.size, r.size);
-        let hull_rot = head.0 + std::f32::consts::FRAC_PI_2;
-
-        // Hull (body direction)
-        draw_texture_ex(
-            sprites.hull(r.sprite, is_enemy),
-            x, y, WHITE,
-            DrawTextureParams { dest_size: Some(size), rotation: hull_rot, ..Default::default() },
-        );
-
-        // Turret (independent aim direction) — only if unit has a Turret component
-        if let Some(turret) = turret_opt {
-            if let Some(tex) = sprites.turret(r.sprite, is_enemy) {
-                let turret_rot = turret.angle + std::f32::consts::FRAC_PI_2;
-                draw_texture_ex(
-                    tex, x, y, WHITE,
-                    DrawTextureParams { dest_size: Some(size), rotation: turret_rot, ..Default::default() },
-                );
-            }
+        } else {
+            let src = sprites.unit_rect(r.sprite);
+            draw_texture_ex(
+                &sprites.atlas,
+                pos.0.x - r.size * 0.5,
+                pos.0.y - r.size * 0.5,
+                r.tint,
+                DrawTextureParams {
+                    dest_size: Some(vec2(r.size, r.size)),
+                    source: Some(src),
+                    rotation: head.0 + std::f32::consts::FRAC_PI_2,
+                    ..Default::default()
+                },
+            );
         }
     }
 }
@@ -292,34 +265,20 @@ fn draw_move_orders(world: &hecs::World) {
     }
 }
 
-/// Depots: drawn as tan/brown squares with a supply-radius ring.
-/// Fogged enemy depots are hidden.
-fn draw_depots(world: &hecs::World) {
-    use crate::components::Faction;
-    use crate::depot::Depot;
-    let ts = map::TILE_SIZE;
-    let depot_size = ts * 2.2;
-    for (_e, (pos, depot, fac)) in world.query::<(&Position, &Depot, &Faction)>().iter() {
-        let is_player = fac.0 == crate::PLAYER_FACTION;
-        let fill = if is_player {
-            Color::new(0.55, 0.48, 0.30, 0.90)  // player: warm tan
-        } else {
-            Color::new(0.50, 0.22, 0.22, 0.85)  // enemy: dark red
-        };
-        let x = pos.0.x - depot_size * 0.5;
-        let y = pos.0.y - depot_size * 0.5;
-        draw_rectangle(x, y, depot_size, depot_size, fill);
-        draw_rectangle_lines(x, y, depot_size, depot_size, 2.5, Color::new(1.0, 0.88, 0.55, 0.85));
-        // Supply radius ring (faint dashed circle)
-        draw_circle_lines(pos.0.x, pos.0.y, depot.supply_range, 1.0, Color::new(1.0, 0.88, 0.55, 0.20));
-        // "D" label in center (drawn as a colored box — text goes through the fogged camera here)
-        // Use a smaller inner box as a visual indicator instead.
-        let inner = depot_size * 0.35;
-        draw_rectangle(
-            pos.0.x - inner * 0.5, pos.0.y - inner * 0.5,
-            inner, inner,
-            Color::new(1.0, 0.88, 0.55, 0.7),
-        );
+fn draw_turret_barrels_fogged(world: &hecs::World, fog: &crate::fog::FogGrid, cam_scale: f32) {
+    use crate::components::{Faction, Turret};
+    // Skip turret barrels entirely in overview mode — dots don't have barrels.
+    if cam_scale < OVERVIEW_ZOOM { return; }
+    for (_e, (pos, r, turret, fac)) in world.query::<(&Position, &Renderable, &Turret, &Faction)>().iter() {
+        if fac.0 != crate::PLAYER_FACTION && !fog.visible_world(pos.0) { continue; }
+        let barrel_len = r.size * 0.52;
+        let barrel_w = r.size * 0.14;
+        let cos = turret.angle.cos();
+        let sin = turret.angle.sin();
+        let tip = pos.0 + vec2(cos, sin) * barrel_len;
+        let base = pos.0 + vec2(cos, sin) * r.size * 0.10;
+        draw_line(base.x, base.y, tip.x, tip.y, barrel_w, Color::new(0.18, 0.20, 0.22, 1.0));
+        draw_circle(pos.0.x, pos.0.y, r.size * 0.22, Color::new(0.22, 0.24, 0.27, 1.0));
     }
 }
 
@@ -343,90 +302,16 @@ fn draw_hitboxes(world: &hecs::World) {
     }
 }
 
-/// Convert a world-space position to screen pixels, accounting for the Y-flip in the world camera.
-/// view = world-space rect visible on screen; (sw, sh) = screen dimensions.
-fn world_to_screen(world_pos: Vec2, view: Rect, sw: f32, sh: f32) -> Vec2 {
-    let nx = (world_pos.x - view.x) / view.w;
-    let ny = 1.0 - (world_pos.y - view.y) / view.h; // flip Y back
-    vec2(nx * sw, ny * sh)
-}
-
-/// World-space coloured dots for each region (circles are symmetric — no Y-flip artifact).
-/// Called while the world camera is active.
-fn draw_region_dots(regions: &[Region], cam_scale: f32) {
-    let ts = map::TILE_SIZE;
-    for r in regions {
-        let cx = r.cx as f32 * ts + ts * 0.5;
-        let cy = r.cy as f32 * ts + ts * 0.5;
-        let color = match r.kind {
-            RegionKind::OreBasin   => Color::new(0.85, 0.65, 0.20, 0.92),
-            RegionKind::OilField   => Color::new(0.45, 0.35, 0.90, 0.92),
-            RegionKind::Pass       => Color::new(0.72, 0.68, 0.62, 0.85),
-            RegionKind::Valley     => Color::new(0.40, 0.75, 0.40, 0.80),
-            RegionKind::Chokepoint => Color::new(0.95, 0.40, 0.30, 0.80),
-        };
-        // Dot radius stable at ~6 screen px.
-        let r_px = (6.0 / cam_scale).clamp(8.0, 80.0);
-        draw_circle(cx, cy, r_px, color);
-        draw_circle_lines(cx, cy, r_px, (1.5 / cam_scale).clamp(1.0, 6.0), Color::new(1.0, 1.0, 1.0, 0.5));
-    }
-}
-
-/// Region name labels drawn in screen space (called after set_default_camera).
-/// Text rendered through the Y-flipping world camera appears mirrored — screen space avoids this.
-fn draw_region_labels_screen(regions: &[Region], view: Rect, sw: f32, sh: f32, cam_scale: f32) {
-    let ts = map::TILE_SIZE;
-    let label_sz = 14.0_f32;
-    let icon_sz  = 16.0_f32;
-
-    for r in regions {
-        let world_pos = vec2(r.cx as f32 * ts + ts * 0.5, r.cy as f32 * ts + ts * 0.5);
-        let sp = world_to_screen(world_pos, view, sw, sh);
-
-        // Skip if off-screen.
-        if sp.x < -100.0 || sp.x > sw + 100.0 || sp.y < -40.0 || sp.y > sh + 40.0 {
-            continue;
-        }
-
-        let (symbol, color) = match r.kind {
-            RegionKind::OreBasin   => ("ORE",   Color::new(0.85, 0.65, 0.20, 1.0)),
-            RegionKind::OilField   => ("OIL",   Color::new(0.55, 0.45, 1.00, 1.0)),
-            RegionKind::Pass       => ("PASS",  Color::new(0.85, 0.82, 0.75, 1.0)),
-            RegionKind::Valley     => ("VLY",   Color::new(0.50, 0.90, 0.50, 1.0)),
-            RegionKind::Chokepoint => ("CHOKE", Color::new(1.00, 0.45, 0.35, 1.0)),
-        };
-
-        // Symbol tag above dot.
-        let sd = measure_text(symbol, None, icon_sz as u16, 1.0);
-        draw_text(symbol, sp.x - sd.width * 0.5, sp.y - 10.0, icon_sz, color);
-
-        // Region name below dot — only when zoomed in enough to read it.
-        if cam_scale > 0.18 {
-            let ld = measure_text(r.name, None, label_sz as u16, 1.0);
-            let bg = Color::new(0.0, 0.0, 0.0, 0.60);
-            let pad = 3.0;
-            draw_rectangle(
-                sp.x - ld.width * 0.5 - pad,
-                sp.y + 10.0,
-                ld.width + pad * 2.0,
-                label_sz + pad * 2.0,
-                bg,
-            );
-            draw_text(r.name, sp.x - ld.width * 0.5, sp.y + 10.0 + label_sz, label_sz, color);
-        }
-    }
-}
-
 fn draw_overlay(world: &hecs::World, map: &TileMap, camera: &GameCamera, sim: &Sim, tick_ms: f32, sh: f32) {
     let selected = world.query::<&Selected>().iter().count();
     let moving = world.query::<&crate::components::MoveOrder>().iter().count();
     let _ = sim;
     // Below the top resource bar so the two don't overlap.
     draw_text(
-        "Drag-select · RMB move (Shift=queue) · dbl-click=type · Ctrl+1-9 group · G=cycle group · B=build · R=restart  (WASD pan, scroll zoom)",
+        "Drag-select, RMB move (Shift=queue), dbl-click=type, Ctrl+1-9 group, B=build, R=restart  (WASD pan)",
         16.0,
         crate::hud::TOP_H + 24.0,
-        22.0,
+        24.0,
         WHITE,
     );
     let info = format!(

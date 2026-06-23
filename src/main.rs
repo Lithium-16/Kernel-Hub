@@ -782,7 +782,7 @@ async fn main() {
         combat::update_turrets(&mut world, &grid, get_frame_time());
 
         let drag_box = drag_start.map(|s| (s, mp));
-        render::present(&world, &map, &regions, &fog, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
+        render::present(&world, &map, &fog, &cam, &sim, &sprites, drag_box, ghost, tick_ms, None);
         // present() exits with set_default_camera() — correct for HUD text.
 
         // Aggregate live economy from all player depots for the HUD top bar.
@@ -887,7 +887,7 @@ async fn main() {
             frame += 1;
             if frame >= capture_frames {
                 let rt = render_target(screen_width() as u32, screen_height() as u32);
-                render::present(&world, &map, &regions, &fog, &cam, &sim, &sprites, None, None, tick_ms, Some(rt.clone()));
+                render::present(&world, &map, &fog, &cam, &sim, &sprites, None, None, tick_ms, Some(rt.clone()));
                 let mut uicam = Camera2D::from_display_rect(Rect::new(0.0, 0.0, sw, sh));
                 uicam.render_target = Some(rt.clone());
                 set_camera(&uicam);
