@@ -52,6 +52,9 @@ pub struct UnitDef {
     pub fire_rate: f32,
     /// Turret rotation speed (rad/s). 0 = no turret (infantry fire direction = hull).
     pub turret_turn_rate: f32,
+    /// Vision radius in world px. 0 = use the global default (fog::VISION_RADIUS_PX).
+    #[serde(default)]
+    pub vision_range: f32,
 }
 
 /// Load and validate the bundled definitions.

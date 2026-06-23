@@ -102,7 +102,7 @@ fn spawn_army(
             components::UnitKind { id: unit.id.clone(), name: unit.name.clone() },
             stance::Stance::Aggressive,
             components::Health { cur: unit.hp, max: unit.hp },
-            components::VisionRange(fog::VISION_RADIUS_PX),
+            components::VisionRange(if unit.vision_range > 0.0 { unit.vision_range } else { fog::VISION_RADIUS_PX }),
         ));
         if unit.fire_rate > 0.0 {
             let _ = world.insert_one(e, components::Weapon {
@@ -143,14 +143,18 @@ fn spawn_scenario(
     // Player side
     let p_armor = spawn_army(world, defs, sprites, PLAYER_FACTION, p_spawn, player_tint, Some("tank"), count);
     let p_eng   = spawn_army(world, defs, sprites, PLAYER_FACTION, p_spawn + vec2(100.0, 0.0), player_tint, Some("engineer"), 5);
+    let p_recon = spawn_army(world, defs, sprites, PLAYER_FACTION, p_spawn + vec2(0.0, -120.0), player_tint, Some("scout"), 4);
     groups.add("1st Armored Group", PLAYER_FACTION, p_armor);
     groups.add("1st Engineer Group", PLAYER_FACTION, p_eng);
+    groups.add("1st Recon Group", PLAYER_FACTION, p_recon);
 
-    // Enemy side (identical capability)
+    // Enemy side (identical capability — symmetric AI)
     let e_armor = spawn_army(world, defs, sprites, ENEMY_FACTION, e_spawn, enemy_tint, Some("tank"), count);
     let e_eng   = spawn_army(world, defs, sprites, ENEMY_FACTION, e_spawn + vec2(-100.0, 0.0), enemy_tint, Some("engineer"), 5);
+    let e_recon = spawn_army(world, defs, sprites, ENEMY_FACTION, e_spawn + vec2(0.0, 120.0), enemy_tint, Some("scout"), 4);
     groups.add("1st Enemy Armored Group", ENEMY_FACTION, e_armor);
     groups.add("1st Enemy Engineer Group", ENEMY_FACTION, e_eng);
+    groups.add("1st Enemy Recon Group", ENEMY_FACTION, e_recon);
 }
 
 fn clear_selection(world: &mut hecs::World) {

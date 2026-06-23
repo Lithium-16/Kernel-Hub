@@ -191,7 +191,7 @@ Fog of war makes geography matter.
 - [x] **Attack-move** — `attack_move` flag on `MoveOrder`; units fire at enemies in range while advancing; stall-settle disabled so they push through to goal. ✓ 2026-06-22
 - [x] **Fog of war** — `FogGrid` (Hidden/LastSeen/Visible per tile); updated per tick from player unit VisionRange; rendered as black/dimmed overlay; enemy units hidden in fog; HQ pre-revealed 20-tile radius. ✓ 2026-06-22
 - [x] **Geographic terrain tiles** — Mountain/Cliff (impassable), MountainPass (2× movement cost), River (impassable), RiverCrossing (2.5× cost), Chokepoint; NavGrid stores per-tile cost used in FlowField Dijkstra so paths correctly prefer flat ground over passes. ✓ 2026-06-22
-- [ ] **Recon Group unit type** — high vision radius, fast, light armor; purpose-built for reconnaissance.
+- [x] **Recon Group unit type** — `scout` unit def (120 px/s, 35 HP, 480px vision = 3× default); `vision_range` field on UnitDef with serde default; 4 scouts per side spawn as "1st Recon Group". ✓ 2026-06-22
 
 **Key types:** `CombatGroup`, `GroupOrder`, `FogOfWar`, `TileProperties`, `VisionRadius`.
 
@@ -317,22 +317,17 @@ Standing practice (owner, 2026-06-21): continuously test/compare features and co
 well-known RTS games (see PROJECT.md §12) and pull the next-most-impactful idea from here each
 iteration. Keep this list fresh — add as we learn, check off as we ship.
 
-**Have:** flow-field movement · formation slots with push-through · control groups 1–9 · shift-add/double-click-type · command card + stances · waypoint queueing · minimap · building placement (ghost+snap) · discrete combat (turrets aim, per-shot tracers, range circles) · health bars · win/lose + restart · geographic terrain (mountains, river, passes, chokepoints) with flow-field terrain cost · fog of war (Hidden/LastSeen/Visible per tile) · combat groups with clickable HUD cards (G key cycles) · attack-move · AI brain with 5-min prep → group advance · debug suite (COLDWAR_ASSERT/QUERY/EVENTLOG).
+**Have:** flow-field movement · formation slots with push-through · control groups 1–9 · shift-add/double-click-type · command card + stances · waypoint queueing · minimap · building placement (ghost+snap) · discrete combat (turrets aim, per-shot tracers, range circles) · health bars · win/lose + restart · geographic terrain (mountains, river, passes, chokepoints) with flow-field terrain cost · fog of war (Hidden/LastSeen/Visible per tile) · combat groups with clickable HUD cards (G key cycles) · attack-move · AI brain with 5-min prep → group advance · Recon Group (scout unit, 3× vision, spawns per side) · strategic zoom (0.08–5.0 scale, colored-dot overview below 0.22) · debug suite (COLDWAR_ASSERT/QUERY/EVENTLOG).
 
 **High-impact gaps vs reference games (reprioritized for operational RTS direction):**
-1. **Combat Groups** (SupCom group control, CoH unit cohesion) — *the* defining feature of the new
-   direction; players command groups not individuals. Build this before any other Phase 3+ work.
-2. **Geographic terrain** (every serious RTS) — mountains, rivers, passes, chokepoints. Currently
-   flat noise map. Geography is a core pillar.
-3. **Fog of war / reconnaissance** (all RTS) — currently full visibility. Recon is phase 1 of the
-   war loop. *Biggest gameplay gap given the new direction.*
-4. **Logistics intent / auto-routing** (unique to this game) — player draws routes, system runs trucks.
-5. **Expansion flow** (unique) — resource regions, secure → build → integrate loop.
-6. **Attack-move** (SC2/SupCom) — units currently only fire in place; attack-move = advance and engage.
-7. **Automated rear defense** (They Are Billions / CoH) — QRF, patrols, threat alerts.
-8. **Strategic zoom** (SupCom) — zoom-to-whole-map-overview; essential for theater command.
-9. **Suppression / cover / retreat** (CoH) — abstracted combat depth (later phase).
-10. **Audio/feedback** (all) — command acks, fire/impact SFX; none yet.
+~~1. Combat Groups~~ ✓ · ~~2. Geographic terrain~~ ✓ · ~~3. Fog of war / recon~~ ✓ · ~~6. Attack-move~~ ✓ · ~~8. Strategic zoom~~ ✓
+
+1. **Logistics intent / auto-routing** (unique to this game) — player draws routes, system runs trucks. Phase 5 core.
+2. **Expansion flow** (unique) — resource regions, secure → build extractor → depot integrates output. Phase 4 core.
+3. **Automated rear defense** (They Are Billions / CoH) — QRF designation, patrol routes, threat alerts from radar. Phase 7.
+4. **Minimap enemy intel** — enemy positions appear on minimap only when in visible fog tiles (currently always shown). Quick win.
+5. **Suppression / cover** (CoH) — moving under fire accrues suppression → slows + forces prone. Later phase.
+6. **Audio/feedback** (all) — command acks, weapon fire, impact SFX; none yet. Phase 8.
 
 ## Parking lot (explicitly deferred)
 Naval/amphibious units · multiplayer/netcode · replays · campaign/story · player-facing modding ·

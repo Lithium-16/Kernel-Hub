@@ -46,7 +46,8 @@ impl GameCamera {
         let (_, wheel_y) = mouse_wheel();
         if wheel_y != 0.0 {
             let factor = if wheel_y > 0.0 { 1.1 } else { 1.0 / 1.1 };
-            self.scale = (self.scale * factor).clamp(0.25, 5.0);
+            // Min zoom 0.08 lets the full 256×256 map fit on screen (8192px / 0.08 ≈ fits 1280px).
+            self.scale = (self.scale * factor).clamp(0.08, 5.0);
         }
 
         self.center.x = self.center.x.clamp(0.0, map_px.x);

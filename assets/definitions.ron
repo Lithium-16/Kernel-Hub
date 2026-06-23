@@ -15,7 +15,9 @@ Definitions(
         (id: "tank",     name: "Main Battle Tank", faction: "vanguard", sprite: "tank",      color: (255, 255, 255), radius: 12.0, speed: 60.0, turn_rate: 3.2, hp: 240.0, range: 130.0, damage: 35.0, fire_rate: 0.8, turret_turn_rate: 2.2),
         (id: "arty",     name: "Artillery",        faction: "vanguard", sprite: "artillery", color: (255, 255, 255), radius: 12.0, speed: 46.0, turn_rate: 2.4, hp: 90.0,  range: 240.0, damage: 55.0, fire_rate: 0.5, turret_turn_rate: 1.4),
         (id: "aa",       name: "AA Vehicle",        faction: "vanguard", sprite: "aa",        color: (255, 255, 255), radius: 10.0, speed: 66.0, turn_rate: 4.0, hp: 80.0,  range: 140.0, damage: 18.0, fire_rate: 2.0, turret_turn_rate: 3.5),
-        (id: "truck",    name: "Supply Truck",      faction: "vanguard", sprite: "truck",     color: (255, 255, 255), radius: 11.0, speed: 78.0, turn_rate: 4.5, hp: 70.0,  range: 0.0,   damage: 0.0,  fire_rate: 0.0, turret_turn_rate: 0.0),
+        (id: "truck",    name: "Supply Truck",      faction: "vanguard", sprite: "truck",     color: (255, 255, 255), radius: 11.0, speed: 78.0,  turn_rate: 4.5, hp: 70.0,  range: 0.0,   damage: 0.0,  fire_rate: 0.0, turret_turn_rate: 0.0),
+        // Recon scout: fast, light armor, no weapon, 3× vision radius for fog-of-war.
+        (id: "scout",    name: "Recon Scout",       faction: "vanguard", sprite: "infantry",  color: (255, 255, 255), radius: 8.0,  speed: 120.0, turn_rate: 9.0, hp: 35.0,  range: 0.0,   damage: 0.0,  fire_rate: 0.0, turret_turn_rate: 0.0, vision_range: 480.0),
     ],
     // Placeholder buildings (footprint in tiles). Drawn as colored footprints for now;
     // sprites + production/logistics roles arrive with the building systems.

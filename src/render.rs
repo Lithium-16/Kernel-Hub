@@ -39,8 +39,8 @@ pub fn present(
     draw_move_orders(world);
     draw_selection_rings(world, sprites);
     // Only draw entities visible through fog.
-    draw_entities_fogged(world, fog, sprites);
-    draw_turret_barrels_fogged(world, fog);
+    draw_entities_fogged(world, fog, sprites, camera.scale);
+    draw_turret_barrels_fogged(world, fog, camera.scale);
     draw_tracers(world);
     draw_health_bars_fogged(world, fog);
     draw_hitboxes(world);
@@ -200,31 +200,34 @@ fn draw_selection_rings(world: &hecs::World, sprites: &Sprites) {
     }
 }
 
-fn draw_entities_fogged(world: &hecs::World, fog: &crate::fog::FogGrid, sprites: &Sprites) {
-    use crate::fog::FogState;
+/// Below this zoom level units render as colored dots for legibility.
+const OVERVIEW_ZOOM: f32 = 0.22;
+
+fn draw_entities_fogged(world: &hecs::World, fog: &crate::fog::FogGrid, sprites: &Sprites, cam_scale: f32) {
     use crate::components::Faction;
+    let overview = cam_scale < OVERVIEW_ZOOM;
     for (_e, (pos, r, head, fac)) in world.query::<(&Position, &Renderable, &Heading, &Faction)>().iter() {
-        // Player units always visible (they reveal fog themselves).
-        // Enemy units only visible in Visible tiles.
-        let vis = if fac.0 == crate::PLAYER_FACTION {
-            true
-        } else {
-            fog.visible_world(pos.0)
-        };
+        let vis = fac.0 == crate::PLAYER_FACTION || fog.visible_world(pos.0);
         if !vis { continue; }
-        let src = sprites.unit_rect(r.sprite);
-        draw_texture_ex(
-            &sprites.atlas,
-            pos.0.x - r.size * 0.5,
-            pos.0.y - r.size * 0.5,
-            r.tint,
-            DrawTextureParams {
-                dest_size: Some(vec2(r.size, r.size)),
-                source: Some(src),
-                rotation: head.0 + std::f32::consts::FRAC_PI_2,
-                ..Default::default()
-            },
-        );
+        if overview {
+            // Strategic overview: draw a screen-size-stable dot (radius = 3 screen px).
+            let dot_r = 3.0 / cam_scale;
+            draw_circle(pos.0.x, pos.0.y, dot_r, r.tint);
+        } else {
+            let src = sprites.unit_rect(r.sprite);
+            draw_texture_ex(
+                &sprites.atlas,
+                pos.0.x - r.size * 0.5,
+                pos.0.y - r.size * 0.5,
+                r.tint,
+                DrawTextureParams {
+                    dest_size: Some(vec2(r.size, r.size)),
+                    source: Some(src),
+                    rotation: head.0 + std::f32::consts::FRAC_PI_2,
+                    ..Default::default()
+                },
+            );
+        }
     }
 }
 
@@ -262,8 +265,10 @@ fn draw_move_orders(world: &hecs::World) {
     }
 }
 
-fn draw_turret_barrels_fogged(world: &hecs::World, fog: &crate::fog::FogGrid) {
+fn draw_turret_barrels_fogged(world: &hecs::World, fog: &crate::fog::FogGrid, cam_scale: f32) {
     use crate::components::{Faction, Turret};
+    // Skip turret barrels entirely in overview mode — dots don't have barrels.
+    if cam_scale < OVERVIEW_ZOOM { return; }
     for (_e, (pos, r, turret, fac)) in world.query::<(&Position, &Renderable, &Turret, &Faction)>().iter() {
         if fac.0 != crate::PLAYER_FACTION && !fog.visible_world(pos.0) { continue; }
         let barrel_len = r.size * 0.52;
