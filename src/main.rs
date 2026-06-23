@@ -201,8 +201,8 @@ fn spawn_scenario(
         for dy in 0..hq_def.h { for dx in 0..hq_def.w { nav.set_blocked(etx + dx, ety + dy); } }
     }
 
-    // Spawn forward supply depots for both sides (supplements the HQ depots).
-    let _ = depot_spawn::spawn_starting_depots(world, p_spawn, e_spawn, PLAYER_FACTION, ENEMY_FACTION);
+    // HQ buildings (spawned above) already contain pre-stocked Depot components.
+    // No additional depot_spawn needed — HQ is the starting depot.
 }
 
 fn clear_selection(world: &mut hecs::World) {

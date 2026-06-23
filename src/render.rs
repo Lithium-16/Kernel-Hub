@@ -333,11 +333,20 @@ fn draw_entities_fogged(world: &hecs::World, fog: &crate::fog::FogGrid, sprites:
 
 /// Depot buildings: tan square + supply-range ring. Distinct from placeable buildings.
 fn draw_depots(world: &hecs::World) {
+    use crate::components::{Building, Faction};
     use crate::depot::Depot;
-    use crate::components::Faction;
     let ts = map::TILE_SIZE;
     let sz = ts * 2.2;
-    for (_e, (pos, depot, fac)) in world.query::<(&Position, &Depot, &Faction)>().iter() {
+    // Skip depots that are also Building entities (HQ, Supply Depot buildings) —
+    // draw_buildings already draws their footprint; we only draw the supply-range ring.
+    for (e, (pos, depot, fac)) in world.query::<(&Position, &Depot, &Faction)>().iter() {
+        let is_building = world.get::<&Building>(e).is_ok();
+        if is_building {
+            // Just draw the supply-range ring so the player can see coverage.
+            draw_circle_lines(pos.0.x, pos.0.y, depot.supply_range, 1.0,
+                Color::new(1.0, 0.88, 0.55, 0.18));
+            continue;
+        }
         let fill = if fac.0 == crate::PLAYER_FACTION {
             Color::new(0.55, 0.48, 0.30, 0.90)
         } else {
