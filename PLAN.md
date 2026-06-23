@@ -274,11 +274,51 @@ valid targets. Units will attack enemy buildings they encounter while advancing.
 - [ ] **`COLDWAR_ASSERT=hq_targetable`** — unit attacks enemy HQ, HQ health decreases.
 - [ ] **`COLDWAR_ASSERT=turret_fires`** — gun turret auto-fires at enemy unit in range.
 
-**Key types:** `BuildingKind`, `BuildingDef` (extended), `spawn_building()`.
+### Blueprint → Engineer construction
+
+**How it works:**
+1. Player places a blueprint (B key, ghost outline as now). Blueprint is a lightweight ECS entity:
+   `Blueprint { building_id: String, tx, ty, w, h, progress: f32, required_supplies: u32, faction }`
+2. Blueprint appears on the map as a translucent footprint with a progress bar. It nav-blocks
+   immediately (no unit can walk through it), but is not yet functional.
+3. Any Engineer unit within range of the blueprint auto-claims it if idle — no manual assignment
+   needed. Engineer pathfinds to the blueprint, then stands adjacent and builds.
+4. Each sim tick an Engineer is building: `progress += build_rate * dt`. Building Supplies are
+   consumed from the nearest depot (1 supply per N progress, checked every second).
+   If the depot runs dry, progress pauses until resupplied.
+5. When `progress >= 1.0`: `spawn_building()` is called, the Blueprint entity is despawned,
+   the real building entity replaces it. The Engineer becomes idle.
+6. Multiple Engineers on one blueprint stack build rates (2 engineers = 2× speed).
+7. Blueprint can be cancelled (right-click → despawn; nav-block removed).
+
+**Key types:**
+```
+Blueprint {
+    building_id: String,      // which BuildingDef to build
+    tx: usize, ty: usize,    // footprint origin
+    w: usize,  h: usize,
+    progress: f32,            // 0.0 → 1.0
+    required_supplies: u32,   // total supplies to complete
+    supplies_consumed: u32,   // running total drawn so far
+    faction: String,
+}
+```
+
+**Build:**
+- [ ] **Blueprint component + entity** — spawned when player commits a ghost placement (replaces the immediate `spawn_building` call for player-placed buildings; HQ/starting depots still spawn directly).
+- [ ] **Engineer auto-claim** — idle Engineers of the same faction within map range pathfind to nearest unclaimed Blueprint and begin building.
+- [ ] **Build progress system** — `construction::step()` per sim tick: for each Blueprint with an adjacent Builder engineer, increment progress, withdraw Building Supplies from nearest depot.
+- [ ] **Blueprint render** — translucent footprint + progress bar; colour shifts from ghost-white to faction colour as progress increases.
+- [ ] **Completion** — on `progress >= 1.0`, despawn Blueprint, call `spawn_building()`.
+- [ ] **Supply gate** — if no Building Supplies available at nearest depot, progress halts; amber warning icon on blueprint.
+- [ ] **`COLDWAR_ASSERT=blueprint_builds`** — place blueprint, spawn engineer near it with depot stocked, verify building exists after N ticks.
+
+**Key types:** `Blueprint`, `construction::step()`.
 
 **Acceptance:** place a Gun Turret → it auto-fires at approaching enemies; place an HQ → it has
 health that decrements when attacked; place a Depot → it stores resources and resupplies nearby
-units; all 6 existing ASSERT scenarios still pass.
+units; place a blueprint with Engineers nearby → building completes as supplies are consumed;
+all 6 existing ASSERT scenarios still pass.
 
 ---
 
