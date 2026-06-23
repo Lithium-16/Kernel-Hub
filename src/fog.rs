@@ -5,7 +5,7 @@
 use hecs::World;
 use macroquad::prelude::Vec2;
 
-use crate::components::{Faction, Position};
+use crate::components::{Faction, Position, VisionRange};
 use crate::map::TILE_SIZE;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -63,12 +63,15 @@ impl FogGrid {
         }
     }
 
-    /// Full update: age then reveal from every player-faction unit.
+    /// Full update: age then reveal from every player-faction entity that has a
+    /// VisionRange component. Blueprints and buildings without VisionRange are
+    /// excluded — a Radar Station only reveals once fully constructed and the
+    /// VisionRange component is attached by spawn_building().
     pub fn update(&mut self, world: &World, player_faction: &str) {
         self.age();
-        for (_e, (pos, fac)) in world.query::<(&Position, &Faction)>().iter() {
+        for (_e, (pos, fac, vision)) in world.query::<(&Position, &Faction, &VisionRange)>().iter() {
             if fac.0 == player_faction {
-                self.reveal_world(pos.0, VISION_RADIUS_PX);
+                self.reveal_world(pos.0, vision.0);
             }
         }
     }
