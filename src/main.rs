@@ -383,6 +383,7 @@ async fn main() {
     let mut drag_start: Option<Vec2> = None;
     let mut last_click: (f64, Option<Entity>) = (0.0, None); // (time, entity) for double-click
     let mut placing: Option<usize> = None; // index into defs.buildings while in placement mode
+    let mut build_panel_open = false;     // whether the build panel UI is visible
     let mut event_log = debug::EventLog::new();
     let mut stats = debug::Stats::new();
     let mut ui = ui::Ui::new();
@@ -569,7 +570,10 @@ async fn main() {
         ui.begin();
         // Input layering: compute HUD panel rects up front (anchored to window size) and
         // gate world input on them, so clicks on any panel never fall through to the world.
-        let input_layout = hud::HudLayout::compute(&world, sw, sh);
+        let input_layout = {
+            let base = hud::HudLayout::compute(&world, sw, sh);
+            if build_panel_open { base.with_build_panel(defs.buildings.len(), sw, sh) } else { base }
+        };
         let over_ui = input_layout.contains(mp);
 
         // Minimap click / drag recenters the camera (handled before cam.update clamps).
@@ -584,14 +588,10 @@ async fn main() {
         let cam2d = Camera2D::from_display_rect(view);
 
         // --- Building placement mode ---
-        // B cycles through building types (then off); Esc / right-click exits. While
-        // placing, a ghost previews the snapped footprint and left-click commits it.
+        // B opens/closes the build panel; click a button to pick a type; Esc exits.
         if is_key_pressed(KeyCode::B) {
-            placing = match placing {
-                None => (!defs.buildings.is_empty()).then_some(0),
-                Some(i) if i + 1 < defs.buildings.len() => Some(i + 1),
-                _ => None,
-            };
+            build_panel_open = !build_panel_open;
+            if !build_panel_open { placing = None; }
         }
         let mut ghost: Option<(Rect, bool)> = None;
         if let Some(idx) = placing {
@@ -641,6 +641,7 @@ async fn main() {
             }
             if is_mouse_button_pressed(MouseButton::Right) || is_key_pressed(KeyCode::Escape) {
                 placing = None;
+                build_panel_open = false;
             }
         }
         let placing_active = placing.is_some();
@@ -875,8 +876,13 @@ async fn main() {
         // Aggregate live economy from all player depots for the HUD top bar.
         let economy = economy::aggregate(&world, PLAYER_FACTION);
         // Recompute layout after this frame's input so panels reflect current selection.
-        let hud_layout = hud::HudLayout::compute(&world, sw, sh);
-        match hud::draw(&mut ui, &world, &economy, &ai, &groups, &hud_layout) {
+        let hud_layout = {
+            let base = hud::HudLayout::compute(&world, sw, sh);
+            if build_panel_open {
+                base.with_build_panel(defs.buildings.len(), sw, sh)
+            } else { base }
+        };
+        match hud::draw(&mut ui, &world, &economy, &ai, &groups, &hud_layout, &hud::BuildState { buildings: &defs.buildings, placing, panel_open: build_panel_open }) {
             hud::HudAction::Stop => {
                 let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
                 for e in sel {
@@ -887,7 +893,6 @@ async fn main() {
             hud::HudAction::ClearSel => clear_selection(&mut world),
             hud::HudAction::SetStance(s) => {
                 stance::set_selected(&mut world, s);
-                // Hold-Ground also halts current movement and cancels queued waypoints.
                 if s == stance::Stance::HoldGround {
                     let sel: Vec<Entity> = world.query::<&Selected>().iter().map(|(e, _)| e).collect();
                     for e in sel {
@@ -904,6 +909,14 @@ async fn main() {
                         cam.center = c;
                     }
                 }
+            }
+            hud::HudAction::PlaceBuilding(idx) => {
+                placing = Some(idx);
+                // Keep panel open so player can switch type without re-opening
+            }
+            hud::HudAction::CloseBuildPanel => {
+                build_panel_open = false;
+                placing = None;
             }
             hud::HudAction::None => {}
         }
@@ -981,7 +994,7 @@ async fn main() {
                 set_camera(&uicam);
                 let cap_layout = hud::HudLayout::compute(&world, sw, sh);
                 let cap_economy = economy::aggregate(&world, PLAYER_FACTION);
-                let _ = hud::draw(&mut ui, &world, &cap_economy, &ai, &groups, &cap_layout);
+                let _ = hud::draw(&mut ui, &world, &cap_economy, &ai, &groups, &cap_layout, &hud::BuildState { buildings: &defs.buildings, placing: None, panel_open: false });
                 minimap.draw(&world, &fog, cam.view_rect(sw, sh), cap_layout.minimap);
                 set_default_camera();
                 rt.texture.get_texture_data().export_png(path);

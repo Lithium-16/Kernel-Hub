@@ -8,6 +8,7 @@ use hecs::World;
 use macroquad::prelude::*;
 
 use crate::components::{Selected, UnitKind};
+use crate::data::BuildingDef;
 use crate::economy::Economy;
 use crate::stance::{self, Stance};
 use crate::ui::Ui;
@@ -26,6 +27,10 @@ pub enum HudAction {
     SetStance(Stance),
     /// Player clicked a group card — select all its members.
     SelectGroup(u32),
+    /// Player clicked a building in the build panel — start placing it.
+    PlaceBuilding(usize),
+    /// Player closed the build panel without selecting.
+    CloseBuildPanel,
 }
 
 /// Anchored rects for every HUD panel this frame, computed before world input so the
@@ -36,10 +41,16 @@ pub struct HudLayout {
     pub selection: Option<Rect>,
     pub command: Option<Rect>,
     pub minimap: Rect,
+    pub build_panel: Option<Rect>,
 }
 
 /// Minimap panel size (square), anchored top-right under the resource bar.
 pub const MINIMAP_SIZE: f32 = 180.0;
+
+// Build panel button size and columns
+const BUILD_BTN: f32 = 110.0;
+const BUILD_COLS: usize = 4;
+const BUILD_BTN_H: f32 = 52.0;
 
 impl HudLayout {
     pub fn compute(world: &World, sw: f32, sh: f32) -> Self {
@@ -58,7 +69,21 @@ impl HudLayout {
             selection,
             command,
             minimap,
+            build_panel: None, // set by compute_with_build when panel is open
         }
+    }
+
+    /// Recompute including the build panel (call when build_open is true).
+    pub fn with_build_panel(mut self, num_buildings: usize, sw: f32, sh: f32) -> Self {
+        let rows = ((num_buildings as f32) / BUILD_COLS as f32).ceil().max(1.0) as usize;
+        let pw = BUILD_COLS as f32 * (BUILD_BTN + 4.0) + 8.0;
+        let ph = rows as f32 * (BUILD_BTN_H + 4.0) + 30.0;
+        self.build_panel = Some(Rect::new(
+            (sw - pw) * 0.5,
+            sh - BAR_H - 8.0 - ph,
+            pw, ph,
+        ));
+        self
     }
 
     /// Does a screen point land on any HUD panel? World input is skipped when true.
@@ -68,6 +93,7 @@ impl HudLayout {
             || self.minimap.contains(p)
             || self.selection.is_some_and(|r| r.contains(p))
             || self.command.is_some_and(|r| r.contains(p))
+            || self.build_panel.is_some_and(|r| r.contains(p))
     }
 }
 
@@ -87,6 +113,13 @@ pub fn selection_summary(world: &World) -> (Vec<(String, u32)>, u32) {
 }
 
 /// Draw the whole HUD and return any interaction (command card overrides bottom bar).
+pub struct BuildState<'a> {
+    pub buildings: &'a [BuildingDef],
+    pub placing: Option<usize>,
+    pub panel_open: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     ui: &mut Ui,
     world: &World,
@@ -94,9 +127,10 @@ pub fn draw(
     ai: &crate::ai_brain::AiBrain,
     groups: &crate::combat_group::GroupRegistry,
     layout: &HudLayout,
+    build: &BuildState<'_>,
 ) -> HudAction {
     draw_top_bar(ui, eco, ai, layout.top);
-    let mut action = draw_bottom_bar(ui, world, layout.bottom);
+    let mut action = draw_bottom_bar(ui, world, layout.bottom, build.panel_open);
     if let Some(r) = layout.command {
         if let Some(a) = draw_command_card(ui, world, r) {
             action = a;
@@ -104,6 +138,11 @@ pub fn draw(
     }
     if let Some(a) = draw_group_panel(ui, groups, world, layout.bottom) {
         action = a;
+    }
+    if let Some(r) = layout.build_panel {
+        if let Some(a) = draw_build_panel(ui, build.buildings, r, build.placing) {
+            action = a;
+        }
     }
     if let Some(r) = layout.selection {
         draw_selection_panel(ui, world, r);
@@ -243,18 +282,103 @@ fn draw_top_bar(ui: &mut Ui, eco: &Economy, ai: &crate::ai_brain::AiBrain, r: Re
     }
 }
 
-/// Bottom command bar: Stop / Clear + a selection count.
-fn draw_bottom_bar(ui: &mut Ui, world: &World, r: Rect) -> HudAction {
+/// Bottom command bar: Stop / Clear / Build + selection count.
+fn draw_bottom_bar(ui: &mut Ui, world: &World, r: Rect, build_open: bool) -> HudAction {
     ui.panel(r);
     let mut action = HudAction::None;
-    if ui.button(Rect::new(r.x + 10.0, r.y + 8.0, 96.0, 40.0), "Stop") {
+    if ui.button(Rect::new(r.x + 10.0, r.y + 8.0, 76.0, 40.0), "Stop") {
         action = HudAction::Stop;
     }
-    if ui.button(Rect::new(r.x + 114.0, r.y + 8.0, 96.0, 40.0), "Clear") {
+    if ui.button(Rect::new(r.x + 94.0, r.y + 8.0, 76.0, 40.0), "Clear") {
         action = HudAction::ClearSel;
     }
+    // Build toggle button — highlighted when panel is open
+    let build_rect = Rect::new(r.x + 178.0, r.y + 8.0, 76.0, 40.0);
+    if build_open {
+        draw_rectangle(build_rect.x - 1.0, build_rect.y - 1.0, build_rect.w + 2.0, build_rect.h + 2.0,
+            Color::new(0.45, 1.0, 0.55, 0.22));
+    }
+    if ui.button(build_rect, "Build") {
+        action = if build_open { HudAction::CloseBuildPanel } else { HudAction::PlaceBuilding(0) };
+    }
+    if build_open {
+        draw_rectangle_lines(build_rect.x, build_rect.y, build_rect.w, build_rect.h, 2.0,
+            Color::new(0.45, 1.0, 0.55, 0.9));
+    }
     let n = world.query::<&Selected>().iter().count();
-    ui.label(vec2(r.x + 228.0, r.y + 34.0), &format!("Selected: {n}"));
+    ui.label(vec2(r.x + 262.0, r.y + 34.0), &format!("Selected: {n}"));
+    action
+}
+
+/// Build panel: grid of building type buttons, shown above the bottom bar.
+/// Returns PlaceBuilding(idx) when a button is clicked, CloseBuildPanel on X.
+fn draw_build_panel(
+    ui: &mut Ui,
+    buildings: &[BuildingDef],
+    r: Rect,
+    placing: Option<usize>,
+) -> Option<HudAction> {
+    ui.panel(r);
+
+    // Title + close button
+    ui.label(vec2(r.x + 10.0, r.y + 20.0), "Place Blueprint");
+    if ui.button(Rect::new(r.x + r.w - 30.0, r.y + 6.0, 24.0, 20.0), "X") {
+        return Some(HudAction::CloseBuildPanel);
+    }
+
+    let pad = 4.0;
+    let mut action = None;
+    let accent = Color::new(0.45, 1.0, 0.55, 0.95);
+
+    // Filter out HQ — players don't place HQs
+    let placeable: Vec<(usize, &BuildingDef)> = buildings.iter().enumerate()
+        .filter(|(_, b)| b.id != "hq")
+        .collect();
+
+    for (slot, (orig_idx, def)) in placeable.iter().enumerate() {
+        let col = slot % BUILD_COLS;
+        let row = slot / BUILD_COLS;
+        let bx = r.x + pad + col as f32 * (BUILD_BTN + pad);
+        let by = r.y + 30.0 + row as f32 * (BUILD_BTN_H + pad);
+        let btn = Rect::new(bx, by, BUILD_BTN, BUILD_BTN_H);
+
+        let is_selected = placing == Some(*orig_idx);
+        if is_selected {
+            draw_rectangle(btn.x - 1.0, btn.y - 1.0, btn.w + 2.0, btn.h + 2.0,
+                Color::new(0.45, 1.0, 0.55, 0.22));
+        }
+        if ui.button(btn, "") {
+            action = Some(HudAction::PlaceBuilding(*orig_idx));
+        }
+        if is_selected {
+            draw_rectangle_lines(btn.x, btn.y, btn.w, btn.h, 2.0, accent);
+        }
+
+        // Building colour swatch
+        let swatch = Rect::new(btn.x + 6.0, btn.y + 6.0, 18.0, 18.0);
+        let c = Color::from_rgba(def.color.0, def.color.1, def.color.2, 220);
+        draw_rectangle(swatch.x, swatch.y, swatch.w, swatch.h, c);
+        draw_rectangle_lines(swatch.x, swatch.y, swatch.w, swatch.h, 1.0,
+            Color::new(1.0, 1.0, 1.0, 0.4));
+
+        // Name (truncated to fit)
+        let name = if def.name.len() > 14 { &def.name[..14] } else { &def.name };
+        ui.label(vec2(btn.x + 6.0, btn.y + 30.0), name);
+
+        // Supply cost
+        if def.required_supplies > 0 {
+            let cost = format!("{}sup", def.required_supplies);
+            let fs = ui.theme.font_size as u16;
+            let d = measure_text(&cost, None, fs, 1.0);
+            let amber = Color::new(1.0, 0.72, 0.25, 1.0);
+            ui.label_colored(vec2(btn.x + btn.w - d.width - 4.0, btn.y + 46.0), &cost, amber);
+        }
+
+        // Size label
+        let size = format!("{}×{}", def.w, def.h);
+        ui.label(vec2(btn.x + 6.0, btn.y + 46.0), &size);
+    }
+
     action
 }
 
