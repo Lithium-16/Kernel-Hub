@@ -55,6 +55,15 @@ pub struct UnitDef {
     /// Vision radius in world px. 0 = use the global default (fog::VISION_RADIUS_PX).
     #[serde(default)]
     pub vision_range: f32,
+    /// Onboard ammo capacity (shots). 0 = unit has no ammo storage (unarmed or infinite).
+    #[serde(default)]
+    pub ammo_capacity: u32,
+    /// Onboard fuel capacity. 0 = unit has no fuel tank (foot soldiers).
+    #[serde(default)]
+    pub fuel_capacity: f32,
+    /// Fuel burn rate (units per world-pixel moved). 0 = use default (0.05).
+    #[serde(default)]
+    pub fuel_burn_rate: f32,
 }
 
 /// Load and validate the bundled definitions.

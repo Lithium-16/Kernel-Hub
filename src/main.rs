@@ -114,11 +114,24 @@ fn spawn_army(
                 fire_rate: unit.fire_rate,
                 cooldown: 0.0,
             });
+            // Onboard ammo storage: unit definition drives capacity (0 = unarmed, skipped).
+            if unit.ammo_capacity > 0 {
+                let _ = world.insert_one(e, components::AmmoStorage::new(unit.ammo_capacity));
+            }
         }
         if unit.turret_turn_rate > 0.0 {
             let _ = world.insert_one(e, components::Turret {
                 angle: -std::f32::consts::FRAC_PI_2,
                 turn_rate: unit.turret_turn_rate,
+            });
+        }
+        // Onboard fuel tank: vehicles only (fuel_capacity > 0 in defs).
+        if unit.fuel_capacity > 0.0 {
+            let burn = if unit.fuel_burn_rate > 0.0 { unit.fuel_burn_rate } else { 0.05 };
+            let _ = world.insert_one(e, components::FuelTank {
+                fuel: unit.fuel_capacity,
+                capacity: unit.fuel_capacity,
+                burn_rate: burn,
             });
         }
         entities.push(e);

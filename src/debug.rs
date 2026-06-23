@@ -151,6 +151,8 @@ pub fn run_assert(scenario: &str) {
         "no_friendly_fire" => assert_no_friendly_fire(),
         "turret_delays"    => assert_turret_delays(),
         "formation_fills"  => assert_formation_fills(),
+        "ammo_drains"      => assert_ammo_drains(),
+        "fuel_drains"      => assert_fuel_drains(),
         other => Err(format!("unknown scenario '{}'", other)),
     };
     match result {
@@ -334,5 +336,104 @@ fn assert_formation_fills() -> Result<String, String> {
         Ok("all 25 units reached formation slots (0 stuck)".into())
     } else {
         Err(format!("{}/25 units still stuck after 1200 ticks", still_moving))
+    }
+}
+
+// ── Scenario: ammo drains and gun goes silent ─────────────────────────────────
+
+fn assert_ammo_drains() -> Result<String, String> {
+    use crate::components::{AmmoStorage, Faction, Health, Position, Weapon};
+    use macroquad::prelude::*;
+
+    let mut world = World::new();
+
+    // Shooter: 3 shells onboard, fires at 10/s so empties within ~0.3s of sim time.
+    let shooter = world.spawn((
+        Position(vec2(100.0, 100.0)),
+        Faction("a".into()),
+        Weapon { range: 200.0, damage: 1.0, fire_rate: 10.0, cooldown: 0.0 },
+        AmmoStorage::new(3),
+    ));
+    // Target (won't fight back).
+    world.spawn((
+        Position(vec2(150.0, 100.0)),
+        Faction("b".into()),
+        Health { cur: 9999.0, max: 9999.0 },
+    ));
+
+    let grid = sim_grid(&world);
+    // 60 ticks × dt=0.1 = 6 simulated seconds — plenty to exhaust 3 shells.
+    for _ in 0..60 {
+        combat_tick(&mut world, &grid, 0.1);
+    }
+
+    let shots_left = world.get::<&AmmoStorage>(shooter)
+        .map(|a| a.shots)
+        .unwrap_or(999);
+
+    if shots_left != 0 {
+        return Err(format!("expected AmmoStorage.shots == 0 after 60 ticks, got {}", shots_left));
+    }
+
+    // Gun should now be silent: no new tracers after ammo = 0.
+    let before = world.query::<&crate::components::Tracer>().iter().count();
+    combat_tick(&mut world, &grid, 0.1);
+    let after = world.query::<&crate::components::Tracer>().iter().count();
+    // Tracers age out; new ones only appear if the gun fired.
+    if after <= before {
+        Ok(format!("ammo drained to 0, gun silent (tracers {} → {})", before, after))
+    } else {
+        Err(format!("ammo = 0 but gun still fires (tracers {} → {})", before, after))
+    }
+}
+
+// ── Scenario: fuel drains and vehicle stops ───────────────────────────────────
+
+fn assert_fuel_drains() -> Result<String, String> {
+    use crate::components::{FuelTank, Heading, Mobility, MoveOrder, MoveState, Position, Velocity, Formation};
+    use macroquad::prelude::*;
+
+    let (map, _) = crate::map::TileMap::generate(64, 64);
+    let nav = crate::nav::NavGrid::from_map(&map);
+    let map_px = map.size_px();
+    let mut cache = crate::nav::FlowCache::new(8);
+    let tick_dt = 1.0_f32 / 20.0;
+
+    let mut world = World::new();
+    let start = vec2(400.0, 400.0);
+    let goal  = vec2(1600.0, 400.0);
+    let (tx, ty) = (
+        (goal.x / crate::map::TILE_SIZE) as usize,
+        (goal.y / crate::map::TILE_SIZE) as usize,
+    );
+    let flow = cache.get_or_build(&nav, (tx, ty));
+
+    // Very low fuel: burn_rate=1.0 px⁻¹, fuel=10 → stops after ~10px.
+    let e = world.spawn((
+        Position(start),
+        Velocity(Vec2::ZERO),
+        Heading(0.0_f32),
+        MoveState { last: start, stall: 0 },
+        Mobility { speed: 80.0, turn_rate: 5.0 },
+        MoveOrder { flow, goal, anchor: goal, seek: 200.0, arrive: 20.0, attack_move: false },
+        Formation { offset: Vec2::ZERO },
+        FuelTank { fuel: 10.0, capacity: 200.0, burn_rate: 1.0 },
+    ));
+
+    let grid = crate::spatial::SpatialGrid::new(map_px, 24.0);
+    for _ in 0..200 {
+        crate::movement::step(&mut world, &grid, &nav, map_px, tick_dt);
+    }
+
+    let fuel_left  = world.get::<&FuelTank>(e).map(|f| f.fuel).unwrap_or(-1.0);
+    let dist_moved = world.get::<&Position>(e).map(|p| p.0.distance(start)).unwrap_or(0.0);
+    let dist_goal  = world.get::<&Position>(e).map(|p| p.0.distance(goal)).unwrap_or(0.0);
+
+    if fuel_left <= 0.0 && dist_goal > 100.0 {
+        Ok(format!("fuel drained to {:.1}, vehicle stranded {:.0}px short of goal (moved {:.0}px)", fuel_left, dist_goal, dist_moved))
+    } else if fuel_left > 0.0 {
+        Err(format!("fuel did not drain: {:.1} remaining after 200 ticks", fuel_left))
+    } else {
+        Err(format!("vehicle reached goal despite tiny fuel tank (fuel={:.1}, dist_goal={:.0})", fuel_left, dist_goal))
     }
 }
