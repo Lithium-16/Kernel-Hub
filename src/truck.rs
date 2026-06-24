@@ -13,8 +13,8 @@ use macroquad::prelude::*;
 
 use crate::assets::Sprites;
 use crate::components::{
-    Faction, FuelTank, Health, Heading, Mobility, MoveState, NonSelectable, Position, Renderable,
-    UnitKind, Velocity,
+    Faction, FuelTank, Health, Heading, LoadingZone, Mobility, MoveState, NonSelectable, Position,
+    Renderable, UnitKind, Velocity,
 };
 use crate::depot::ResourceType;
 
@@ -23,8 +23,9 @@ use crate::depot::ResourceType;
 pub const TRUCK_SPEED: f32 = 90.0;
 pub const TRUCK_TURN_RATE: f32 = 4.0;
 pub const TRUCK_RADIUS: f32 = 11.0;
-/// Distance from a depot centre (world px) at which a truck counts as arrived.
-pub const TRUCK_ARRIVAL_RANGE: f32 = 64.0;
+/// Distance (world px) at which a truck counts as arrived.
+/// Uses LoadingZone position if available; 200px covers the largest buildings.
+pub const TRUCK_ARRIVAL_RANGE: f32 = 200.0;
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -147,12 +148,17 @@ pub enum TruckEvent {
 pub fn step(world: &mut World) -> Vec<(Entity, TruckEvent)> {
     // ── Pass 1: read-only — gather position snapshots and truck states ────────
 
-    // Collect depot positions up front so we can look them up without
-    // conflicting with the mutable Truck query below.
+    // Collect depot positions and their LoadingZone overrides up front.
     let depot_positions: std::collections::HashMap<Entity, Vec2> = world
         .query::<&Position>()
         .iter()
         .map(|(e, pos)| (e, pos.0))
+        .collect();
+    // LoadingZone overrides: if a depot building has one, use that for arrival checks.
+    let loading_zones: std::collections::HashMap<Entity, Vec2> = world
+        .query::<&LoadingZone>()
+        .iter()
+        .map(|(e, lz)| (e, lz.world_pos))
         .collect();
 
     // ── Pass 2: iterate trucks, emit events ──────────────────────────────────
@@ -171,7 +177,10 @@ pub fn step(world: &mut World) -> Vec<(Entity, TruckEvent)> {
 
         match truck.state {
             TruckState::DrivingToDestination => {
-                if let Some(&dest_pos) = depot_positions.get(&truck.destination) {
+                // Prefer LoadingZone (exact stop point) over raw depot centre.
+                let dest_check = loading_zones.get(&truck.destination)
+                    .or_else(|| depot_positions.get(&truck.destination)).copied();
+                if let Some(dest_pos) = dest_check {
                     if pos.0.distance(dest_pos) < TRUCK_ARRIVAL_RANGE {
                         events.push((
                             entity,
@@ -188,7 +197,9 @@ pub fn step(world: &mut World) -> Vec<(Entity, TruckEvent)> {
             }
 
             TruckState::DrivingBack => {
-                if let Some(&origin_pos) = depot_positions.get(&truck.origin) {
+                let origin_check = loading_zones.get(&truck.origin)
+                    .or_else(|| depot_positions.get(&truck.origin)).copied();
+                if let Some(origin_pos) = origin_check {
                     if pos.0.distance(origin_pos) < TRUCK_ARRIVAL_RANGE {
                         events.push((entity, TruckEvent::Returned { route_id: truck.route_id }));
                     }

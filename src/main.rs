@@ -973,9 +973,13 @@ async fn main() {
                 } else {
                     Color::new(1.0, 0.55, 0.55, 1.0)
                 };
-                // Spawn outside the source building footprint, drive to tile adjacent to destination.
-                let spawn_pos = nearest_passable(origin_centre, &nav);
-                let move_target = nearest_passable(dest_centre, &nav);
+                // Use LoadingZone if available (exact stop point), else nearest passable.
+                let spawn_pos = world.get::<&components::LoadingZone>(origin_e)
+                    .map(|lz| lz.world_pos)
+                    .unwrap_or_else(|_| nearest_passable(origin_centre, &nav));
+                let move_target = world.get::<&components::LoadingZone>(dest_e)
+                    .map(|lz| lz.world_pos)
+                    .unwrap_or_else(|_| nearest_passable(dest_centre, &nav));
                 let truck_e = truck::spawn_truck(
                     &mut world, &sprites, route_id,
                     resource, amount, origin_e, dest_e,
@@ -997,14 +1001,15 @@ async fn main() {
                             }
                         }
                         // Issue return trip
-                        let origin_pos = {
-                            let origin = world.get::<&truck::Truck>(truck_e)
-                                .map(|t| t.origin)
-                                .ok();
-                            origin.and_then(|o| world.get::<&components::Position>(o).map(|p| p.0).ok())
-                        };
-                        if let Some(target) = origin_pos {
-                            let passable_target = nearest_passable(target, &nav);
+                        let origin_e = world.get::<&truck::Truck>(truck_e).map(|t| t.origin).ok();
+                        if let Some(origin_e) = origin_e {
+                            let passable_target = world.get::<&components::LoadingZone>(origin_e)
+                                .map(|lz| lz.world_pos)
+                                .unwrap_or_else(|_| {
+                                    let p = world.get::<&components::Position>(origin_e)
+                                        .map(|p| p.0).unwrap_or_default();
+                                    nearest_passable(p, &nav)
+                                });
                             issue_move(&mut world, &nav, &mut flow_cache, &[truck_e], passable_target);
                         }
                         if let Ok(mut t) = world.get::<&mut truck::Truck>(truck_e) {

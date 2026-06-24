@@ -190,6 +190,13 @@ pub struct IsBuilding {
     pub blueprint: hecs::Entity,
 }
 
+/// The world-space loading zone position for a building — a guaranteed passable tile
+/// adjacent to the building footprint. Trucks path here for pickup/dropoff, and
+/// arrival is checked against this position (not the blocked building centre).
+pub struct LoadingZone {
+    pub world_pos: macroquad::prelude::Vec2,
+}
+
 /// Onboard fuel for vehicles. Engine stops when fuel <= 0.
 pub struct FuelTank {
     pub fuel: f32,

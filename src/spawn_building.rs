@@ -7,7 +7,8 @@ use hecs::World;
 use macroquad::prelude::{Color, Vec2};
 
 use crate::components::{
-    AmmoStorage, Building, BuildingKind, Faction, Health, Position, Turret, Weapon, VisionRange,
+    AmmoStorage, Building, BuildingKind, Faction, Health, LoadingZone, Position, Turret, Weapon,
+    VisionRange,
 };
 use crate::data::BuildingDef;
 use crate::depot::{Depot, ResourceType};
@@ -32,12 +33,20 @@ pub fn spawn_building(
     let (r, g, b) = def.color;
     let color = Color::from_rgba(r, g, b, 255);
 
+    // Loading zone: one tile below the bottom-centre of the building footprint.
+    // This is always passable (buildings can't be placed on impassable tiles),
+    // and it's the exact position trucks will stop at for pickup/dropoff.
+    let lz_x = (tx as f32 + def.w as f32 * 0.5) * TILE_SIZE;
+    let lz_y = (ty as f32 + def.h as f32 + 0.5) * TILE_SIZE; // one tile below bottom edge
+    let loading_zone_pos = Vec2::new(lz_x, lz_y);
+
     // ── Always-present components ─────────────────────────────────────────────
     let entity = world.spawn((
         Building { tx, ty, w: def.w, h: def.h, color },
         BuildingKind(def.id.clone()),
         Faction(faction.to_owned()),
         Position(pos),
+        LoadingZone { world_pos: loading_zone_pos },
     ));
 
     // ── Health ────────────────────────────────────────────────────────────────

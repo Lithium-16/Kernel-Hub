@@ -295,14 +295,17 @@ fn draw_group_panel(ui: &mut Ui, groups: &crate::combat_group::GroupRegistry, wo
                 .unwrap_or(false)
         });
         if has_engineers {
-            let auto_r = Rect::new(r.x + 4.0, r.y + card_h - 18.0, 36.0, 14.0);
+            // AUTO BUILD toggle — green glow + "ON" label when active, dim when off
+            let auto_w = if g.auto_build { 58.0 } else { 46.0 };
+            let auto_r = Rect::new(r.x + 4.0, r.y + card_h - 18.0, auto_w, 14.0);
             if g.auto_build {
-                draw_rectangle(auto_r.x, auto_r.y, auto_r.w, auto_r.h,
+                draw_rectangle(auto_r.x - 1.0, auto_r.y - 1.0, auto_r.w + 2.0, auto_r.h + 2.0,
                     Color::new(0.45, 1.0, 0.55, 0.30));
                 draw_rectangle_lines(auto_r.x, auto_r.y, auto_r.w, auto_r.h, 1.5,
                     Color::new(0.45, 1.0, 0.55, 0.95));
             }
-            if ui.button(auto_r, "AUTO") {
+            let label = if g.auto_build { "BUILD: ON" } else { "BUILD" };
+            if ui.button(auto_r, label) {
                 action = Some(HudAction::ToggleAutoBuild(g.id));
             }
         }

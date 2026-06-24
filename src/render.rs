@@ -77,6 +77,8 @@ pub fn present(
         let r = Rect::new(a.x.min(b.x), a.y.min(b.y), (b.x - a.x).abs(), (b.y - a.y).abs());
         draw_rectangle_lines(r.x, r.y, r.w, r.h, 1.5, Color::new(0.5, 1.0, 0.6, 0.9));
     }
+    // Building labels drawn in screen space (world-space text appears mirrored).
+    draw_building_labels(world, view, sw, sh, camera.scale);
     draw_overlay(world, map, camera, sim, tick_ms, sh);
     set_default_camera();
 }
@@ -182,14 +184,23 @@ fn draw_fog_overlay(fog: &crate::fog::FogGrid, view: Rect) {
 /// Buildings with a Health component show a bar above the footprint when cur < max.
 /// Bar width = footprint width * 0.8, positioned 6px above the building top edge.
 fn draw_buildings(world: &hecs::World) {
-    use crate::components::{BuildingKind, Health};
+    use crate::components::{BuildingKind, Health, LoadingZone};
     let ts = map::TILE_SIZE;
     let edge = Color::new(0.05, 0.06, 0.08, 1.0);
-    for (_e, (b, health_opt, _kind_opt)) in
-        world.query::<(&crate::components::Building, Option<&Health>, Option<&BuildingKind>)>().iter()
+    for (_e, (b, health_opt, _kind_opt, lz_opt)) in
+        world.query::<(&crate::components::Building, Option<&Health>, Option<&BuildingKind>, Option<&LoadingZone>)>().iter()
     {
         let (x, y) = (b.tx as f32 * ts, b.ty as f32 * ts);
         let (w, h) = (b.w as f32 * ts, b.h as f32 * ts);
+
+        // Loading zone tile: amber stripe below the building footprint.
+        if let Some(lz) = lz_opt {
+            let lz_x = lz.world_pos.x - ts * 0.5;
+            let lz_y = lz.world_pos.y - ts * 0.5;
+            draw_rectangle(lz_x, lz_y, ts, ts, Color::new(0.70, 0.55, 0.20, 0.55));
+            draw_rectangle_lines(lz_x, lz_y, ts, ts, 1.0, Color::new(1.0, 0.80, 0.35, 0.70));
+        }
+
         draw_rectangle(x, y, w, h, b.color);
         draw_rectangle_lines(x, y, w, h, 2.0, edge);
 
@@ -431,6 +442,34 @@ fn draw_hitboxes(world: &hecs::World) {
     let c = Color::new(0.2, 1.0, 0.3, 0.55);
     for (_e, (pos, _)) in world.query::<(&Position, &Selected)>().iter() {
         draw_circle_lines(pos.0.x, pos.0.y, crate::movement::UNIT_RADIUS, 1.0, c);
+    }
+}
+
+/// Convert world position to screen pixels, accounting for the Y-flip in the world camera.
+fn world_to_screen(world_pos: Vec2, view: Rect, sw: f32, sh: f32) -> Vec2 {
+    let nx = (world_pos.x - view.x) / view.w;
+    let ny = 1.0 - (world_pos.y - view.y) / view.h;
+    vec2(nx * sw, ny * sh)
+}
+
+/// Draw building kind labels in screen space. Only visible when zoomed in enough.
+fn draw_building_labels(world: &hecs::World, view: Rect, sw: f32, sh: f32, cam_scale: f32) {
+    use crate::components::{BuildingKind, Position};
+    // Labels too small to read when fully zoomed out
+    if cam_scale < 0.3 { return; }
+    let font_sz = (10.0_f32 * cam_scale).clamp(9.0, 14.0);
+
+    for (_e, (pos, kind)) in world.query::<(&Position, &BuildingKind)>().iter() {
+        let sp = world_to_screen(pos.0, view, sw, sh);
+        if sp.x < 0.0 || sp.x > sw || sp.y < 0.0 || sp.y > sh { continue; }
+        let name = kind.0.replace('_', " ").to_uppercase();
+        let d = measure_text(&name, None, font_sz as u16, 1.0);
+        // Dark background chip
+        draw_rectangle(sp.x - d.width * 0.5 - 2.0, sp.y - font_sz - 2.0,
+                       d.width + 4.0, font_sz + 4.0,
+                       Color::new(0.0, 0.0, 0.0, 0.65));
+        draw_text(&name, sp.x - d.width * 0.5, sp.y, font_sz,
+                  Color::new(1.0, 0.95, 0.80, 0.95));
     }
 }
 
