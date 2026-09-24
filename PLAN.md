@@ -1,0 +1,890 @@
+# Hub — implementation plan
+
+This is the build plan for the system described in [ARCHITECTURE.md](ARCHITECTURE.md).
+The architecture doc says *what* and *why*. This doc says *how*, *in what order*, and
+*how we know each piece is done*.
+
+Conventions: **MUST** means required for the phase to count as done. **Later** means
+explicitly deferred. Estimates assume one person working focused, and they're rough.
+
+---
+
+## Contents
+
+1. [Scope of v1](#1-scope-of-v1)
+2. [Repository, tooling and CI](#2-repository-tooling-and-ci)
+3. [Node daemon](#3-node-daemon)
+4. [Hub protocol](#4-hub-protocol)
+5. [Module system](#5-module-system)
+6. [Hub services (home node)](#6-hub-services-home-node)
+7. [Desktop app](#7-desktop-app)
+8. [Phone web app](#8-phone-web-app)
+9. [Data model](#9-data-model)
+10. [Module specs](#10-module-specs)
+11. [Security](#11-security)
+12. [Testing](#12-testing)
+13. [Packaging, updates and releases](#13-packaging-updates-and-releases)
+14. [Phases, tasks and acceptance criteria](#14-phases-tasks-and-acceptance-criteria)
+15. [Risks, open questions, decision log](#15-risks-open-questions-decision-log)
+
+---
+
+## 1. Scope of v1
+
+**v1 is done when**, for a week of daily use:
+
+- I can start, stop, restart and back up the Minecraft server, and use its console, from the
+  desktop, the palette, the phone, and by asking the assistant.
+- I can see every PC's health and sleep, wake, restart or shut them down, with confirmations.
+- The assistant can operate every module, asks before any `confirm` action, and every action
+  appears in the activity log with who started it.
+- The crash restart, stop-when-empty, nightly backup and disk alert automations run
+  unattended, including while the main PC is off.
+- I can generate images on Pluto from chat or a button, and they land in the library on Pluto.
+- The wake word works well enough that I leave it on.
+- Installing on a fresh machine takes under 10 minutes following the onboarding.
+
+**Out of v1:** multiple users, sharing modules, video/music, a sandbox for the assistant's
+web browsing (web access stays `confirm`), code signing, macOS/Linux.
+
+---
+
+## 2. Repository, tooling and CI
+
+### Layout
+
+```
+.
+├─ ARCHITECTURE.md  PLAN.md  README.md
+├─ Cargo.toml                  # Rust workspace
+├─ package.json  pnpm-workspace.yaml
+├─ apps/
+│  ├─ desktop/                 # Tauri 2 app
+│  │  ├─ src-tauri/            # Rust: windows, tray, palette hotkey, voice capture, local node client
+│  │  └─ src/                  # React UI
+│  └─ phone/                   # PWA (Vite + React), built into the home node's static assets
+├─ crates/
+│  ├─ node/                    # node daemon binary (hubnode.exe)
+│  ├─ hub-services/            # home-node services, linked into hubnode (feature "home")
+│  ├─ protocol/                # generated Rust types + hand-written helpers
+│  └─ common/                  # logging, paths, keyring, config
+├─ packages/
+│  ├─ protocol/                # zod schemas = source of truth; emits JSON Schema
+│  ├─ assistant/               # Node process: Claude Agent SDK runtime
+│  ├─ ui/                      # shared React components (desktop + phone)
+│  └─ sdk-ts/                  # TypeScript module SDK
+├─ sdk/python/hub_sdk/         # Python module SDK (published locally as a wheel)
+├─ modules/
+│  ├─ minecraft/  vm-power/  pc-monitor/  ai-media/  files/
+├─ tools/
+│  ├─ fake-node/               # test double for the desktop app
+│  └─ mock-rcon/               # RCON server for Minecraft module tests
+└─ .github/workflows/
+```
+
+### Toolchain (pinned)
+
+| Tool | Version policy | Notes |
+|---|---|---|
+| Rust | stable, pinned in `rust-toolchain.toml` | `clippy -D warnings`, `rustfmt` |
+| Node | 22 LTS, pinned in `.nvmrc` | also the runtime bundled with the assistant |
+| pnpm | pinned via `packageManager` | workspaces |
+| Python | 3.12, managed with `uv` | modules bundle their own venv |
+| TypeScript | strict mode, `noUncheckedIndexedAccess` | Biome for lint and format |
+
+### Code generation
+
+`packages/protocol` (zod) → `pnpm gen:schema` → `schema/*.json` → `cargo run -p protocol-gen`
+→ `crates/protocol/src/generated.rs` (via `typify`), plus Python pydantic models via
+`datamodel-code-generator`. The generated files are committed, and CI fails if regenerating changes them.
+
+### CI (GitHub Actions)
+
+| Workflow | Runner | Jobs |
+|---|---|---|
+| `ci.yml` (push/PR) | `windows-latest` | Rust fmt/clippy/test · pnpm lint/typecheck/test · pytest for SDK + modules · codegen drift check · contract tests |
+| `ci.yml` | `ubuntu-latest` | the same Rust/TS/Python unit tests (fast feedback, catches Windows-only assumptions) |
+| `release.yml` (tag `v*`) | `windows-latest` | build desktop installer, node installer, module bundles, then sign the updater manifest and publish a GitHub Release |
+
+---
+
+## 3. Node daemon
+
+Binary: `hubnode.exe` (Rust, tokio). One per machine. On Pluto it's built with the
+`home` feature, which adds the hub services.
+
+### Responsibilities
+
+- Pairing and authentication with other nodes and the desktop app.
+- Discovering, starting, supervising, updating and removing modules.
+- Collecting module status and events and relaying them to subscribers.
+- Running actions (checking permissions, recording them in the activity log).
+- Running node-local automations (§6.3).
+- Writing logs and producing diagnostics bundles.
+- A tray icon: status, open logs, restart node, pause all automations.
+
+### Running on Windows
+
+- Runs **per user**, not as a Windows service, because modules need the user's session
+  (desktop notifications, the GPU context for Forge, hypervisor CLI tools) and a tray icon.
+- Autostart via `HKCU\...\Run`. On Pluto and mc-vm, Windows auto-login plus "never sleep"
+  are documented setup steps. For mc-vm on Linux, a systemd **user** service with lingering
+  enabled.
+- One copy per user, enforced with a named mutex.
+
+### Folders
+
+```
+%LOCALAPPDATA%\Hub\node\
+  config.toml          # node id, name, listen addrs, allowed folders, flags
+  node.db              # SQLite (node-local tables, §9)
+  logs\                # rotating, 10 × 10 MB
+  modules\<id>\        # installed module code (read-only at runtime)
+  data\<id>\           # per-module writable data
+  runtimes\python312\  # bundled Python, shared by Python modules
+```
+
+The module source-of-truth folder is `D:\Hub\modules` (configurable). Installing copies
+it into `modules\<id>\` and builds a venv, so editing the source never breaks a running module.
+
+### Supervising modules
+
+- Each module is a child process, spawned with a clean environment (only `HUB_*`
+  variables plus `PATH`, `SystemRoot` and `TEMP`) and its working directory set to `data\<id>\`.
+- **Health:** the module must answer an MCP `ping` every 10s. Three misses → kill and restart.
+- **Restart backoff:** 1s, 2s, 4s … up to 60s. More than 5 crashes in 5 minutes → state
+  `failed` plus an alert, and no more automatic restarts until one is requested from the UI.
+- Module stdout/stderr go to `logs\modules\<id>.log`.
+- Graceful stop: an MCP `shutdown` notification, 10s grace, then kill.
+
+### Networking
+
+- Listens on `0.0.0.0:47800`. **The app** checks the source address against RFC1918 ranges
+  and Tailscale `100.64.0.0/10` and rejects everything else. Belt and braces.
+- The installer adds a Windows Firewall rule: TCP 47800, profile **Private** plus the
+  Tailscale adapter only.
+- TLS with a self-signed certificate per node. Peers pin each other's certificate fingerprint
+  at pairing time (§4.2).
+
+---
+
+## 4. Hub protocol
+
+Everything runs over **one WSS connection** per peer pair (desktop↔node, node↔home node),
+using JSON messages validated with the zod-generated schemas. MCP is used *inside* a node
+(node↔module over stdio), not on the network.
+
+### 4.1 Envelope
+
+```jsonc
+{ "v": 1, "id": "01J…", "type": "action.invoke", "ts": "2026-09-24T20:11:02Z", "body": { … } }
+```
+
+- `v`: protocol major version. A mismatch closes the connection with code 4001 and the
+  UI shows "update required".
+- Requests carry an `id`, and responses carry `re: <id>`.
+
+### 4.2 Pairing
+
+1. The new node's tray shows **Pair…**, which displays a 6-digit code and its certificate fingerprint.
+2. In the desktop app, go to **Settings → Nodes → Pair a new node**, and enter the node's address and the code.
+3. The desktop app connects over TLS, and both sides confirm the code with SPAKE2 (`spake2`
+   crate), so the code is never sent in the clear.
+4. After a successful exchange, each side stores the other's certificate fingerprint and a
+   long-lived token in Credential Manager (`Hub/<peer-id>`).
+5. The home node is paired first. After that, the home node introduces new nodes to every
+   existing client.
+
+Unpairing deletes those records on both sides and closes live connections.
+
+### 4.3 Message types (v1)
+
+| Type | Direction | Purpose |
+|---|---|---|
+| `hello` / `welcome` | client → node | authenticate, exchange versions and capabilities |
+| `catalog.get` → `catalog` | client → node | modules, manifests, actions, views, current status |
+| `status.subscribe` / `status.update` | ↔ | streaming status for modules (≤ 4 Hz per module) |
+| `event` | node → client | module events (`minecraft.server.crashed`, …) |
+| `action.invoke` → `action.result` | client → node | run an action with params, the calling actor, and an optional approval id |
+| `action.progress` | node → client | long-running actions (backup at 40%…) |
+| `approval.request` / `approval.decide` / `approval.resolved` | ↔ | the approval flow (§6.2) |
+| `activity.append` / `activity.query` | ↔ | activity log |
+| `automation.*` | ↔ | create, update, enable, run now, list runs |
+| `logs.tail` | client → node | live log view for a module or node |
+| `diag.bundle` | client → node | produce a diagnostics zip |
+| `chat.*` | desktop/phone → home | assistant conversation (§6.1) |
+| `voice.*` | desktop → home | voice session streaming (§7.6) |
+
+### 4.4 Errors
+
+`action.result` with `ok:false` and an `error.code` of:
+
+- `offline`
+- `disabled`
+- `not_permitted`
+- `needs_approval`
+- `invalid_params`
+- `module_failed`
+- `timeout`
+- `busy`
+- `internal`
+
+Every error also carries a human-readable `message`.
+The UI maps each code to one line of copy plus a suggested next step.
+
+---
+
+## 5. Module system
+
+### 5.1 Manifest (`module.toml`)
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | yes | `[a-z][a-z0-9-]{1,31}`, unique per node |
+| `name`, `icon`, `version` | yes | display name, Lucide icon name, semver |
+| `runtime` | yes | `python` or `node` |
+| `entry` | yes | entry file |
+| `requires` | no | e.g. `platform = "windows"`, `commands = ["VBoxManage"]` |
+| `[settings]` | no | typed settings with defaults, rendered as a form. Fields marked `secret = true` go to Credential Manager |
+| `[status]` | no | status fields (typed), plus `sidebar` and `tiles` templates |
+| `[[actions]]` | no | see below |
+| `[[events]]` | no | `id`, `payload` schema, `description` |
+| `[[views]]` | no | layout of UI blocks (§5.3) |
+
+**Actions:**
+
+| Field | Meaning |
+|---|---|
+| `id` | `noun.verb` (`server.start`) |
+| `label`, `icon`, `description` | used on the button, in the palette, and as the tool description for the assistant |
+| `params` | typed parameters (`int`, `float`, `string`, `enum`, `bool`, `path`) with constraints |
+| `ai` | `safe`, `confirm` or `never` |
+| `confirm_when` | expression that forces a confirm **for humans too** (e.g. `players > 0`) |
+| `enabled_when` | expression over status. When false, the button is disabled, the tool is hidden and the reason is shown |
+| `long_running` | enables `action.progress` and a cancel button |
+| `timeout_s` | default 60 |
+
+Expressions use a tiny, side-effect-free language (`cel-interpreter` crate: comparisons,
+`&&`, `||`, and field access on status only).
+
+### 5.2 Module SDK
+
+**Python**
+
+```python
+from hub_sdk import Module, action, event, status
+
+mod = Module("minecraft")
+
+@mod.status(every=2.0)
+async def current():
+    s = await rcon.query()
+    return {"state": s.state, "players": s.online, "max_players": s.max, "tps": s.tps}
+
+@mod.action("server.start")
+async def start(ctx):
+    await vm_guest.run_server()
+    await ctx.wait_until(lambda st: st["state"] == "running", timeout=180)
+    return {"ok": True}
+
+@mod.action("server.stop")
+async def stop(ctx, delay_min: int = 0):
+    if delay_min:
+        await rcon.say(f"Server stopping in {delay_min} min")
+        await ctx.sleep(delay_min * 60)
+    await rcon.command("stop")
+
+mod.run()
+```
+
+**TypeScript** has the same shape (`defineModule`, `action`, `status`) with zod params.
+
+The SDK handles:
+
+- validating the manifest against the code at start-up (missing handlers fail fast)
+- MCP transport, pings and shutdown
+- structured logging
+- settings and secret access (`ctx.settings`, `ctx.secret("rcon_password")`)
+- emitting events and progress (`ctx.emit`, `ctx.progress`)
+
+### 5.3 UI blocks (v1 set)
+
+| Block | Binds to | Used by |
+|---|---|---|
+| `toolbar` | actions (ordered) | all |
+| `tiles` | status fields (+ optional meter) | Minecraft, PC monitor |
+| `metrics` | per-device groups of meters | PC monitor |
+| `console:<source>` | log/stream + command action | Minecraft (RCON) |
+| `table:<field>` | array status field, with row actions | players, backups |
+| `list:<field>` | array status field | backups, alerts |
+| `form:<action>` | action params | "generate image", settings |
+| `gallery:<field>` | media items | AI media library |
+| `note` | static text (markdown subset) | warnings like "Restore is button-only" |
+
+The desktop app and the phone draw these blocks with the same `packages/ui` components.
+There's no module-supplied UI code in v1 (a sandboxed iframe block comes **later**).
+
+### 5.4 Lifecycle
+
+| Stage | What happens |
+|---|---|
+| install | copy folder, validate manifest, create the venv or `pnpm install --prod`, register in `node.db` |
+| enable / disable | start or stop the process. Disabled modules keep their settings |
+| update | the source folder's version changed → the UI offers an update → stop, reinstall, start. Rolls back if start-up fails |
+| remove | stop, delete code, keep `data\<id>\` unless "delete data" is checked |
+
+---
+
+## 6. Hub services (home node)
+
+### 6.1 Assistant runtime
+
+- A Node process (`packages/assistant`), supervised by the home node like a module (but not
+  a module), talking to the node over a local socket.
+- Uses the **Claude Agent SDK** with:
+  - **tools:** one in-process MCP server built by the home node from the live catalog. Tool
+    name `<module>__<action>` with dots replaced by underscores, the description from the
+    manifest, and a JSON Schema input built from `params`.
+  - **built-in tools:** Claude Code's file, shell and web tools are **not** enabled in v1.
+    The assistant acts only through module tools. Web search/fetch is a `confirm` tool.
+  - **permissions:** the SDK's `canUseTool` callback checks the action's tier plus
+    `confirm_when`. A `confirm` result → create an approval (§6.2) and wait.
+  - **context:** a compact status summary of all online modules, refreshed each turn, sent as a
+    system message.
+  - **model:** the Settings → Assistant choice. Effort defaults to `medium` for chat.
+- A local brain (Ollama) is an optional **later** backend behind the same tool list, labeled
+  experimental.
+- **Conversations:** the SDK owns transcripts. `chats` (§9) stores id, title, timestamps
+  and the SDK session id for resume.
+- **Save as automation:** takes the chat's successful tool calls as steps, has the model
+  suggest which values should become inputs, and opens the automation editor pre-filled.
+
+### 6.2 Approvals
+
+State machine: `pending → approved | denied | expired | cancelled`.
+
+- Created by the assistant, an automation step marked `confirm`, or a human action hitting
+  `confirm_when`.
+- Fanned out to: the desktop (inline in chat, plus a toast if the chat isn't open), the phone
+  (top of the home screen), and a Windows notification with Approve/Deny buttons.
+- The first decision wins. Expires after 10 minutes (setting) → treated as denied.
+- Every step is recorded in `approvals` and the activity log.
+
+### 6.3 Automation engine
+
+**Definition format** (stored as JSON in `automations`, edited in the UI):
+
+```jsonc
+{
+  "name": "Stop when empty",
+  "trigger": { "type": "condition", "module": "minecraft", "when": "players == 0", "for": "15m" },
+  "steps": [
+    { "type": "action", "module": "minecraft", "action": "server.stop", "params": {} }
+  ],
+  "policy": { "concurrency": "skip", "missed": "skip", "retries": 0 }
+}
+```
+
+- **Triggers:**
+  - `schedule` (cron plus time zone)
+  - `event` (module event id plus an optional filter)
+  - `condition` (expression over status, plus an optional `for` duration)
+  - `voice` (phrase, home node only)
+- **Steps:**
+  - `action`
+  - `wait` (duration, or `until` an expression with a timeout)
+  - `notify`
+  - `assistant` (a prompt, with its output available to later steps)
+  - `if` (expression, then/else)
+- **Where it runs:** the home node computes this when the automation is saved. If every
+  trigger and step touches one node's modules (and there's no `assistant` step), it's
+  deployed to that node. Otherwise it stays on the home node. The UI shows "Runs on …".
+- **Policies:**
+  - `concurrency`: skip, queue or parallel
+  - `missed` (for schedules when the node was off): skip or run once
+  - `retries` with backoff
+- Every run is written to `automation_runs`, with its step results and durations.
+
+### 6.4 Claude API proxy
+
+- A local HTTP server on `127.0.0.1` only, which the assistant process uses as `ANTHROPIC_BASE_URL`.
+- The assistant gets a random bearer token per process start. The proxy swaps it for the
+  real key from Credential Manager.
+- Streams responses through unchanged, so prompt caching works.
+- Records `usage` (input, output, cache read/write tokens) per request into `usage`, with
+  the cost from a price table that ships with the app and can be edited.
+- **Budget:** a monthly cap from settings. At 80% → notification. At 100% → requests get a
+  402, the assistant tells the user, and automations with `assistant` steps pause.
+- **Concurrency:** 4 requests in flight. Retries 429 and 529 errors with jittered backoff,
+  respecting `retry-after`.
+
+### 6.5 Notifications
+
+- Channels: desktop toast (through the desktop app, or through the node when the app is
+  closed), the phone (web push via the PWA), and the activity feed.
+- Per-category settings: approvals, alerts, automation failures, automation successes (off by default).
+
+---
+
+## 7. Desktop app
+
+### 7.1 Windows and navigation
+
+| Window | Notes |
+|---|---|
+| Main | a frameless custom title bar that keeps the Windows snap layouts. Sidebar + content |
+| Palette | always-on-top, Alt+Space global hotkey, closes when it loses focus |
+| Settings | a separate small window (960×640) |
+| Toasts | native Windows notifications (`tauri-plugin-notification`) |
+
+**Screens** (matching the design canvas):
+
+- Assistant
+- Automations (list + detail + editor)
+- a Module screen per module (built from the manifest's views)
+- PC monitor
+- Activity log
+- Settings (General, Assistant, Modules, Nodes, Permissions, Shortcuts)
+- Onboarding
+
+### 7.2 State and data
+
+- **Rust side:** keeps connections to the home node and the local node, merges their catalogs,
+  and exposes typed Tauri commands (`invoke`, `approve`, `subscribe`) plus events
+  (`status`, `activity`, `approval`).
+- **UI side:**
+  - TanStack Query for request/response data
+  - a small Zustand store for live status, fed by Tauri events
+  - TanStack Router for screens (flat route list, no nesting)
+- **Degraded mode:** if the home node is unreachable, the app connects directly to the other
+  paired nodes. The assistant, automations editing and the library show "Home node offline",
+  while module buttons keep working.
+
+### 7.3 Design system
+
+The canvas design is implemented as tokens:
+
+- colors: `--bg`, `--side`, `--raise`, `--line`, text-1/2/3, accent, add, del, warn
+- square corners everywhere
+- Geist and Geist Mono
+- Lucide icons at 1.5px stroke with square caps and miter joins
+
+Components live in `packages/ui`:
+
+- `Sidebar`, `Row`, `Kbd`, `Btn`, `ActionBar`, `Panel`, `Tile`, `Meter`, `Console`, `Table`,
+  `Approval`, `Toggle`, `Picker`, `Composer`, `Feed`
+- plus the §5.3 blocks built from them
+
+Accessibility requirements: everything reachable by keyboard, visible focus rings, contrast
+≥ 4.5:1 for text, and `aria-label` on icon-only buttons.
+
+### 7.4 Keyboard
+
+| Keys | Action |
+|---|---|
+| Alt+Space | palette (global) |
+| Ctrl+K | palette (in app) |
+| Ctrl+Space (hold) | push-to-talk |
+| Ctrl+Enter / Esc | approve / deny the focused approval |
+| Ctrl+L | activity log |
+| Ctrl+, | settings |
+| Ctrl+1…9 | jump to sidebar item |
+
+Module actions can declare a suggested shortcut. Conflicts are resolved in Settings → Shortcuts.
+
+### 7.5 Tray
+
+- Menu: Open Hub, Palette, Mic on/off, Pause automations, and Quit.
+- Closing the main window hides it to the tray.
+
+### 7.6 Voice
+
+**Pipeline:**
+
+```
+mic (WASAPI, 16 kHz mono) → Silero VAD → openWakeWord ("hey hub")
+  → on trigger: stream PCM frames over WSS (voice.stream) to home node
+  → faster-whisper (Pluto, GPU at voice priority) → text into chat
+  → assistant reply → Kokoro TTS (Pluto CPU) → audio frames back → play
+```
+
+- **Latency budget** (from end of speech to first audio), ≤ 2.0 s:
+  - VAD end-of-speech: 300 ms
+  - STT: 500 ms
+  - first assistant token: 700 ms
+  - TTS first chunk: 300 ms
+  - network: 200 ms
+- **Barge-in:** if speech is detected while TTS is playing, stop playback and start a new turn.
+- **Privacy:** before the wake word, audio never leaves the process, and a tray indicator
+  shows the mic state. A setting lets you require push-to-talk only.
+- **Fallback:** if Pluto is unreachable, voice is disabled and the tray shows why.
+
+### 7.7 Onboarding (first run)
+
+1. Welcome, and choose "This is my main PC".
+2. Pair the home node (Pluto): the code-entry screen.
+3. Enter the Anthropic API key. It's stored on the home node, never on the main PC.
+4. Pair the other nodes (mc-vm), or skip.
+5. Enable modules. Per-module setup forms appear (Minecraft asks for the server path and the RCON port).
+6. Permissions: review the defaults.
+7. Voice: mic test, wake word test, or skip.
+
+---
+
+## 8. Phone web app
+
+- A Vite + React PWA sharing `packages/ui`, served by the home node at `/m/`.
+- Reached through **Tailscale Serve** (HTTPS with a real certificate on the tailnet domain).
+  Not reachable any other way.
+- **Device login:** Desktop → Settings → Nodes → "Add phone" shows a QR code with a one-time
+  code. The phone exchanges it for a device token, stored in the PWA's storage. Device tokens
+  can be revoked in Settings.
+- **Screens:**
+  - Home: pending approvals, module cards with big action buttons, node status, recent activity
+  - a Module detail screen built from the same views, with the console and tables simplified for small screens
+  - Assistant chat
+  - Activity
+- Web push notifications (VAPID) for approvals and alerts.
+- Touch targets ≥ 44 px, and it works in portrait at 360 px width.
+
+---
+
+## 9. Data model
+
+### Home node (`hub.db`)
+
+| Table | Key columns |
+|---|---|
+| `nodes` | id, name, role, address, cert_fp, last_seen, version |
+| `modules` | node_id, module_id, version, enabled, state, manifest_json |
+| `activity` | id, ts, actor (`user`/`assistant`/`automation`/`phone`), actor_ref, node_id, module_id, action, params_json, result (`ok`/`error`/`denied`), error_code, duration_ms, approval_id |
+| `approvals` | id, created_ts, requested_by, node_id, module_id, action, params_json, reason, state, decided_by, decided_ts |
+| `automations` | id, name, definition_json, placement_node, enabled, created_from_chat |
+| `automation_runs` | id, automation_id, node_id, started_ts, finished_ts, status, steps_json |
+| `chats` | id, title, created_ts, updated_ts, sdk_session_id, model |
+| `usage` | ts, request_id, model, in_tokens, out_tokens, cache_read, cache_write, cost_usd, chat_id |
+| `library_items` | id, kind (`image`/`audio`), path, prompt, params_json, model, seed, source (chat/automation/button), created_ts, tags |
+| `alerts` | id, ts, node_id, module_id, severity, text, resolved_ts |
+| `devices` | id, name, token_hash, created_ts, last_seen (phones) |
+| `settings` | key, value_json |
+
+`library_items` also has an FTS5 index over the prompt and tags.
+
+### Every node (`node.db`)
+
+`module_settings`, `local_automations` (deployed copies), `local_runs` (synced up to the home
+node when it's reachable), `status_cache`.
+
+### Migrations
+
+Uses `refinery` (Rust) with numbered SQL files, run on start-up. The database is backed up
+to `*.db.bak` before each migration.
+
+### Retention
+
+- `activity`: 180 days
+- `usage`: kept forever (it's small)
+- `automation_runs`: 90 days
+- logs: rotation limits
+
+---
+
+## 10. Module specs
+
+### 10.1 Minecraft (`modules/minecraft`, runs on mc-vm)
+
+**Settings:** `server_dir`, `start_command` (default `run.bat` or `./run.sh`),
+`rcon_port` (25575), `rcon_password` (secret), `backup_target` (a Files path on Pluto),
+`keep_backups` (14), `java_max_mem`.
+
+**Status:**
+
+- `state` (`stopped`/`starting`/`running`/`stopping`/`crashed`)
+- `players[]` (name, uuid, ping, joined_at)
+- `max_players`
+- `tps`
+- `memory_mb`
+- `uptime_s`
+- `version`
+- `mods_count`
+- `last_backup`
+- `backups[]`
+
+**Actions:**
+
+| Action | Tier | Notes |
+|---|---|---|
+| `server.start` | safe | runs `start_command` as a child process and waits for `Done (` in the log |
+| `server.stop` | confirm when `players > 0` | optional `delay_min` with countdown messages in chat, then `stop` over RCON, then waits for exit (kills after 60s) |
+| `server.restart` | confirm when `players > 0` | stop + start |
+| `server.command` | confirm | raw console command (the console block uses this) |
+| `server.say` | safe | chat broadcast |
+| `player.kick`, `player.op`, `player.deop` | confirm | |
+| `whitelist.add` / `whitelist.remove` / `whitelist.list` | confirm / confirm / safe | |
+| `world.backup` | safe | `save-off` → `save-all flush` → zip the world folders → `save-on`, then upload through the Files module to Pluto, then prune to `keep_backups` |
+| `world.restore` | never | stop → move the current world aside → extract → start |
+| `mods.list` | safe | read the `mods/` folder and the jar metadata |
+
+**Events:** `server.started`, `server.stopped`, `server.crashed` (process exited
+unexpectedly, or a new file appeared in `crash-reports/`), `player.joined`, `player.left`,
+`backup.done`, `backup.failed`.
+
+**Getting TPS:** Forge's `/forge tps` over RCON, parsed. Falls back to "unknown".
+
+**RCON:** a small async client (the Source RCON protocol). `enable-rcon=true`,
+`rcon.port`, `rcon.password` and `broadcast-rcon-to-ops=false` in `server.properties`. The
+module's setup offers to write these. RCON binds to localhost only, since the module runs
+inside the VM.
+
+**Open:** the VM's OS and how the server is started today (§15). The module supports
+both Windows (`run.bat`) and Linux (`run.sh`).
+
+### 10.2 VM power (`modules/vm-power`, runs on Pluto)
+
+- **Adapters, chosen by setting:**
+  - Hyper-V (PowerShell `Get-VM` / `Start-VM` / `Stop-VM`. The user must be in *Hyper-V Administrators*)
+  - VirtualBox (`VBoxManage startvm --type headless`, `controlvm acpipowerbutton`)
+  - VMware Workstation (`vmrun`)
+  - Proxmox (REST API with a token)
+- **Actions:**
+  - `vm.start` (safe)
+  - `vm.stop` (confirm, graceful ACPI shutdown, forced off after a timeout)
+  - `vm.restart` (confirm)
+- **Status:** `state`, `cpu_pct`, `mem_mb`, `uptime_s`.
+- **Events:** `vm.stopped_unexpectedly`.
+
+### 10.3 PC monitor (`modules/pc-monitor`, every node)
+
+- **Status:**
+  - CPU % (and per core)
+  - RAM used/total
+  - disks used/total
+  - GPU % / VRAM / temperature via NVML (`pynvml`; works on the 1080 Ti)
+  - CPU temperature via LibreHardwareMonitor's WMI provider when installed (optional, otherwise hidden)
+  - network throughput
+  - uptime
+- **Actions:**
+  - `power.sleep` (confirm)
+  - `power.restart` (confirm, 60s countdown, cancellable)
+  - `power.shutdown` (confirm, same)
+  - `power.wake` (safe, sends a Wake-on-LAN magic packet to a *peer's* MAC address)
+- **Wake-on-LAN** needs "Wake on Magic Packet" enabled in Pluto's NIC settings and BIOS, and
+  Windows fast startup turned off. This is a documented setup step, and the module has a
+  "Test WoL" button.
+- **Events:** `threshold.crossed` (disk > X%, GPU temp > Y°C, both configurable).
+
+### 10.4 AI media (`modules/ai-media`, runs on Pluto)
+
+- **Forge** (A1111-compatible API, launched with `--api`, optionally managed by the module):
+  - `image.generate` → `/sdapi/v1/txt2img`
+  - `image.edit` → `/sdapi/v1/img2img` (including inpainting masks)
+  - `image.upscale` → `/sdapi/v1/extra-single-image`
+  - model and LoRA lists → `/sdapi/v1/sd-models`, `/sdapi/v1/loras`
+  - progress → `/sdapi/v1/progress`
+- **TTS:** `speech.say` with Kokoro (CPU) by default, Piper as a light fallback, and XTTS
+  (GPU) optional for voice cloning.
+- **STT:** `speech.transcribe` with faster-whisper `small` or `medium` (int8 on the GPU,
+  falling back to the CPU). It's also used by the voice pipeline.
+- **GPU queue:** one GPU job at a time. Priority: voice > interactive image > automations.
+  The queue shows in status and on the module screen.
+- **Library:** every output is written to `D:\Hub\Library\YYYY\MM\` with a JSON sidecar and
+  inserted into `library_items`. Thumbnails are generated at 256 px.
+- **Pinned versions:** a PyTorch and CUDA combination that supports compute capability 6.1
+  (Pascal). It's recorded in `modules/ai-media/requirements.lock` and checked at start-up.
+
+### 10.5 Files (`modules/files`, runs on Pluto and the main PC)
+
+- **Allowed roots** come from settings, and every path is resolved and checked against the
+  roots, rejecting symlink escapes and `..`.
+- **Actions:**
+  - `files.list`, `files.read` (up to 10 MB), `files.search` (all safe)
+  - `files.write`, `files.move`, `files.delete` (confirm)
+  - `files.transfer` (between nodes, streamed in chunks, safe when the destination is empty)
+  - `backup.folder` (copies a folder to a target with versioned snapshots, safe)
+- **Backups:** the "second copy" job from ARCHITECTURE §8 is a `backup.folder` automation,
+  off by default, and the UI nags until it's configured.
+
+---
+
+## 11. Security
+
+**Threat model:**
+
+| Threat | Mitigation |
+|---|---|
+| Something on the LAN or internet talks to a node | Firewall rule for Private/Tailscale only · source address check in the app · TLS with pinned certificates · per-peer tokens |
+| A stolen phone | Revocable device tokens · `confirm` approvals still need an unlocked phone · approvals expire |
+| Prompt injection (web pages, chat messages, player names in logs) | The assistant only has module tools · anything from the web can't trigger a `confirm` action without a human · `never` tier · status text is marked as data in prompts |
+| The assistant reading secrets | The API key only exists in the proxy · module secrets only in that module's process · the assistant process gets a scrubbed environment |
+| A buggy or rogue module | Its own process with a scrubbed environment and its own data folder · no network ports opened by modules (they reach out, nothing reaches in) · modules are local, trusted code (no marketplace) |
+| A compromised Minecraft VM | The mc-vm node only knows its own token and module. It **cannot** send actions to other nodes (the home node refuses actions from mc-vm to anything except its own module) |
+| Mistaken destructive actions | `confirm_when` also applies to humans · restore is `never` · the activity log records who did what |
+
+**Secrets inventory:** Anthropic key (home node), peer tokens (each node), device tokens
+(stored hashed on the home node), RCON password (mc-vm), Proxmox token if used (Pluto).
+All in Credential Manager (or `libsecret` on a Linux VM).
+
+---
+
+## 12. Testing
+
+| Level | What | Tools |
+|---|---|---|
+| Unit | Rust crates, SDKs, modules (RCON client, backup logic, path checks, expression evaluation) | `cargo test`, `vitest`, `pytest` |
+| Contract | zod ⇄ Rust ⇄ pydantic round-trip of every message type, using golden JSON fixtures | CI job |
+| Module harness | `hub-sdk test` runs a module against a fake node, asserts manifest ↔ handlers, and runs recorded scenarios | SDK |
+| Minecraft | `tools/mock-rcon` plus a fake server process that prints Forge log lines, covering start, stop, crash and backup paths | pytest |
+| Integration | A real node plus fake modules plus a test desktop client: pairing, approvals, automations placement, offline/reconnect | Rust integration tests |
+| UI | component tests plus key flows (approve in chat, Minecraft start/stop, sleep confirm) against `tools/fake-node` | Playwright (web build of the UI) |
+| Assistant | recorded-response tests for tool selection and approval behavior; a small eval set of 30 requests ("start the server", "is Pluto hot?") with expected tool calls | vitest + recorded responses |
+| Manual | a release checklist on real hardware: WoL, sleep/wake, VM power, voice latency, fresh install | `docs/release-checklist.md` |
+
+Coverage targets: 80% lines for `crates/node`, the SDKs, and the `minecraft` and `files`
+modules. None for UI code, where behavior tests matter more.
+
+---
+
+## 13. Packaging, updates and releases
+
+| Artifact | Format | Contents |
+|---|---|---|
+| Desktop app | Tauri NSIS installer, per-user | app + WebView2 bootstrapper + the local node |
+| Node | NSIS installer, per-user | `hubnode.exe` + the bundled Python runtime + the firewall rule. On Pluto it also includes the assistant (bundled Node 22 + `packages/assistant`) and the phone PWA |
+| Linux VM node | tarball + install script | `hubnode` (musl build) + a systemd user unit |
+| Modules | folder zips attached to the release | copied into `D:\Hub\modules` |
+
+- **Updates:** the Tauri updater for the desktop app, and the node checks the same GitHub
+  Releases feed. Both verify the updater signature (the key is kept offline). Nodes update
+  one at a time, home node last. Protocol changes stay backward compatible within a major version.
+- **Versioning:** one version for the whole repo (`vX.Y.Z`) and a changelog generated from
+  Conventional Commits.
+- **Unsigned for now:** document the SmartScreen "More info → Run anyway" step, and move to
+  Azure Trusted Signing before sharing any further.
+
+---
+
+## 14. Phases, tasks and acceptance criteria
+
+### Phase 0: test run (1–2 weeks)
+
+- [ ] Repo scaffold per §2, CI green on Windows and Linux runners
+- [ ] Tauri window with the design tokens, sidebar, and a palette window on Alt+Space
+- [ ] `hubnode` skeleton: config, logs, tray, TLS listener, SPAKE2 pairing between two machines over Tailscale
+- [ ] Python SDK "hello" module: one status field, one action, supervised with restart
+- [ ] **Agent SDK test:** a bundled Node 22 runs `packages/assistant` on Windows, calls one module tool through the proxy, and the key isn't visible from inside the assistant process (checked by test)
+- [ ] Decision recorded: the Tauri + Node process split holds (or switch to Electron)
+
+**Accept when:** clicking a button in the desktop app on the main PC runs the hello action
+on Pluto, the result appears in the activity log, and the assistant can call it from a
+command-line harness.
+
+### Phase 1: buttons (3–4 weeks)
+
+- [ ] Protocol v1 message types from §4.3 except `chat.*`, `voice.*` and `automation.*`
+- [ ] Module manifest parser and validator, UI blocks `toolbar`, `tiles`, `metrics`, `console`, `table`, `list`, `note`
+- [ ] **Minecraft** module (§10.1), all actions except `world.restore`'s upload path. Backups go to a local folder for now
+- [ ] **VM power** module with the adapter for whatever the VM turns out to use
+- [ ] **PC monitor** module on all three nodes, including WoL and power actions with confirms
+- [ ] Activity log screen, and a basic `approvals` flow for human `confirm_when`
+- [ ] Degraded mode when the home node is offline
+- [ ] Onboarding steps 1, 2, 4, 5
+
+**Accept when:** for 3 days, the Minecraft server and the PCs are managed only through Hub
+buttons, with no crashes that lose state, and Sleep on Pluto → Wake from the main PC works.
+
+### Phase 2: assistant (3 weeks)
+
+- [ ] `packages/assistant` with the Agent SDK, the tool catalog built from manifests, a status summary in context
+- [ ] API proxy with usage metering, budget cap and concurrency limit
+- [ ] Full approval flow (§6.2) in chat, toasts and notifications
+- [ ] Assistant screen as designed: chat, tool-call rows, the approval card, and the live and activity panels
+- [ ] Palette "Ask the assistant" mode
+- [ ] Settings → Assistant and Permissions tabs
+- [ ] 30-request assistant eval set passing ≥ 90% on the right tool and arguments
+
+**Accept when:** "start the server and tell me when it's up" and "stop it in an hour and
+back up after" work end to end, with approval, the activity log shows who did what, and
+the monthly cost is visible.
+
+### Phase 3: automations + phone (3 weeks)
+
+- [ ] Automation engine (§6.3) with node placement, the four starter automations, and a runs history
+- [ ] Automations screen (list, detail, simple step editor) and "save chat as automation"
+- [ ] Node-local execution and syncing runs back to the home node
+- [ ] Phone PWA (§8) with device login, home, module screens, approvals, chat and web push
+- [ ] Notifications settings
+
+**Accept when:** with the main PC **off**, a forced Minecraft crash is restarted and I get
+a phone notification, the nightly backup runs, and I can approve a stop from the phone.
+
+### Phase 4: AI media + storage (3–4 weeks)
+
+- [ ] **Files** module on Pluto and the main PC, including transfers and folder backup
+- [ ] Minecraft backups moved to Pluto through Files, with `world.restore` enabled
+- [ ] **AI media** module: Forge generate/edit/upscale, the GPU queue, Kokoro TTS, faster-whisper STT
+- [ ] Library screen (gallery, detail, search, "more like this"), stored on Pluto with a main-PC thumbnail cache
+- [ ] Assistant returns images inline in chat
+- [ ] Second-copy backup automation, and nagging until it's configured
+
+**Accept when:** "make a 16:9 wallpaper of a snowy pixel-art village" produces an image
+in chat and in the library on Pluto, and a world restore from a Pluto backup works.
+
+### Phase 5: voice + polish (3 weeks)
+
+- [ ] Voice pipeline (§7.6): push-to-talk first, then the wake word, TTS replies, barge-in
+- [ ] Latency measured and logged. p50 ≤ 2.0 s, p90 ≤ 3.0 s on the home network
+- [ ] Onboarding step 7, a mic indicator in the tray and sidebar
+- [ ] Installers (§13), the updater, export diagnostics, release checklist
+- [ ] Optional local brain (Ollama) behind a setting, labeled experimental
+- [ ] Accessibility pass (keyboard-only walkthrough of every screen)
+
+**Accept when:** the v1 definition in §1 holds for a full week.
+
+### After v1
+
+Candidates, not commitments:
+
+- a sandboxed module iframe block
+- a Discord bridge module
+- Home Assistant module
+- a WSL2 sandbox for browsing tasks
+- a low-power always-on box (Raspberry Pi) as a fallback home node and WoL relay
+- code signing
+
+---
+
+## 15. Risks, open questions, decision log
+
+### Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| Agent SDK packaging on Windows | medium | high | Phase 0 test. Fallback: Electron, or calling the Claude API directly with our own tool loop |
+| Pluto sleeping breaks the home node | high | medium | Document "never sleep". Degraded mode. Later, a low-power fallback home node |
+| 1080 Ti support dropped by PyTorch/CUDA | medium | medium | Pinned lockfile. CPU fallback for TTS and STT |
+| Forge server specifics (VM, OS, startup) unknown | certain | low | Module supports both OSes. Settle in phase 1 |
+| Voice false triggers or latency | medium | medium | Push-to-talk first, tunable wake threshold, measured latency |
+| Scope creep | high | high | Phases gated on acceptance criteria. "After v1" list for new ideas |
+
+### Open questions
+
+1. Minecraft VM: hypervisor, guest OS, current start method, RCON status, whether it's on Pluto.
+2. Can Pluto run 24/7 (power, noise)? If not, pick the fallback home node early.
+3. Main PC GPU model (decides whether STT runs locally or on Pluto).
+4. Which voice for TTS, and whether voice cloning is wanted.
+5. Where Minecraft backups should live long term, and how many to keep.
+
+### Decision log
+
+| # | Decision | Why |
+|---|---|---|
+| D1 | Windows-first, single user, unsigned | the audience is me |
+| D2 | Tauri 2 + Rust node + Node assistant process | small footprint and Rust experience. Agent SDK is Node-only. Revisit after phase 0 |
+| D3 | Pluto is the home node | needs to be always on for the phone, automations and the assistant |
+| D4 | Modules are processes speaking MCP + a manifest | isolation, any language (Python/TS), assistant tools for free |
+| D5 | Buttons = palette = phone = AI tools = automation steps (one action path) | "use it without AI", consistency, one permission check |
+| D6 | Three AI permission tiers + `confirm_when` for humans too | safety without nagging |
+| D7 | Assistant has module tools only in v1 (no shell/file/web built-ins) | limits the damage from prompt injection |
+| D8 | UI blocks, no module UI code, in v1 | consistent look, no untrusted UI code |
+| D9 | Automations run on the owning node when possible | keep working when the main PC or Pluto are off |
+| D10 | Square, Raycast-style design, Geist, Lucide icons | per the design canvas |

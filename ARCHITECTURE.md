@@ -5,7 +5,8 @@ storage. It is built from **modules**, and it has an **assistant** that can oper
 any of them. Every feature works by hand too: each thing the assistant can do is a
 button first.
 
-Status: plan. Design mockups: *Claude Agent Desktop* canvas (Assistant, Minecraft,
+Status: plan. The build plan (specs, data model, phases and acceptance criteria) is in
+[PLAN.md](PLAN.md). Design mockups: *Claude Agent Desktop* canvas (Assistant, Minecraft,
 PC monitor, Automations, Palette, Phone, Settings).
 
 ---
