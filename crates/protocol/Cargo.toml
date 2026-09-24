@@ -1,0 +1,16 @@
+[package]
+name = "kernel-protocol"
+description = "Wire types for the Kernel protocol (mirrors packages/protocol)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+ulid = { workspace = true }
+time = { workspace = true }
+
+[lints]
+workspace = true

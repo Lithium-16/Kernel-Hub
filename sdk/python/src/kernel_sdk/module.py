@@ -1,0 +1,237 @@
+"""Module runtime: exposes manifest actions as MCP tools and status as an MCP resource."""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+import json
+import logging
+import os
+import sys
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from mcp import types
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+
+from .manifest import Action, Manifest, Param, load_manifest
+
+STATUS_URI = "kernel://status"
+
+ERROR_CODES = frozenset(
+    {"invalid_params", "module_failed", "timeout", "busy", "not_permitted", "disabled", "offline", "internal"}
+)
+
+log = logging.getLogger("kernel_sdk")
+
+Handler = Callable[..., Any | Awaitable[Any]]
+
+
+class ActionError(Exception):
+    """Raise from an action handler to return a typed error to Kernel."""
+
+    def __init__(self, code: str, message: str) -> None:
+        if code not in ERROR_CODES:
+            raise ValueError(f"unknown error code '{code}'")
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+@dataclass
+class ActionContext:
+    module: Manifest
+    action: Action
+    log: logging.Logger
+
+
+def _check_param(p: Param, value: Any) -> Any:
+    ok = {
+        "int": isinstance(value, int) and not isinstance(value, bool),
+        "float": isinstance(value, (int, float)) and not isinstance(value, bool),
+        "string": isinstance(value, str),
+        "bool": isinstance(value, bool),
+        "enum": isinstance(value, str) and value in p.options,
+    }[p.type]
+    if not ok:
+        expected = f"one of {list(p.options)}" if p.type == "enum" else p.type
+        raise ActionError("invalid_params", f"'{p.name}' must be {expected}")
+    if p.type in ("int", "float"):
+        if p.min is not None and value < p.min:
+            raise ActionError("invalid_params", f"'{p.name}' must be at least {p.min}")
+        if p.max is not None and value > p.max:
+            raise ActionError("invalid_params", f"'{p.name}' must be at most {p.max}")
+        if p.type == "float":
+            value = float(value)
+    return value
+
+
+def resolve_params(action: Action, given: dict[str, Any]) -> dict[str, Any]:
+    known = {p.name for p in action.params}
+    unknown = sorted(set(given) - known)
+    if unknown:
+        raise ActionError("invalid_params", f"unknown parameter(s): {', '.join(unknown)}")
+    out: dict[str, Any] = {}
+    for p in action.params:
+        if p.name in given:
+            out[p.name] = _check_param(p, given[p.name])
+        elif p.has_default:
+            out[p.name] = p.default
+        else:
+            raise ActionError("invalid_params", f"missing required parameter '{p.name}'")
+    return out
+
+
+def _find_manifest() -> Path:
+    env = os.environ.get("KERNEL_MODULE_DIR")
+    candidates = [Path(env)] if env else []
+    main = sys.modules.get("__main__")
+    if main is not None and getattr(main, "__file__", None):
+        candidates.append(Path(main.__file__).resolve().parent)
+    candidates.append(Path.cwd())
+    for d in candidates:
+        if (d / "module.toml").is_file():
+            return d / "module.toml"
+    raise FileNotFoundError("module.toml not found (set KERNEL_MODULE_DIR)")
+
+
+class Module:
+    """A Kernel module. Register handlers with `@mod.action(...)` and `@mod.status`, then `mod.run()`."""
+
+    def __init__(self, manifest: Manifest | Path | str | None = None) -> None:
+        if isinstance(manifest, Manifest):
+            self.manifest = manifest
+        else:
+            self.manifest = load_manifest(Path(manifest) if manifest else _find_manifest())
+        self._handlers: dict[str, Handler] = {}
+        self._status: Handler | None = None
+        self.log = logging.getLogger(f"kernel.{self.manifest.id}")
+
+    def action(self, action_id: str) -> Callable[[Handler], Handler]:
+        spec = self.manifest.action(action_id)
+        if spec is None:
+            raise KeyError(f"action '{action_id}' is not declared in module.toml")
+
+        def register(fn: Handler) -> Handler:
+            self._handlers[action_id] = fn
+            return fn
+
+        return register
+
+    def status(self, fn: Handler) -> Handler:
+        self._status = fn
+        return fn
+
+    def validate(self) -> None:
+        missing = [a.id for a in self.manifest.actions if a.id not in self._handlers]
+        if missing:
+            raise RuntimeError(f"no handler for declared action(s): {', '.join(missing)}")
+
+    async def _call(self, fn: Handler, *args: Any, **kwargs: Any) -> Any:
+        result = fn(*args, **kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    async def invoke(self, action_id: str, params: dict[str, Any]) -> Any:
+        """Validate params and run a handler. Raises ActionError on failure."""
+        spec = self.manifest.action(action_id)
+        if spec is None or action_id not in self._handlers:
+            raise ActionError("invalid_params", f"unknown action '{action_id}'")
+        args = resolve_params(spec, params)
+        ctx = ActionContext(module=self.manifest, action=spec, log=self.log)
+        try:
+            return await asyncio.wait_for(self._call(self._handlers[action_id], ctx, **args), spec.timeout_s)
+        except TimeoutError:
+            raise ActionError("timeout", f"'{action_id}' took longer than {spec.timeout_s:g}s") from None
+        except ActionError:
+            raise
+        except Exception as e:
+            self.log.exception("action %s failed", action_id)
+            raise ActionError("module_failed", f"{type(e).__name__}: {e}") from e
+
+    async def current_status(self) -> dict[str, Any]:
+        if self._status is None:
+            return {}
+        value = await self._call(self._status)
+        if not isinstance(value, dict):
+            raise TypeError("status provider must return a dict")
+        return value
+
+    def server(self) -> Server[Any]:
+        """Build the MCP server. Tool names are action ids with dots replaced by `__`."""
+        self.validate()
+        m = self.manifest
+
+        async def list_tools(ctx: Any, params: Any) -> types.ListToolsResult:
+            return types.ListToolsResult(
+                tools=[
+                    types.Tool(
+                        name=a.tool_name,
+                        title=a.label,
+                        description=a.description or a.label,
+                        input_schema=a.input_schema(),
+                        meta={"kernel/action": a.id, "kernel/ai": a.ai},
+                    )
+                    for a in m.actions
+                ]
+            )
+
+        async def call_tool(ctx: Any, params: types.CallToolRequestParams) -> types.CallToolResult:
+            action = m.action_for_tool(params.name)
+            try:
+                if action is None:
+                    raise ActionError("invalid_params", f"unknown tool '{params.name}'")
+                result = await self.invoke(action.id, dict(params.arguments or {}))
+            except ActionError as e:
+                body = {"code": e.code, "message": e.message}
+                return types.CallToolResult(
+                    content=[types.TextContent(type="text", text=json.dumps(body))],
+                    structured_content={"error": body},
+                    is_error=True,
+                )
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=json.dumps(result))],
+                structured_content={"result": result},
+            )
+
+        async def list_resources(ctx: Any, params: Any) -> types.ListResourcesResult:
+            return types.ListResourcesResult(
+                resources=[types.Resource(name="status", uri=STATUS_URI, mime_type="application/json")]
+            )
+
+        async def read_resource(ctx: Any, params: types.ReadResourceRequestParams) -> types.ReadResourceResult:
+            if str(params.uri) != STATUS_URI:
+                raise ValueError(f"unknown resource {params.uri}")
+            return types.ReadResourceResult(
+                contents=[
+                    types.TextResourceContents(
+                        uri=STATUS_URI, mime_type="application/json", text=json.dumps(await self.current_status())
+                    )
+                ]
+            )
+
+        return Server(
+            m.id,
+            version=m.version,
+            on_list_tools=list_tools,
+            on_call_tool=call_tool,
+            on_list_resources=list_resources,
+            on_read_resource=read_resource,
+        )
+
+    async def run_async(self) -> None:
+        server = self.server()
+        async with stdio_server() as (read, write):
+            await server.run(read, write, server.create_initialization_options())
+
+    def run(self) -> None:
+        logging.basicConfig(
+            level=os.environ.get("KERNEL_LOG_LEVEL", "INFO"),
+            stream=sys.stderr,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+        asyncio.run(self.run_async())

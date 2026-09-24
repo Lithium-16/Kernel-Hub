@@ -1,0 +1,22 @@
+# Rust
+/target/
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+# Local runtime data
+/.kernel-dev/
+*.db
+*.db-wal
+*.db-shm
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

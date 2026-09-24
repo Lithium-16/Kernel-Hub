@@ -1,0 +1,35 @@
+id = "hello"
+name = "Hello"
+icon = "hand"
+version = "0.1.0"
+runtime = "python"
+entry = "main.py"
+
+[[actions]]
+id = "greet.say"
+label = "Say hello"
+icon = "message-square"
+description = "Returns a greeting and counts it."
+ai = "safe"
+params.name = { type = "string", description = "Who to greet", default = "world" }
+
+[[actions]]
+id = "counter.reset"
+label = "Reset counter"
+icon = "rotate-ccw"
+description = "Resets the greeting counter to zero."
+ai = "confirm"
+
+[[actions]]
+id = "slow.wait"
+label = "Wait"
+description = "Sleeps, for testing timeouts."
+ai = "safe"
+timeout_s = 1
+params.seconds = { type = "float", min = 0, max = 30 }
+
+[[actions]]
+id = "debug.crash"
+label = "Crash the module"
+description = "Exits the process, for testing supervision."
+ai = "never"

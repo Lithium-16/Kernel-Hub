@@ -100,6 +100,12 @@ web browsing (web access stays `confirm`), code signing, macOS/Linux.
 → `crates/protocol/src/generated.rs` (via `typify`), plus Python pydantic models via
 `datamodel-code-generator`. The generated files are committed, and CI fails if regenerating changes them.
 
+> **Phase 0 status:** the `typify` step is deferred. With 9 message types, the Rust types
+> in `crates/protocol` are written by hand, and the contract test (`crates/protocol/tests/fixtures.rs`)
+> round-trips every zod fixture through them. A zod change that the Rust side doesn't follow
+> fails CI. Switch to generation when the protocol grows past about 20 types (phase 2, with `chat.*`).
+> Python modules don't need protocol models yet, because they only talk MCP.
+
 ### CI (GitHub Actions)
 
 | Workflow | Runner | Jobs |
@@ -815,10 +821,13 @@ modules. None for UI code, where behavior tests matter more.
 
 ### Phase 0: test run (1–2 weeks)
 
-- [ ] Repo scaffold per §2, CI green on Windows and Linux runners
+- [x] Repo scaffold per §2 (Cargo + pnpm workspaces, Biome, uv), CI on Windows and Linux runners
 - [ ] Tauri window with the design tokens, sidebar, and a palette window on Alt+Space
-- [ ] `kerneld` skeleton: config, logs, tray, TLS listener, SPAKE2 pairing between two machines over Tailscale
-- [ ] Python SDK "hello" module: one status field, one action, supervised with restart
+- [~] `kerneld` skeleton: config, logs, WebSocket listener with token auth and a LAN/tailnet
+  address filter, module supervisor, activity log in SQLite. **Still to do:** tray, TLS,
+  SPAKE2 pairing between two machines over Tailscale
+- [x] Python SDK "hello" module: status fields, four actions (one per tier, plus a timeout
+  case), supervised with restart and backoff, covered by `crates/node/tests/e2e.rs`
 - [ ] **Agent SDK test:** a bundled Node 22 runs `packages/assistant` on Windows, calls one module tool through the proxy, and the key isn't visible from inside the assistant process (checked by test)
 - [ ] Decision recorded: the Tauri + Node process split holds (or switch to Electron)
 
