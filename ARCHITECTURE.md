@@ -1,6 +1,6 @@
-# Hub — architecture plan (v4)
+# Kernel — architecture plan (v4)
 
-A Windows desktop hub for everything I run: game servers, PCs, local AI tools and
+A Windows desktop app for everything I run: game servers, PCs, local AI tools and
 storage. It is built from **modules**, and it has an **assistant** that can operate
 any of them. Every feature works by hand too: each thing the assistant can do is a
 button first.
@@ -36,8 +36,8 @@ PC monitor, Automations, Palette, Phone, Settings).
 
 | Node | Hardware | Role |
 |---|---|---|
-| **Main PC** | Windows, decent GPU | Desktop app (UI, palette, tray, mic/wake word), local modules (PC monitor, files) |
-| **Pluto** | Windows, GTX 1080 Ti (11 GB), 64 GB RAM | **Home node**: assistant runtime, cross-node automations, activity log, phone web app, library and storage, AI media (Forge, TTS, STT) |
+| **Main PC** | Windows, GTX 1080 Ti | Desktop app (UI, palette, tray, mic/wake word), **speech-to-text** (faster-whisper on its own GPU), local modules (PC monitor, files) |
+| **Pluto** | Windows, GTX 1080 Ti (11 GB), 64 GB RAM, **on 24/7** | **Home node**: assistant runtime, cross-node automations, activity log, phone web app, library and storage, AI media (Forge, TTS). Also my Roblox AFK machine, which stays on Windows because Roblox doesn't run on Linux |
 | **mc-vm** | VM (hypervisor TBD) | Minecraft (Forge) only, isolated. Runs a minimal node with just the Minecraft module |
 
 Pluto is the **home node** because it's meant to stay on. The phone app and AI
@@ -48,7 +48,7 @@ automations need a machine that's awake, and the main PC is often off.
 ```
  Main PC                                   Pluto (home node)                      mc-vm
 ┌──────────────────────────┐   Tailscale  ┌──────────────────────────────┐       ┌────────────────┐
-│ Desktop app (Tauri 2)     │◄────────────►│ Hub services                  │◄─────►│ Node (minimal)  │
+│ Desktop app (Tauri 2)     │◄────────────►│ Kernel services                  │◄─────►│ Node (minimal)  │
 │  React UI · palette · tray│   WSS + MCP  │  assistant runtime (Agent SDK)│  WSS  │  minecraft      │
 │  voice capture/wake word  │              │  automation engine            │  +MCP │   module        │
 │ Node (local modules)      │              │  activity log · API proxy     │       └────────────────┘
@@ -63,7 +63,7 @@ automations need a machine that's awake, and the main PC is often off.
   If Pluto is unreachable, it still drives local modules directly (degraded mode).
 - **Nodes** run modules and report their status. Each node is a single Rust binary
   with a tray icon that starts at sign-in.
-- **Hub services** on the home node coordinate everything that spans nodes: the assistant,
+- **Kernel services** on the home node coordinate everything that spans nodes: the assistant,
   cross-node automations, the activity log, the phone app, and the Claude API proxy.
 
 ## 4. Modules
@@ -107,7 +107,7 @@ ai = "never"                 # only a human can press this
 [[events]]                   # usable as automation triggers
 id = "server.crashed"
 
-[[views]]                    # built from the hub's own blocks; no module UI code
+[[views]]                    # built from Kernel's own blocks; no module UI code
 blocks = ["toolbar", "tiles", "console:rcon", "table:players", "list:backups"]
 ```
 
@@ -116,7 +116,7 @@ call or automation step all become the **same** `action.invoke(module, id, param
 The node checks permissions, runs it, and logs it to the activity feed along with
 *who* started it (you, the assistant, an automation, or the phone).
 
-**UI blocks** (drawn by the hub in its square Raycast-style look): toolbar buttons,
+**UI blocks** (drawn by Kernel in its square Raycast-style look): toolbar buttons,
 stat tiles, meters, tables, a console/log view with an input, lists, forms and a media
 gallery. Later, a module that really needs a custom panel can ship one in a sandboxed
 iframe.
@@ -130,6 +130,14 @@ iframe.
 | **PC monitor** | every node | sleep, restart, shut down (all *confirm*), wake Pluto (Wake-on-LAN, from the main PC) | CPU, GPU, temperatures, RAM, disks | threshold crossed |
 | **AI media** | Pluto | generate / edit / upscale image (Forge `--api`), speak (TTS), transcribe (STT) | GPU job queue, models and LoRAs, library gallery | job done |
 | **Files / storage** | Pluto (+ main PC) | list, read, write, move between PCs, back up folder | allowed folders, usage | backup done / failed |
+| **Roblox** | Pluto | relaunch client, rejoin the last place (both *confirm*) | client running, session length, memory, last disconnect | client crashed, disconnected |
+
+The Roblox module only **watches** the client and relaunches it. It never automates
+gameplay or sends input to the game.
+
+**Minecraft backups:** weekly (Sunday 03:00), keeping only the newest. The old one is deleted
+only **after** the new one is written and verified (the zip opens and `level.dat` reads), so
+there's never a moment with zero good backups.
 
 The Minecraft module talks to the server over **RCON bound to localhost inside the
 VM** (setup turns it on if needed). The VM keeps its isolation: its node exposes only
@@ -139,6 +147,14 @@ the Minecraft module, and has no access to Pluto's files or GPU.
 
 - **Brain:** Claude through the Claude Agent SDK, running on the home node. A local model
   (Ollama) is an option, labeled experimental.
+- **Account:** an **Anthropic API key** (pay per use). The Agent SDK docs say apps built on
+  it can't use claude.ai subscription login or rate limits without Anthropic's approval, so
+  my Pro/Max subscription stays for the Claude apps and Claude Code. Default monthly cap
+  **$10** with alerts at 80%, and routine turns use a cheaper model.
+- **Persona: "Kernel".** A personality prompt makes it a tsundere catgirl, the same voice as
+  the Claude that designed it. It's editable in Settings → Assistant. Branding line:
+  "Kernel, powered by Claude". **The personality never touches safety text:** approval
+  prompts, errors, and what an action will do are always plain and exact.
 - **Tools:** the assistant sees one merged tool list with every module action from every
   online node. Installing a module teaches it new skills with no core changes.
 - **Context:** each module's live status is included, so "what's running?" doesn't need
@@ -150,9 +166,10 @@ the Minecraft module, and has no access to Pluto's files or GPU.
 - Anything coming from the web can never, on its own, trigger a `confirm` action without you.
 - **Chats become automations:** you can save a conversation as an automation, and the
   tool calls turn into steps.
-- **Voice:** a wake word ("Hey hub") runs locally on the main PC, and nothing leaves the
-  mic before it. Audio streams to speech-to-text on Pluto, the brain replies, and TTS on
-  Pluto speaks it. Push-to-talk works in the palette.
+- **Voice:** a wake word ("Hey Kernel", a custom openWakeWord model) runs locally on the main
+  PC, and nothing leaves the mic before it. Speech-to-text also runs **on the main PC's
+  1080 Ti** (faster-whisper, int8), the brain replies, and **Kokoro** TTS on Pluto's CPU
+  speaks it. Push-to-talk works in the palette.
 
 ### API proxy (on the home node)
 
@@ -180,8 +197,9 @@ Starter automations:
 
 - restart the Minecraft server on crash, and notify me
 - stop the server 15 minutes after the last player leaves
-- back up the world nightly at 03:00, to Pluto storage
+- back up the world weekly (Sunday 03:00) to Pluto storage, replacing last week's once the new one is verified
 - alert me when any disk goes above 90%
+- alert me on my phone if the Roblox client crashes or disconnects
 
 ## 7. Phone
 
@@ -192,17 +210,18 @@ Starter automations:
   - approval prompts
   - recent activity
   - assistant chat
-- Limitation: if Pluto (the home node) is asleep, the phone app is down. The main PC's
-  node can serve a read-only fallback, and Wake-on-LAN from the phone needs an always-on
-  device on the LAN (future: a Raspberry Pi or the router).
+- **iPhone:** notifications need the app added to the Home Screen first (Safari → Share →
+  Add to Home Screen, iOS 16.4+). Onboarding walks through it.
+- Pluto runs 24/7, so the phone app is normally always up. If Pluto is down anyway (updates,
+  power cut), the main PC's node serves a read-only fallback.
 
 ## 8. Data and secrets
 
 | Data | Owner |
 |---|---|
 | Activity log, automations, chats, module settings, library catalog | SQLite on the home node (versioned migrations) |
-| UI state, window layout, local cache (thumbnails, recent files) | SQLite in `%APPDATA%\Hub` on the main PC |
-| Library files (images, audio), world backups | Pluto storage, e.g. `D:\Hub\Library`, `D:\Hub\Backups` |
+| UI state, window layout, local cache (thumbnails, recent files) | SQLite in `%APPDATA%\Kernel` on the main PC |
+| Library files (images, audio), world backups | Pluto storage, e.g. `D:\Kernel\Library`, `D:\Kernel\Backups` |
 | Claude session transcripts | The Agent SDK's own store on the home node |
 | Anthropic key, node pairing tokens, module secrets (RCON password) | Windows Credential Manager on the node that uses them |
 
@@ -263,8 +282,9 @@ sdk/python/            Python module SDK
 modules/minecraft/     first modules
 modules/pc-monitor/
 modules/vm-power/
+modules/roblox/
 modules/ai-media/
-modules/storage/
+modules/files/
 docs/                  this plan, module authoring guide
 ```
 
@@ -275,7 +295,7 @@ Rough estimates for one person working focused.
 | Phase | Deliverable | Rough time |
 |---|---|---|
 | **0 · Test run** | Tauri shell; node daemon + pairing over Tailscale; module SDK "hello world"; **test that the Agent SDK runs from bundled Node on Windows** | 1–2 wk |
-| **1 · Buttons** | **Minecraft**, **VM power** and **PC monitor** modules with full UI: tiles, console, tables, buttons, palette commands. Activity log. **Useful with no AI.** | 3–4 wk |
+| **1 · Buttons** | **Minecraft**, **VM power**, **PC monitor** and **Roblox** modules with full UI: tiles, console, tables, buttons, palette commands. Activity log. **Useful with no AI.** | 3–4 wk |
 | **2 · Assistant** | Assistant on the home node, module tools, permission tiers, approval prompts, API proxy + cost meter | 3 wk |
 | **3 · Automations + phone** | Automation engine on nodes, starter automations, phone web app | 3 wk |
 | **4 · AI media + storage** | Forge/TTS/STT module, library on Pluto, files module, backups | 3–4 wk |
@@ -292,9 +312,21 @@ Rough estimates for one person working focused.
 - **Hands-free voice:** false triggers and latency. Ship push-to-talk first.
 - **Prompt injection:** limit the damage (permission tiers, `never` actions, no key in the
   agent). Nobody can fully prevent it.
+- **Pluto does double duty (home node + Roblox AFK):** Roblox takes some GPU memory, so the
+  GPU queue gives Forge less headroom while it's running. Windows Update must not restart
+  Pluto on its own: set active hours and schedule restarts.
+- **Keeping only one Minecraft backup** means a corruption that goes unnoticed for over a
+  week can't be undone. Mitigated by verify-before-delete. Keeping two is one setting away.
 
 ## 15. Open questions
 
-- The Minecraft VM: which hypervisor, which guest OS, how the server is started today, and whether RCON is on.
-- Can Pluto stay awake 24/7 as the home node, or do we need a low-power always-on box?
-- Which TTS voice(s), and is voice cloning (XTTS) worth its GPU memory?
+- The Minecraft VM: which hypervisor, which guest OS, how the server is started today, and
+  whether RCON is on. (Waiting on details from an earlier chat.)
+
+### Resolved
+
+- Pluto stays on Windows (Roblox needs it), runs 24/7, and is the home node.
+- Both PCs have a GTX 1080 Ti. Speech-to-text runs on the main PC, TTS (Kokoro) on Pluto's CPU.
+- Claude access uses an API key with a $10/month cap. Subscription login isn't allowed for SDK apps.
+- iPhone, so web push needs Add to Home Screen.
+- Name: **Kernel**, wake word "Hey Kernel", tsundere catgirl persona.

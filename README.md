@@ -1,4 +1,4 @@
-# Hub
+# Kernel
 
 A Windows control panel for everything I run: the Minecraft server, my PCs, local AI
 tools on Pluto, and files. Everything is built as modules, and there's an assistant

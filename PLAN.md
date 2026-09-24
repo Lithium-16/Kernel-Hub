@@ -1,4 +1,4 @@
-# Hub — implementation plan
+# Kernel — implementation plan
 
 This is the build plan for the system described in [ARCHITECTURE.md](ARCHITECTURE.md).
 The architecture doc says *what* and *why*. This doc says *how*, *in what order*, and
@@ -14,9 +14,9 @@ explicitly deferred. Estimates assume one person working focused, and they're ro
 1. [Scope of v1](#1-scope-of-v1)
 2. [Repository, tooling and CI](#2-repository-tooling-and-ci)
 3. [Node daemon](#3-node-daemon)
-4. [Hub protocol](#4-hub-protocol)
+4. [Kernel protocol](#4-kernel-protocol)
 5. [Module system](#5-module-system)
-6. [Hub services (home node)](#6-hub-services-home-node)
+6. [Kernel services (home node)](#6-kernel-services-home-node)
 7. [Desktop app](#7-desktop-app)
 8. [Phone web app](#8-phone-web-app)
 9. [Data model](#9-data-model)
@@ -36,9 +36,11 @@ explicitly deferred. Estimates assume one person working focused, and they're ro
 - I can start, stop, restart and back up the Minecraft server, and use its console, from the
   desktop, the palette, the phone, and by asking the assistant.
 - I can see every PC's health and sleep, wake, restart or shut them down, with confirmations.
+- I get a phone alert within a minute if the Roblox client on Pluto crashes or disconnects,
+  and I can relaunch it from the phone.
 - The assistant can operate every module, asks before any `confirm` action, and every action
   appears in the activity log with who started it.
-- The crash restart, stop-when-empty, nightly backup and disk alert automations run
+- The crash restart, stop-when-empty, weekly backup, disk alert and Roblox alert automations run
   unattended, including while the main PC is off.
 - I can generate images on Pluto from chat or a button, and they land in the library on Pluto.
 - The wake word works well enough that I leave it on.
@@ -64,8 +66,8 @@ web browsing (web access stays `confirm`), code signing, macOS/Linux.
 │  │  └─ src/                  # React UI
 │  └─ phone/                   # PWA (Vite + React), built into the home node's static assets
 ├─ crates/
-│  ├─ node/                    # node daemon binary (hubnode.exe)
-│  ├─ hub-services/            # home-node services, linked into hubnode (feature "home")
+│  ├─ node/                    # node daemon binary (kerneld.exe)
+│  ├─ kernel-services/            # home-node services, linked into kerneld (feature "home")
 │  ├─ protocol/                # generated Rust types + hand-written helpers
 │  └─ common/                  # logging, paths, keyring, config
 ├─ packages/
@@ -73,9 +75,9 @@ web browsing (web access stays `confirm`), code signing, macOS/Linux.
 │  ├─ assistant/               # Node process: Claude Agent SDK runtime
 │  ├─ ui/                      # shared React components (desktop + phone)
 │  └─ sdk-ts/                  # TypeScript module SDK
-├─ sdk/python/hub_sdk/         # Python module SDK (published locally as a wheel)
+├─ sdk/python/kernel_sdk/         # Python module SDK (published locally as a wheel)
 ├─ modules/
-│  ├─ minecraft/  vm-power/  pc-monitor/  ai-media/  files/
+│  ├─ minecraft/  vm-power/  pc-monitor/  roblox/  ai-media/  files/
 ├─ tools/
 │  ├─ fake-node/               # test double for the desktop app
 │  └─ mock-rcon/               # RCON server for Minecraft module tests
@@ -110,8 +112,8 @@ web browsing (web access stays `confirm`), code signing, macOS/Linux.
 
 ## 3. Node daemon
 
-Binary: `hubnode.exe` (Rust, tokio). One per machine. On Pluto it's built with the
-`home` feature, which adds the hub services.
+Binary: `kerneld.exe` (Rust, tokio). One per machine. On Pluto it's built with the
+`home` feature, which adds the Kernel services.
 
 ### Responsibilities
 
@@ -135,7 +137,7 @@ Binary: `hubnode.exe` (Rust, tokio). One per machine. On Pluto it's built with t
 ### Folders
 
 ```
-%LOCALAPPDATA%\Hub\node\
+%LOCALAPPDATA%\Kernel\node\
   config.toml          # node id, name, listen addrs, allowed folders, flags
   node.db              # SQLite (node-local tables, §9)
   logs\                # rotating, 10 × 10 MB
@@ -144,12 +146,12 @@ Binary: `hubnode.exe` (Rust, tokio). One per machine. On Pluto it's built with t
   runtimes\python312\  # bundled Python, shared by Python modules
 ```
 
-The module source-of-truth folder is `D:\Hub\modules` (configurable). Installing copies
+The module source-of-truth folder is `D:\Kernel\modules` (configurable). Installing copies
 it into `modules\<id>\` and builds a venv, so editing the source never breaks a running module.
 
 ### Supervising modules
 
-- Each module is a child process, spawned with a clean environment (only `HUB_*`
+- Each module is a child process, spawned with a clean environment (only `KERNEL_*`
   variables plus `PATH`, `SystemRoot` and `TEMP`) and its working directory set to `data\<id>\`.
 - **Health:** the module must answer an MCP `ping` every 10s. Three misses → kill and restart.
 - **Restart backoff:** 1s, 2s, 4s … up to 60s. More than 5 crashes in 5 minutes → state
@@ -168,7 +170,7 @@ it into `modules\<id>\` and builds a venv, so editing the source never breaks a 
 
 ---
 
-## 4. Hub protocol
+## 4. Kernel protocol
 
 Everything runs over **one WSS connection** per peer pair (desktop↔node, node↔home node),
 using JSON messages validated with the zod-generated schemas. MCP is used *inside* a node
@@ -191,7 +193,7 @@ using JSON messages validated with the zod-generated schemas. MCP is used *insid
 3. The desktop app connects over TLS, and both sides confirm the code with SPAKE2 (`spake2`
    crate), so the code is never sent in the clear.
 4. After a successful exchange, each side stores the other's certificate fingerprint and a
-   long-lived token in Credential Manager (`Hub/<peer-id>`).
+   long-lived token in Credential Manager (`Kernel/<peer-id>`).
 5. The home node is paired first. After that, the home node introduces new nodes to every
    existing client.
 
@@ -272,7 +274,7 @@ Expressions use a tiny, side-effect-free language (`cel-interpreter` crate: comp
 **Python**
 
 ```python
-from hub_sdk import Module, action, event, status
+from kernel_sdk import Module, action, event, status
 
 mod = Module("minecraft")
 
@@ -335,7 +337,7 @@ There's no module-supplied UI code in v1 (a sandboxed iframe block comes **later
 
 ---
 
-## 6. Hub services (home node)
+## 6. Kernel services (home node)
 
 ### 6.1 Assistant runtime
 
@@ -352,6 +354,15 @@ There's no module-supplied UI code in v1 (a sandboxed iframe block comes **later
   - **context:** a compact status summary of all online modules, refreshed each turn, sent as a
     system message.
   - **model:** the Settings → Assistant choice. Effort defaults to `medium` for chat.
+    Short routine turns ("start the server") go to a cheaper model, and longer conversations
+    use the main one.
+  - **persona:** a system prompt that makes it **Kernel**, the tsundere catgirl, with its
+    text editable in Settings → Assistant. Hard rule in the prompt, and enforced by the UI:
+    approval cards, errors and descriptions of what an action will do are generated from the
+    manifest and never styled by the persona.
+- **Account:** an Anthropic **API key**, entered once during onboarding and stored on the home
+  node. Per the Agent SDK docs, apps built on the SDK can't use claude.ai subscription login
+  or rate limits without Anthropic's approval, so this isn't optional.
 - A local brain (Ollama) is an optional **later** backend behind the same tool list, labeled
   experimental.
 - **Conversations:** the SDK owns transcripts. `chats` (§9) stores id, title, timestamps
@@ -413,7 +424,7 @@ State machine: `pending → approved | denied | expired | cancelled`.
 - Streams responses through unchanged, so prompt caching works.
 - Records `usage` (input, output, cache read/write tokens) per request into `usage`, with
   the cost from a price table that ships with the app and can be edited.
-- **Budget:** a monthly cap from settings. At 80% → notification. At 100% → requests get a
+- **Budget:** a monthly cap from settings (default **$10**). At 80% → notification. At 100% → requests get a
   402, the assistant tells the user, and automations with `assistant` steps pause.
 - **Concurrency:** 4 requests in flight. Retries 429 and 529 errors with jittered backoff,
   respecting `retry-after`.
@@ -494,7 +505,7 @@ Module actions can declare a suggested shortcut. Conflicts are resolved in Setti
 
 ### 7.5 Tray
 
-- Menu: Open Hub, Palette, Mic on/off, Pause automations, and Quit.
+- Menu: Open Kernel, Palette, Mic on/off, Pause automations, and Quit.
 - Closing the main window hides it to the tray.
 
 ### 7.6 Voice
@@ -502,9 +513,9 @@ Module actions can declare a suggested shortcut. Conflicts are resolved in Setti
 **Pipeline:**
 
 ```
-mic (WASAPI, 16 kHz mono) → Silero VAD → openWakeWord ("hey hub")
-  → on trigger: stream PCM frames over WSS (voice.stream) to home node
-  → faster-whisper (Pluto, GPU at voice priority) → text into chat
+mic (WASAPI, 16 kHz mono) → Silero VAD → openWakeWord ("Hey Kernel")
+  → on trigger: faster-whisper on the MAIN PC's 1080 Ti (int8, `small.en`)
+  → text sent to the home node as a chat turn
   → assistant reply → Kokoro TTS (Pluto CPU) → audio frames back → play
 ```
 
@@ -518,6 +529,13 @@ mic (WASAPI, 16 kHz mono) → Silero VAD → openWakeWord ("hey hub")
 - **Privacy:** before the wake word, audio never leaves the process, and a tray indicator
   shows the mic state. A setting lets you require push-to-talk only.
 - **Fallback:** if Pluto is unreachable, voice is disabled and the tray shows why.
+- **Wake word model:** "Hey Kernel" isn't a stock openWakeWord phrase, so it's trained with
+  openWakeWord's synthetic-speech training notebook (a one-off, about an hour on the 1080 Ti),
+  then tuned with ~50 real recordings of my voice plus an hour of background audio (Roblox
+  and game sound included) to cut false triggers. The model file ships with the desktop app.
+- **Running STT locally** on the main PC keeps the round trip off the network and leaves
+  Pluto's GPU for Forge. Pluto's `speech.transcribe` is still available for other uses (e.g.
+  transcribing files).
 
 ### 7.7 Onboarding (first run)
 
@@ -545,13 +563,17 @@ mic (WASAPI, 16 kHz mono) → Silero VAD → openWakeWord ("hey hub")
   - Assistant chat
   - Activity
 - Web push notifications (VAPID) for approvals and alerts.
+- **iPhone:** web push only works once the PWA has been added to the Home Screen (iOS 16.4+),
+  and push permission can only be requested after a tap. The device-login flow ends with an
+  "Add to Home Screen, then tap Enable notifications" step with screenshots, and the home
+  screen shows a banner until notifications are on.
 - Touch targets ≥ 44 px, and it works in portrait at 360 px width.
 
 ---
 
 ## 9. Data model
 
-### Home node (`hub.db`)
+### Home node (`kernel.db`)
 
 | Table | Key columns |
 |---|---|
@@ -595,7 +617,7 @@ to `*.db.bak` before each migration.
 
 **Settings:** `server_dir`, `start_command` (default `run.bat` or `./run.sh`),
 `rcon_port` (25575), `rcon_password` (secret), `backup_target` (a Files path on Pluto),
-`keep_backups` (14), `java_max_mem`.
+`backup_schedule` (weekly, Sunday 03:00), `keep_backups` (1), `java_max_mem`.
 
 **Status:**
 
@@ -621,7 +643,7 @@ to `*.db.bak` before each migration.
 | `server.say` | safe | chat broadcast |
 | `player.kick`, `player.op`, `player.deop` | confirm | |
 | `whitelist.add` / `whitelist.remove` / `whitelist.list` | confirm / confirm / safe | |
-| `world.backup` | safe | `save-off` → `save-all flush` → zip the world folders → `save-on`, then upload through the Files module to Pluto, then prune to `keep_backups` |
+| `world.backup` | safe | `save-off` → `save-all flush` → zip the world folders → `save-on`, then upload through the Files module to Pluto, **verify** (the zip opens and `level.dat` parses), and only then delete backups beyond `keep_backups`. A failed verify keeps the old backup and raises `backup.failed` |
 | `world.restore` | never | stop → move the current world aside → extract → start |
 | `mods.list` | safe | read the `mods/` folder and the jar metadata |
 
@@ -687,12 +709,38 @@ both Windows (`run.bat`) and Linux (`run.sh`).
   falling back to the CPU). It's also used by the voice pipeline.
 - **GPU queue:** one GPU job at a time. Priority: voice > interactive image > automations.
   The queue shows in status and on the module screen.
-- **Library:** every output is written to `D:\Hub\Library\YYYY\MM\` with a JSON sidecar and
+- **Library:** every output is written to `D:\Kernel\Library\YYYY\MM\` with a JSON sidecar and
   inserted into `library_items`. Thumbnails are generated at 256 px.
 - **Pinned versions:** a PyTorch and CUDA combination that supports compute capability 6.1
   (Pascal). It's recorded in `modules/ai-media/requirements.lock` and checked at start-up.
 
-### 10.5 Files (`modules/files`, runs on Pluto and the main PC)
+### 10.5 Roblox (`modules/roblox`, runs on Pluto)
+
+Watches the Roblox client I leave AFK on Pluto. **Watching and relaunching only:** it never
+sends input to the game or automates gameplay.
+
+- **Settings:** `place_id` (optional, for rejoin), `alert_on_disconnect` (on), `auto_relaunch` (off).
+- **Status:**
+  - `state` (`closed`/`running`/`disconnected`)
+  - `session_s`
+  - `memory_mb`
+  - `gpu_mem_mb`
+  - `last_event` (text + time)
+  - `place_name` if known
+- **How it knows:**
+  - the process list for `RobloxPlayerBeta.exe` (running, crashed, exited)
+  - tailing the newest file in `%LOCALAPPDATA%\Roblox\logs\` for disconnect/kick lines
+    (the patterns are kept in a config file, since Roblox changes its log format)
+  - Roblox's own error window when present
+- **Actions:**
+  - `client.relaunch` (confirm): close the client if it's hung, then start it again
+  - `client.rejoin` (confirm, needs `place_id`): open `roblox://experiences/start?placeId=<id>`
+  - `client.close` (confirm)
+- **Events:** `client.crashed`, `client.disconnected`, `client.closed`.
+- **GPU note:** Roblox's VRAM use is reported to the AI media GPU queue, so Forge jobs size
+  their batches to what's actually free.
+
+### 10.6 Files (`modules/files`, runs on Pluto and the main PC)
 
 - **Allowed roots** come from settings, and every path is resolved and checked against the
   roots, rejecting symlink escapes and `..`.
@@ -732,7 +780,7 @@ All in Credential Manager (or `libsecret` on a Linux VM).
 |---|---|---|
 | Unit | Rust crates, SDKs, modules (RCON client, backup logic, path checks, expression evaluation) | `cargo test`, `vitest`, `pytest` |
 | Contract | zod ⇄ Rust ⇄ pydantic round-trip of every message type, using golden JSON fixtures | CI job |
-| Module harness | `hub-sdk test` runs a module against a fake node, asserts manifest ↔ handlers, and runs recorded scenarios | SDK |
+| Module harness | `kernel-sdk test` runs a module against a fake node, asserts manifest ↔ handlers, and runs recorded scenarios | SDK |
 | Minecraft | `tools/mock-rcon` plus a fake server process that prints Forge log lines, covering start, stop, crash and backup paths | pytest |
 | Integration | A real node plus fake modules plus a test desktop client: pairing, approvals, automations placement, offline/reconnect | Rust integration tests |
 | UI | component tests plus key flows (approve in chat, Minecraft start/stop, sleep confirm) against `tools/fake-node` | Playwright (web build of the UI) |
@@ -749,9 +797,9 @@ modules. None for UI code, where behavior tests matter more.
 | Artifact | Format | Contents |
 |---|---|---|
 | Desktop app | Tauri NSIS installer, per-user | app + WebView2 bootstrapper + the local node |
-| Node | NSIS installer, per-user | `hubnode.exe` + the bundled Python runtime + the firewall rule. On Pluto it also includes the assistant (bundled Node 22 + `packages/assistant`) and the phone PWA |
-| Linux VM node | tarball + install script | `hubnode` (musl build) + a systemd user unit |
-| Modules | folder zips attached to the release | copied into `D:\Hub\modules` |
+| Node | NSIS installer, per-user | `kerneld.exe` + the bundled Python runtime + the firewall rule. On Pluto it also includes the assistant (bundled Node 22 + `packages/assistant`) and the phone PWA |
+| Linux VM node | tarball + install script | `kerneld` (musl build) + a systemd user unit |
+| Modules | folder zips attached to the release | copied into `D:\Kernel\modules` |
 
 - **Updates:** the Tauri updater for the desktop app, and the node checks the same GitHub
   Releases feed. Both verify the updater signature (the key is kept offline). Nodes update
@@ -769,7 +817,7 @@ modules. None for UI code, where behavior tests matter more.
 
 - [ ] Repo scaffold per §2, CI green on Windows and Linux runners
 - [ ] Tauri window with the design tokens, sidebar, and a palette window on Alt+Space
-- [ ] `hubnode` skeleton: config, logs, tray, TLS listener, SPAKE2 pairing between two machines over Tailscale
+- [ ] `kerneld` skeleton: config, logs, tray, TLS listener, SPAKE2 pairing between two machines over Tailscale
 - [ ] Python SDK "hello" module: one status field, one action, supervised with restart
 - [ ] **Agent SDK test:** a bundled Node 22 runs `packages/assistant` on Windows, calls one module tool through the proxy, and the key isn't visible from inside the assistant process (checked by test)
 - [ ] Decision recorded: the Tauri + Node process split holds (or switch to Electron)
@@ -785,11 +833,12 @@ command-line harness.
 - [ ] **Minecraft** module (§10.1), all actions except `world.restore`'s upload path. Backups go to a local folder for now
 - [ ] **VM power** module with the adapter for whatever the VM turns out to use
 - [ ] **PC monitor** module on all three nodes, including WoL and power actions with confirms
+- [ ] **Roblox** module on Pluto (§10.5): status, crash/disconnect detection, relaunch
 - [ ] Activity log screen, and a basic `approvals` flow for human `confirm_when`
 - [ ] Degraded mode when the home node is offline
 - [ ] Onboarding steps 1, 2, 4, 5
 
-**Accept when:** for 3 days, the Minecraft server and the PCs are managed only through Hub
+**Accept when:** for 3 days, the Minecraft server and the PCs are managed only through Kernel
 buttons, with no crashes that lose state, and Sleep on Pluto → Wake from the main PC works.
 
 ### Phase 2: assistant (3 weeks)
@@ -808,14 +857,15 @@ the monthly cost is visible.
 
 ### Phase 3: automations + phone (3 weeks)
 
-- [ ] Automation engine (§6.3) with node placement, the four starter automations, and a runs history
+- [ ] Automation engine (§6.3) with node placement, the five starter automations (Minecraft crash restart, stop when empty, weekly backup, disk alert, Roblox alert), and a runs history
 - [ ] Automations screen (list, detail, simple step editor) and "save chat as automation"
 - [ ] Node-local execution and syncing runs back to the home node
 - [ ] Phone PWA (§8) with device login, home, module screens, approvals, chat and web push
 - [ ] Notifications settings
 
 **Accept when:** with the main PC **off**, a forced Minecraft crash is restarted and I get
-a phone notification, the nightly backup runs, and I can approve a stop from the phone.
+a phone notification, the weekly backup runs and replaces last week's, a Roblox disconnect
+reaches my iPhone, and I can approve a stop from the phone.
 
 ### Phase 4: AI media + storage (3–4 weeks)
 
@@ -832,6 +882,7 @@ in chat and in the library on Pluto, and a world restore from a Pluto backup wor
 ### Phase 5: voice + polish (3 weeks)
 
 - [ ] Voice pipeline (§7.6): push-to-talk first, then the wake word, TTS replies, barge-in
+- [ ] Train and tune the "Hey Kernel" wake word model. Target: under 1 false trigger per day with Roblox audio playing
 - [ ] Latency measured and logged. p50 ≤ 2.0 s, p90 ≤ 3.0 s on the home network
 - [ ] Onboarding step 7, a mic indicator in the tray and sidebar
 - [ ] Installers (§13), the updater, export diagnostics, release checklist
@@ -860,7 +911,7 @@ Candidates, not commitments:
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | Agent SDK packaging on Windows | medium | high | Phase 0 test. Fallback: Electron, or calling the Claude API directly with our own tool loop |
-| Pluto sleeping breaks the home node | high | medium | Document "never sleep". Degraded mode. Later, a low-power fallback home node |
+| Pluto restarting for Windows Update breaks the home node and the Roblox session | medium | medium | Pluto runs 24/7 (D13). Set active hours, pause auto-restart, and schedule update restarts for when I'm not AFK. Degraded mode on the main PC |
 | 1080 Ti support dropped by PyTorch/CUDA | medium | medium | Pinned lockfile. CPU fallback for TTS and STT |
 | Forge server specifics (VM, OS, startup) unknown | certain | low | Module supports both OSes. Settle in phase 1 |
 | Voice false triggers or latency | medium | medium | Push-to-talk first, tunable wake threshold, measured latency |
@@ -868,11 +919,11 @@ Candidates, not commitments:
 
 ### Open questions
 
-1. Minecraft VM: hypervisor, guest OS, current start method, RCON status, whether it's on Pluto.
-2. Can Pluto run 24/7 (power, noise)? If not, pick the fallback home node early.
-3. Main PC GPU model (decides whether STT runs locally or on Pluto).
-4. Which voice for TTS, and whether voice cloning is wanted.
-5. Where Minecraft backups should live long term, and how many to keep.
+1. Minecraft VM: hypervisor, guest OS, current start method, RCON status, whether it's on
+   Pluto. Waiting on details from an earlier chat. The module supports every combination,
+   so this only blocks the **VM power** adapter choice.
+
+Resolved: Pluto runs 24/7 (D13) · TTS voice is Kokoro (D14) · backups (D15) · main PC GPU is a 1080 Ti (D14).
 
 ### Decision log
 
@@ -888,3 +939,8 @@ Candidates, not commitments:
 | D8 | UI blocks, no module UI code, in v1 | consistent look, no untrusted UI code |
 | D9 | Automations run on the owning node when possible | keep working when the main PC or Pluto are off |
 | D10 | Square, Raycast-style design, Geist, Lucide icons | per the design canvas |
+| D11 | Name **Kernel**, wake word "Hey Kernel", tsundere catgirl persona | my choice. Persona never styles safety text |
+| D12 | Anthropic API key, $10/month default cap | the Agent SDK can't use subscription login without approval |
+| D13 | Pluto stays Windows and runs 24/7 | Roblox AFK needs Windows. Being on 24/7 is exactly what the home node needs |
+| D14 | STT on the main PC's 1080 Ti, TTS (Kokoro) on Pluto's CPU | lowest voice latency, and keeps Pluto's GPU free for Forge |
+| D15 | Weekly Minecraft backup, keep 1, verify before deleting the old one | my choice. Verification removes the "zero good backups" window |
