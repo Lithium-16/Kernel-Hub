@@ -141,15 +141,19 @@ jobs:
             --notes "kerneld from $GITHUB_SHA. Installed nodes find it with Node > Check for updates."
 
   python:
-    name: Python SDK (${{ matrix.os }})
+    name: Python SDK and modules (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v6
       - run: uv venv .venv
-      - run: uv pip install --python .venv -e "sdk/python[dev]"
+      - name: Install the SDK and every module's requirements
+        run: uv pip install --python .venv -e "sdk/python[dev]" $(for r in modules/*/requirements.txt; do printf -- '-r %s ' "$r"; done)
       - run: uv run --python .venv --no-project pytest

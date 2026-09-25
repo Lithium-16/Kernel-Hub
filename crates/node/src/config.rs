@@ -130,6 +130,10 @@ fn default_node() -> String {
 
 impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
+        // Absolute first: relative paths inside resolve against the file's folder, and
+        // modules run with their own working directory.
+        let path =
+            &std::path::absolute(path).with_context(|| format!("resolving {}", path.display()))?;
         let text =
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let mut cfg: Self =
@@ -137,7 +141,7 @@ impl Config {
         let base = path.parent().unwrap_or(Path::new("."));
         cfg.modules_dir = absolutize(base, &cfg.modules_dir);
         cfg.data_dir = absolutize(base, &cfg.data_dir);
-        cfg.path = Some(std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()));
+        cfg.path = Some(path.clone());
         cfg.validate()?;
         Ok(cfg)
     }
@@ -224,6 +228,24 @@ ping_interval_ms = 500
         assert!(Config::load(&path).is_err());
         std::fs::write(&path, "node_id='a'\nnode_name='A'\ntoken='long-enough'\nmodules_dir='m'\ndata_dir='d'\nbogus=1\n").unwrap();
         assert!(Config::load(&path).is_err());
+    }
+
+    #[test]
+    fn relative_config_paths_become_absolute() {
+        // A folder in the current directory, so the config can be named by a relative path
+        // (changing the working directory would race with other tests).
+        let dir = tempfile::tempdir_in(".").unwrap();
+        std::fs::write(
+            dir.path().join("node.toml"),
+            "node_id='a'\nnode_name='A'\ntoken='long-enough'\nmodules_dir='m'\ndata_dir='d'\n",
+        )
+        .unwrap();
+        let relative = Path::new(dir.path().file_name().unwrap()).join("node.toml");
+        assert!(relative.is_relative());
+        let cfg = Config::load(&relative).unwrap();
+        assert!(cfg.data_dir.is_absolute(), "{}", cfg.data_dir.display());
+        assert!(cfg.modules_dir.is_absolute());
+        assert!(cfg.path.unwrap().is_absolute());
     }
 
     #[test]

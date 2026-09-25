@@ -564,26 +564,54 @@ fn windowless(program: impl AsRef<std::ffi::OsStr>) -> Command {
     cmd
 }
 
-/// Reinstall the Python SDK wheel that ships in `app/sdk/`, if there is one.
-fn install_sdk(cfg: &Config, app: &Path) -> Res<()> {
-    let wheel = std::fs::read_dir(app.join("sdk"))
-        .ok()
+/// `uv pip install` arguments for the Python side of a build: the SDK wheel in `app/sdk/`
+/// (reinstalled, since its version rarely changes) and each module's `requirements.txt`.
+/// `None` when there's nothing to install.
+pub fn python_install_args(app: &Path) -> Option<Vec<std::ffi::OsString>> {
+    let files = |dir: PathBuf| -> Vec<PathBuf> {
+        let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .collect();
+        v.sort();
+        v
+    };
+    let wheel = files(app.join("sdk"))
         .into_iter()
-        .flatten()
-        .filter_map(Result::ok)
-        .map(|e| e.path())
         .find(|p| p.extension().is_some_and(|x| x == "whl"));
-    let Some(wheel) = wheel else { return Ok(()) };
+    let requirements: Vec<PathBuf> = files(app.join("modules"))
+        .into_iter()
+        .map(|m| m.join("requirements.txt"))
+        .filter(|r| r.is_file())
+        .collect();
+    if wheel.is_none() && requirements.is_empty() {
+        return None;
+    }
+    let mut args: Vec<std::ffi::OsString> = Vec::new();
+    if let Some(wheel) = wheel {
+        args.extend([
+            "--reinstall-package".into(),
+            "kernel-sdk".into(),
+            wheel.into(),
+        ]);
+    }
+    for r in requirements {
+        args.extend(["-r".into(), r.into()]);
+    }
+    Some(args)
+}
+
+/// Install the new build's Python packages into the modules' environment.
+fn install_python_deps(cfg: &Config, app: &Path) -> Res<()> {
+    let Some(args) = python_install_args(app) else {
+        return Ok(());
+    };
     let out = windowless(&cfg.update.uv)
-        .args([
-            "pip",
-            "install",
-            "--reinstall-package",
-            "kernel-sdk",
-            "--python",
-        ])
+        .args(["pip", "install", "--python"])
         .arg(&cfg.python)
-        .arg(&wheel)
+        .args(args)
         .output()
         .map_err(|e| format!("running {}: {e}", cfg.update.uv))?;
     if out.status.success() {
@@ -632,7 +660,7 @@ pub fn apply(args: &ApplyArgs) -> anyhow::Result<()> {
                 .ok_or_else(|| {
                     anyhow::anyhow!("{} is not in an app folder", args.start.display())
                 })?;
-            swap_and_install(root, staging, |app| install_sdk(&cfg, app))
+            swap_and_install(root, staging, |app| install_python_deps(&cfg, app))
         }
         None => Ok(()),
     };
@@ -799,6 +827,43 @@ mod tests {
         assert!(err.contains("the old one is back") && err.contains("uv exploded"));
         assert_eq!(version(root.path(), "app"), "old");
         assert_eq!(version(root.path(), "app.failed"), "new");
+    }
+
+    #[test]
+    fn installs_the_sdk_and_module_requirements() {
+        let app = tempfile::tempdir().unwrap();
+        assert!(python_install_args(app.path()).is_none());
+        std::fs::create_dir_all(app.path().join("sdk")).unwrap();
+        std::fs::write(app.path().join("sdk/kernel_sdk-0.1.0-py3-none-any.whl"), "").unwrap();
+        std::fs::write(app.path().join("sdk/.gitignore"), "*").unwrap();
+        for (m, req) in [("pc-monitor", true), ("hello", false), ("roblox", true)] {
+            std::fs::create_dir_all(app.path().join("modules").join(m)).unwrap();
+            if req {
+                std::fs::write(
+                    app.path().join("modules").join(m).join("requirements.txt"),
+                    "psutil",
+                )
+                .unwrap();
+            }
+        }
+        let args: Vec<String> = python_install_args(app.path())
+            .unwrap()
+            .into_iter()
+            .map(|a| a.to_string_lossy().replace('\\', "/"))
+            .collect();
+        let base = app.path().to_string_lossy().replace('\\', "/");
+        assert_eq!(
+            args,
+            [
+                "--reinstall-package".to_string(),
+                "kernel-sdk".into(),
+                format!("{base}/sdk/kernel_sdk-0.1.0-py3-none-any.whl"),
+                "-r".into(),
+                format!("{base}/modules/pc-monitor/requirements.txt"),
+                "-r".into(),
+                format!("{base}/modules/roblox/requirements.txt"),
+            ]
+        );
     }
 
     #[test]

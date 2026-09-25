@@ -1,7 +1,10 @@
 /** Display rules for module status values, driven by key naming conventions. */
 
 export function label(key: string): string {
-  const words = key.replace(/_(s|mb|pct|bytes)$/, '').replace(/_/g, ' ');
+  const words = key
+    .replace(/_(s|mb|pct|bytes|bps|c)$/, '')
+    .replace(/_/g, ' ')
+    .replace(/\b(cpu|gpu|vram|ram|motd|mac|id)\b/g, (w) => w.toUpperCase());
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
@@ -46,12 +49,16 @@ export function value(key: string, v: unknown): string {
     if (key.endsWith('_mb')) return bytes(v * 1024 * 1024);
     if (key === 'bytes' || key.endsWith('_bytes')) return bytes(v);
     if (key.endsWith('_pct')) return `${Math.round(v)}%`;
+    if (key.endsWith('_c')) return `${Math.round(v)} °C`;
+    if (key.endsWith('_bps')) return `${bytes(v)}/s`;
     return Number.isInteger(v) ? String(v) : v.toFixed(1);
   }
   if (typeof v === 'string') {
     if (ISO.test(v)) return when(v);
-    // Single status words read better capitalized ("Running"); names and files stay as they are.
-    return /^[a-z][a-z-]*$/.test(v) ? v.charAt(0).toUpperCase() + v.slice(1) : v;
+    // Status words read better capitalized ("Running", "In game"); names and files stay as they are.
+    if (!/^[a-z][a-z_-]*$/.test(v)) return v;
+    const words = v.replace(/_/g, ' ');
+    return words.charAt(0).toUpperCase() + words.slice(1);
   }
   return JSON.stringify(v);
 }
@@ -63,16 +70,24 @@ export function stateTone(state: unknown): Tone {
     case 'running':
     case 'active':
     case 'online':
+    case 'in_game':
+    case 'current':
       return 'ok';
     case 'starting':
     case 'stopping':
     case 'activating':
     case 'deactivating':
     case 'connecting':
+    case 'joining':
+    case 'available':
+    case 'checking':
+    case 'downloading':
+    case 'installing':
       return 'warn';
     case 'crashed':
     case 'failed':
     case 'unauthorized':
+    case 'disconnected':
       return 'bad';
     default:
       return 'mute';
@@ -83,7 +98,7 @@ export function stateTone(state: unknown): Tone {
 const SELF_EVIDENT = new Set(['file', 'name', 'message', 'command', 'bytes']);
 
 function selfEvident(key: string): boolean {
-  return SELF_EVIDENT.has(key) || /_(s|mb|bytes)$/.test(key);
+  return SELF_EVIDENT.has(key) || /_(s|mb|bytes|bps|c|pct)$/.test(key);
 }
 
 /** Short summary of an action result for the status bar. */

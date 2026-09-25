@@ -1,13 +1,16 @@
-import importlib
+import importlib.util
+from pathlib import Path
 
 from kernel_sdk import Module
 
 
 def test_manifest_and_handlers(monkeypatch):
-    from conftest import MODULE_DIR
-
-    monkeypatch.setenv("KERNEL_MODULE_DIR", str(MODULE_DIR))
-    main = importlib.import_module("main")
+    # Loaded by path: every module has a main.py, so `import main` would get whichever came first.
+    module_dir = Path(__file__).resolve().parent.parent
+    monkeypatch.setenv("KERNEL_MODULE_DIR", str(module_dir))
+    spec = importlib.util.spec_from_file_location("minecraft_main", module_dir / "main.py")
+    main = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(main)
     mod: Module = main.mod
     mod.validate()
     assert mod.settings["server_dir"] == "/srv/minecraft"
