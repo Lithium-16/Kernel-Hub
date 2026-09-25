@@ -1,0 +1,18 @@
+# Example kerneld config. Copy to a private location and change the token.
+node_id = "pluto"
+node_name = "Pluto"
+listen = "0.0.0.0:47800"          # the node still only accepts LAN / Tailscale / localhost peers
+token = "change-me-to-a-long-random-string"
+modules_dir = "D:/Kernel/modules"
+data_dir = "C:/Users/you/AppData/Local/Kernel/node"
+python = "C:/Users/you/AppData/Local/Kernel/node/runtimes/python312/python.exe"
+
+# Only start these modules (leave empty to start every module found).
+enabled_modules = []
+
+[supervisor]
+ping_interval_ms = 10000
+ping_misses = 3
+status_interval_ms = 2000
+max_crashes = 5
+crash_window_s = 300

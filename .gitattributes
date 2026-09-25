@@ -1,11 +1,2 @@
-# Normalize line endings: LF in the repo, auto on checkout.
-* text=auto eol=lf
-
-# Treat these as binary (no EOL/diff munging).
-*.png binary
-*.jpg binary
-*.jpeg binary
-*.gif binary
-*.wasm binary
-*.ogg binary
-*.wav binary
+# Shell scripts run inside Linux (WSL); CRLF would break them.
+*.sh text eol=lf

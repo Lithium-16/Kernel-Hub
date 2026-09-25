@@ -1,0 +1,143 @@
+id = "minecraft"
+name = "Minecraft"
+icon = "pickaxe"
+version = "0.1.0"
+runtime = "python"
+entry = "main.py"
+
+# Override any of these per machine in settings.local.toml (not committed).
+[settings]
+# How to reach the Linux side that runs the server:
+#   "wsl"    kerneld runs on the Windows host (Pluto); commands go through wsl.exe
+#   "ssh"    kerneld runs on another PC; commands go through `ssh <ssh_host> wsl ...`
+#   "direct" kerneld already runs on the Linux side
+transport = "wsl"
+distro = "Ubuntu"
+ssh_host = "pluto"
+server_dir = "/srv/minecraft"
+service = "minecraft"
+# The detached screen session systemd runs the server in (see the minecraft unit).
+screen_dir = "/run/screen-mc"
+screen_user = "minecraft"
+screen_session = "mc"
+extra_services = ["playit", "mc-notify"]
+backup_dir = "/srv/minecraft-backups"
+keep_backups = 1
+# WSL shuts its VM down when nothing holds a session open, which kills the server.
+# The module holds one open for as long as it runs.
+keep_wsl_alive = true
+refresh_s = 10.0
+start_timeout_s = 300.0
+
+[[actions]]
+id = "server.start"
+label = "Start server"
+icon = "play"
+description = "Starts the server and waits until it answers pings."
+ai = "safe"
+timeout_s = 360
+
+[[actions]]
+id = "server.stop"
+label = "Stop server"
+icon = "square"
+description = "Stops the server, optionally after warning players in chat once a minute."
+ai = "confirm"
+timeout_s = 2100
+params.delay_min = { type = "int", description = "Minutes of warning before stopping", default = 0, min = 0, max = 30 }
+
+[[actions]]
+id = "server.restart"
+label = "Restart server"
+icon = "rotate-cw"
+description = "Restarts the server and waits until it answers pings."
+ai = "confirm"
+timeout_s = 480
+
+[[actions]]
+id = "server.command"
+label = "Run command"
+icon = "terminal"
+description = "Runs one console command and returns what the server logged."
+ai = "confirm"
+params.command = { type = "string", description = "Console command, without the leading slash" }
+
+[[actions]]
+id = "server.say"
+label = "Say in chat"
+icon = "megaphone"
+description = "Broadcasts a message to everyone on the server."
+ai = "safe"
+params.message = { type = "string", description = "Message text" }
+
+[[actions]]
+id = "console.tail"
+label = "Show console"
+icon = "scroll-text"
+description = "Returns the last lines of the server log."
+ai = "safe"
+params.lines = { type = "int", default = 50, min = 1, max = 500 }
+
+[[actions]]
+id = "player.kick"
+label = "Kick player"
+icon = "user-x"
+ai = "confirm"
+params.name = { type = "string", description = "Player name" }
+params.reason = { type = "string", description = "Shown to the player", default = "" }
+
+[[actions]]
+id = "player.op"
+label = "Make operator"
+icon = "shield-plus"
+ai = "confirm"
+params.name = { type = "string", description = "Player name" }
+
+[[actions]]
+id = "player.deop"
+label = "Remove operator"
+icon = "shield-minus"
+ai = "confirm"
+params.name = { type = "string", description = "Player name" }
+
+[[actions]]
+id = "whitelist.add"
+label = "Add to whitelist"
+icon = "user-plus"
+ai = "confirm"
+params.name = { type = "string", description = "Player name" }
+
+[[actions]]
+id = "whitelist.remove"
+label = "Remove from whitelist"
+icon = "user-minus"
+ai = "confirm"
+params.name = { type = "string", description = "Player name" }
+
+[[actions]]
+id = "whitelist.list"
+label = "Show whitelist"
+icon = "list"
+ai = "safe"
+
+[[actions]]
+id = "world.backup"
+label = "Back up world"
+icon = "archive"
+description = "Saves and archives the world, verifies the archive, then deletes backups beyond keep_backups."
+ai = "safe"
+timeout_s = 1800
+
+[[actions]]
+id = "mods.list"
+label = "List mods"
+icon = "package"
+ai = "safe"
+
+[[actions]]
+id = "service.restart"
+label = "Restart helper service"
+icon = "refresh-cw"
+description = "Restarts the playit.gg tunnel or the Discord notifier."
+ai = "confirm"
+params.service = { type = "enum", options = ["playit", "mc-notify"] }

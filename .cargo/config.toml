@@ -1,5 +1,0 @@
-# macroquad/miniquad reference JS functions (e.g. `now`, `console_warn`) that are
-# provided at runtime by the JS bundle (web/index.html). Recent Rust's wasm linker
-# treats these as link errors unless told to import undefined symbols.
-[target.wasm32-unknown-unknown]
-rustflags = ["-C", "link-arg=--import-undefined", "-C", "link-arg=--allow-undefined"]
