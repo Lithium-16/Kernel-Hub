@@ -163,6 +163,8 @@ async fn node_runs_hello_module_end_to_end() {
             backoff_max_ms: 1_000,
             ..SupervisorConfig::default()
         },
+        update: Default::default(),
+        path: None,
     };
     let running = kernel_node::start(cfg).await.expect("node starts");
 

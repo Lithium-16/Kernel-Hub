@@ -32,6 +32,21 @@ def test_defaults_come_from_the_manifest(tmp_path):
     assert mod.settings == {"distro": "Ubuntu", "refresh_s": 10.0, "keep": 1, "enabled": True}
 
 
+def test_kernel_settings_file_wins(tmp_path, monkeypatch):
+    elsewhere = tmp_path / "data" / "demo.toml"
+    elsewhere.parent.mkdir()
+    elsewhere.write_text('distro = "Arch"\n')
+    monkeypatch.setenv("KERNEL_SETTINGS_FILE", str(elsewhere))
+    mod = Module(write_module(tmp_path, 'distro = "Debian"\n'))
+    assert mod.settings["distro"] == "Arch"
+
+
+def test_missing_kernel_settings_file_falls_back(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNEL_SETTINGS_FILE", str(tmp_path / "nope.toml"))
+    mod = Module(write_module(tmp_path, 'distro = "Debian"\n'))
+    assert mod.settings["distro"] == "Debian"
+
+
 def test_local_file_overrides_defaults(tmp_path):
     mod = Module(write_module(tmp_path, 'distro = "Debian"\nrefresh_s = 5\n'))
     assert mod.settings["distro"] == "Debian"

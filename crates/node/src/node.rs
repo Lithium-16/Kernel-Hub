@@ -4,14 +4,18 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use kernel_protocol::{
-    ActionInvoke, ActionResult, ActivityEntry, ActivityResult, AiTier, ErrorCode, ErrorInfo,
-    ModuleState, NodeInfo, new_id, now_ts,
+    ActionInvoke, ActionResult, ActionSpec, ActivityEntry, ActivityResult, Actor, ActorKind,
+    AiTier, ErrorCode, ErrorInfo, ModuleInfo, ModuleState, NodeInfo, new_id, now_ts,
 };
+use serde_json::json;
+use tokio::sync::watch;
 
 use crate::activity::ActivityStore;
+use crate::builtin;
 use crate::config::Config;
 use crate::mcp::McpError;
 use crate::supervisor::Supervisor;
+use crate::update::{self, Updater};
 
 /// Extra time allowed on top of an action's own timeout (which the module enforces).
 const TIMEOUT_GRACE: Duration = Duration::from_secs(5);
@@ -20,6 +24,32 @@ pub struct Node {
     pub cfg: Config,
     pub supervisor: Arc<Supervisor>,
     pub activity: ActivityStore,
+    pub updater: Updater,
+    /// Set to true to ask the process to exit (after handing off to the update helper).
+    pub exit: watch::Sender<bool>,
+    pub started: Instant,
+}
+
+fn fail(code: ErrorCode, message: impl Into<String>) -> ActionResult {
+    ActionResult::failure(ErrorInfo::new(code, message))
+}
+
+/// The assistant and automations get `safe` actions only, until approvals arrive in phase 2.
+fn permission(actor: &Actor, spec: &ActionSpec) -> Option<ActionResult> {
+    if actor.kind.is_human() {
+        return None;
+    }
+    match spec.ai {
+        AiTier::Safe => None,
+        AiTier::Never => Some(fail(
+            ErrorCode::NotPermitted,
+            format!("'{}' can only be run with a button", spec.id),
+        )),
+        AiTier::Confirm => Some(fail(
+            ErrorCode::NeedsApproval,
+            format!("'{}' needs your approval", spec.id),
+        )),
+    }
 }
 
 impl Node {
@@ -31,17 +61,69 @@ impl Node {
         }
     }
 
+    /// Every module, with the node's own module last.
+    pub fn catalog(&self) -> Vec<ModuleInfo> {
+        let mut modules = self.supervisor.catalog();
+        let mut status = self.updater.status();
+        status.insert("uptime_s".into(), json!(self.started.elapsed().as_secs()));
+        modules.push(ModuleInfo {
+            id: builtin::ID.into(),
+            name: builtin::NAME.into(),
+            icon: builtin::ICON.into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            state: ModuleState::Running,
+            actions: builtin::actions(),
+            status: Some(status),
+        });
+        modules
+    }
+
+    /// Ask the process to exit in a moment, so the reply to the current action goes out first.
+    pub fn exit_soon(self: &Arc<Self>) {
+        let node = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let _ = node.exit.send(true);
+        });
+    }
+
+    /// Install a new build without a button press (`[update] auto_install`).
+    pub async fn auto_install(self: &Arc<Self>) {
+        let req = ActionInvoke {
+            module: builtin::ID.into(),
+            action: "update.install".into(),
+            params: Default::default(),
+            actor: Actor {
+                kind: ActorKind::Automation,
+                reference: Some("auto-update".into()),
+            },
+            approval_id: None,
+        };
+        let started = Instant::now();
+        let result = self.install_update().await;
+        self.record(&req, &result, started);
+    }
+
     pub fn check_token(&self, given: &str) -> bool {
         constant_time_eq(given.as_bytes(), self.cfg.token.as_bytes())
     }
 
-    /// Run an action on behalf of `req.actor`. Every call, allowed or not, is logged.
-    pub async fn invoke(&self, req: ActionInvoke) -> ActionResult {
+    /// Run an action on behalf of `req.actor`. Every call, allowed or not, is logged
+    /// (except quiet ones).
+    pub async fn invoke(self: &Arc<Self>, req: ActionInvoke) -> ActionResult {
         let started = Instant::now();
-        let result = self.run(&req).await;
-        if self.is_quiet(&req) {
-            return result;
+        let result = if req.module == builtin::ID {
+            self.run_builtin(&req).await
+        } else {
+            self.run(&req).await
+        };
+        if !self.is_quiet(&req) {
+            self.record(&req, &result, started);
         }
+        result
+    }
+
+    fn record(&self, req: &ActionInvoke, result: &ActionResult, started: Instant) {
         let (outcome, code) = match &result.error {
             None => (ActivityResult::Ok, None),
             Some(e) if matches!(e.code, ErrorCode::NeedsApproval | ErrorCode::NotPermitted) => {
@@ -64,7 +146,55 @@ impl Node {
         if let Err(e) = self.activity.insert(&entry) {
             tracing::error!(error = %e, "failed to write activity log");
         }
-        result
+    }
+
+    async fn install_update(self: &Arc<Self>) -> ActionResult {
+        match self.updater.install().await {
+            Ok(Some(build)) => {
+                tracing::info!(build, "installing update; restarting");
+                self.exit_soon();
+                ActionResult::success(json!({
+                    "installing": build,
+                    "message": "restarting on the new build, back in under a minute"
+                }))
+            }
+            Ok(None) => {
+                ActionResult::success(json!({ "update": "current", "build": update::build() }))
+            }
+            Err(e) => fail(ErrorCode::ModuleFailed, e),
+        }
+    }
+
+    async fn run_builtin(self: &Arc<Self>, req: &ActionInvoke) -> ActionResult {
+        let Some(spec) = builtin::actions().into_iter().find(|a| a.id == req.action) else {
+            return fail(
+                ErrorCode::InvalidParams,
+                format!("module '{}' has no action '{}'", req.module, req.action),
+            );
+        };
+        if let Some(denied) = permission(&req.actor, &spec) {
+            return denied;
+        }
+        match req.action.as_str() {
+            "update.check" => match self.updater.check().await {
+                Ok(Some(r)) => ActionResult::success(json!({
+                    "update": "available", "latest_build": r.build, "build": update::build()
+                })),
+                Ok(None) => {
+                    ActionResult::success(json!({ "update": "current", "build": update::build() }))
+                }
+                Err(e) => fail(ErrorCode::ModuleFailed, e),
+            },
+            "update.install" => self.install_update().await,
+            "node.restart" => match self.updater.restart() {
+                Ok(()) => {
+                    self.exit_soon();
+                    ActionResult::success(json!({ "message": "restarting, back in a few seconds" }))
+                }
+                Err(e) => fail(ErrorCode::ModuleFailed, e),
+            },
+            _ => fail(ErrorCode::Internal, "unhandled built-in action"),
+        }
     }
 
     /// Quiet actions (safe, read-only, polled) stay out of the activity log.
@@ -76,8 +206,6 @@ impl Node {
     }
 
     async fn run(&self, req: &ActionInvoke) -> ActionResult {
-        let fail = |code, msg: String| ActionResult::failure(ErrorInfo::new(code, msg));
-
         let Some(slot) = self.supervisor.get(&req.module) else {
             return fail(
                 ErrorCode::InvalidParams,
@@ -91,23 +219,8 @@ impl Node {
             );
         };
 
-        if !req.actor.kind.is_human() {
-            match action.spec.ai {
-                AiTier::Safe => {}
-                AiTier::Never => {
-                    return fail(
-                        ErrorCode::NotPermitted,
-                        format!("'{}' can only be run with a button", req.action),
-                    );
-                }
-                // Approvals arrive in phase 2. Until then, `confirm` actions are human-only.
-                AiTier::Confirm => {
-                    return fail(
-                        ErrorCode::NeedsApproval,
-                        format!("'{}' needs your approval", req.action),
-                    );
-                }
-            }
+        if let Some(denied) = permission(&req.actor, &action.spec) {
+            return denied;
         }
 
         let Some(client) = slot.client() else {
