@@ -1,0 +1,31 @@
+[package]
+name = "kernel-desktop"
+version = "0.1.0"
+description = "Kernel desktop app"
+edition = "2024"
+publish = false
+
+# Its own workspace: the desktop app needs WebView system libraries that the node
+# crates (and their CI job) don't.
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

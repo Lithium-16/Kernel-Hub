@@ -57,6 +57,7 @@ class Action:
     description: str | None = None
     params: tuple[Param, ...] = ()
     timeout_s: float = 60.0
+    quiet: bool = False
 
     @property
     def tool_name(self) -> str:
@@ -143,6 +144,11 @@ def parse_manifest(data: dict[str, Any], root: Path | None = None) -> Manifest:
         if ai not in ("safe", "confirm", "never"):
             raise ManifestError(f"{where}: ai must be safe, confirm or never")
         params = tuple(_parse_param(n, p, f"{where}.params") for n, p in raw.get("params", {}).items())
+        quiet = raw.get("quiet", False)
+        if not isinstance(quiet, bool):
+            raise ManifestError(f"{where}: quiet must be true or false")
+        if quiet and ai != "safe":
+            raise ManifestError(f"{where}: only safe actions can be quiet (everything else is always logged)")
         actions.append(
             Action(
                 id=action_id,
@@ -152,6 +158,7 @@ def parse_manifest(data: dict[str, Any], root: Path | None = None) -> Manifest:
                 description=raw.get("description"),
                 params=params,
                 timeout_s=float(raw.get("timeout_s", 60)),
+                quiet=quiet,
             )
         )
 

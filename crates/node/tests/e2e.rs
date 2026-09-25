@@ -187,7 +187,7 @@ async fn node_runs_hello_module_end_to_end() {
     }
 
     let hello = c.wait_for_state(ModuleState::Running).await;
-    assert_eq!(hello.actions.len(), 4);
+    assert_eq!(hello.actions.len(), 5);
 
     // A button press works, and parameter validation comes from the module.
     let r = c
@@ -263,7 +263,11 @@ async fn node_runs_hello_module_end_to_end() {
         "a fresh process starts counting again"
     );
 
-    // Everything is in the activity log, newest first, with who did it.
+    // Quiet reads work but stay out of the activity log.
+    let r = c.invoke(ActorKind::User, "greet.count", json!({})).await;
+    assert_eq!(r.result.unwrap()["greetings"], 1);
+
+    // Everything else is in the activity log, newest first, with who did it.
     let activity = match c
         .request(Payload::ActivityQuery(ActivityQuery {
             limit: Some(50),

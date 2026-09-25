@@ -39,6 +39,9 @@ impl Node {
     pub async fn invoke(&self, req: ActionInvoke) -> ActionResult {
         let started = Instant::now();
         let result = self.run(&req).await;
+        if self.is_quiet(&req) {
+            return result;
+        }
         let (outcome, code) = match &result.error {
             None => (ActivityResult::Ok, None),
             Some(e) if matches!(e.code, ErrorCode::NeedsApproval | ErrorCode::NotPermitted) => {
@@ -62,6 +65,14 @@ impl Node {
             tracing::error!(error = %e, "failed to write activity log");
         }
         result
+    }
+
+    /// Quiet actions (safe, read-only, polled) stay out of the activity log.
+    fn is_quiet(&self, req: &ActionInvoke) -> bool {
+        self.supervisor
+            .get(&req.module)
+            .and_then(|slot| slot.manifest.action(&req.action).map(|a| a.spec.quiet))
+            .unwrap_or(false)
     }
 
     async fn run(&self, req: &ActionInvoke) -> ActionResult {

@@ -29,6 +29,13 @@ timeout_s = 1
 params.seconds = { type = "float", min = 0, max = 30 }
 
 [[actions]]
+id = "greet.count"
+label = "Count greetings"
+description = "Reads the counter. Quiet: polled reads stay out of the activity log."
+ai = "safe"
+quiet = true
+
+[[actions]]
 id = "debug.crash"
 label = "Crash the module"
 description = "Exits the process, for testing supervision."

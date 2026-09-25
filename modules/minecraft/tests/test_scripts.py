@@ -178,7 +178,7 @@ async def test_status_of_a_running_server(env):
     assert s["memory_mb"] == 1024
     assert s["services"] == {"playit": "active", "mc-notify": "active"}
     assert s["uptime_s"] is not None
-    assert server.status()["keepalive"] is None  # direct transport never needs one
+    assert "keepalive" not in server.status()  # direct transport never needs one
 
 
 async def test_stop_and_start(env):

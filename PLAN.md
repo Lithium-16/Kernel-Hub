@@ -269,6 +269,7 @@ The UI maps each code to one line of copy plus a suggested next step.
 | `enabled_when` | expression over status. When false, the button is disabled, the tool is hidden and the reason is shown |
 | `long_running` | enables `action.progress` and a cancel button |
 | `timeout_s` | default 60 |
+| `quiet` | `true` keeps a read-only, frequently polled action (like `console.tail`) out of the activity log. Only allowed on `safe` actions, so anything that needs a confirm is always logged |
 
 Expressions use a tiny, side-effect-free language (`cel-interpreter` crate: comparisons,
 `&&`, `||`, and field access on status only).
@@ -828,7 +829,12 @@ modules. None for UI code, where behavior tests matter more.
 ### Phase 0: test run (1–2 weeks)
 
 - [x] Repo scaffold per §2 (Cargo + pnpm workspaces, Biome, uv), CI on Windows and Linux runners
-- [ ] Tauri window with the design tokens, sidebar, and a palette window on Alt+Space
+- [x] Tauri window with the design tokens, sidebar, and a palette window on Alt+Space
+  (`apps/desktop`). Module screens are generated from the catalog: action buttons (inputs go in
+  a More menu, anything above `safe` needs a second click), status tiles, lists and tables, and
+  a live console for modules with `console.tail` + `server.command`. Activity and Settings
+  screens. The installer is a CI artifact. Node address and token live in local storage until
+  pairing
 - [~] `kerneld` skeleton: config, logs, WebSocket listener with token auth and a LAN/tailnet
   address filter, module supervisor, activity log in SQLite. **Still to do:** tray, TLS,
   SPAKE2 pairing between two machines over Tailscale

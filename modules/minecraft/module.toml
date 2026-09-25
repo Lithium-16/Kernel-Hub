@@ -76,6 +76,8 @@ label = "Show console"
 icon = "scroll-text"
 description = "Returns the last lines of the server log."
 ai = "safe"
+# The desktop console polls this every few seconds; keep it out of the activity log.
+quiet = true
 params.lines = { type = "int", default = 50, min = 1, max = 500 }
 
 [[actions]]

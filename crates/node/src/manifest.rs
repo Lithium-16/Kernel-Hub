@@ -58,6 +58,8 @@ struct RawAction {
     params: BTreeMap<String, ParamSpec>,
     #[serde(default)]
     timeout_s: Option<f64>,
+    #[serde(default)]
+    quiet: bool,
 }
 
 fn default_ai() -> AiTier {
@@ -139,6 +141,11 @@ fn validate(raw: RawManifest, dir: PathBuf) -> Result<Manifest, ManifestError> {
                 serde_json::to_value(p).expect("param spec serializes"),
             );
         }
+        if a.quiet && a.ai != AiTier::Safe {
+            return Err(invalid(format!(
+                "{at}: only safe actions can be quiet (everything else is always logged)"
+            )));
+        }
         let timeout_s = a.timeout_s.unwrap_or(60.0);
         if !(timeout_s > 0.0 && timeout_s <= 3600.0) {
             return Err(invalid(format!(
@@ -153,6 +160,7 @@ fn validate(raw: RawManifest, dir: PathBuf) -> Result<Manifest, ManifestError> {
                 description: a.description,
                 ai: a.ai,
                 params,
+                quiet: a.quiet,
             },
             timeout: Duration::from_secs_f64(timeout_s),
         });
@@ -208,7 +216,13 @@ mod tests {
         let ids: Vec<_> = m.actions.iter().map(|a| a.spec.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["greet.say", "counter.reset", "slow.wait", "debug.crash"]
+            [
+                "greet.say",
+                "counter.reset",
+                "slow.wait",
+                "greet.count",
+                "debug.crash"
+            ]
         );
         assert_eq!(m.action("greet.say").unwrap().tool_name(), "greet__say");
         assert_eq!(
@@ -216,6 +230,8 @@ mod tests {
             Duration::from_secs(1)
         );
         assert_eq!(m.action("debug.crash").unwrap().spec.ai, AiTier::Never);
+        assert!(m.action("greet.count").unwrap().spec.quiet);
+        assert!(!m.action("greet.say").unwrap().spec.quiet);
         assert_eq!(
             m.action("greet.say").unwrap().spec.params["name"]["default"],
             "world"
@@ -266,6 +282,10 @@ mod tests {
             (
                 &format!("{HEAD}[[actions]]\nid='a.b'\nlabel='x'\ntimeout_s=0\n"),
                 "timeout_s",
+            ),
+            (
+                &format!("{HEAD}[[actions]]\nid='a.b'\nlabel='x'\nai='confirm'\nquiet=true\n"),
+                "only safe actions can be quiet",
             ),
         ];
         for (text, needle) in cases {

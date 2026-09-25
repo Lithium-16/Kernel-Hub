@@ -27,6 +27,11 @@ def reset(ctx: ActionContext) -> dict:
     return {"greetings": 0}
 
 
+@mod.action("greet.count")
+def count(ctx: ActionContext) -> dict:
+    return {"greetings": state["greetings"]}
+
+
 @mod.action("slow.wait")
 async def wait(ctx: ActionContext, seconds: float) -> dict:
     await asyncio.sleep(seconds)
