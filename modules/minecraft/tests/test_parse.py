@@ -19,6 +19,9 @@ SETTINGS = {
     "ssh_host": "pluto",
     "server_dir": "/srv/minecraft",
     "service": "minecraft",
+    "screen_dir": "/run/screen-mc",
+    "screen_user": "minecraft",
+    "screen_session": "mc",
     "extra_services": ["playit", "mc-notify"],
     "backup_dir": "/srv/minecraft-backups",
     "keep_backups": 1,
@@ -102,6 +105,8 @@ def test_transports():
         {"server_dir": "srv/minecraft"},
         {"keep_backups": 0},
         {"extra_services": ["ok", "bad name"]},
+        {"screen_dir": "run/screen-mc"},
+        {"screen_session": "mc -X quit"},
     ],
 )
 def test_rejects_bad_settings(change):

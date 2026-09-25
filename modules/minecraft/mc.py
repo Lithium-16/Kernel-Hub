@@ -4,8 +4,9 @@ Every operation is a small bash script from `scripts/`, piped to `bash -s` on th
 side over stdin. Nothing goes through cmd.exe quoting, and values are passed as
 shell-quoted variables at the top of the script.
 
-The server side provides `systemctl`, `mc-cmd` (send a console command), `mc-ping` (status
-ping as JSON) and `logs/latest.log`.
+The server runs under systemd inside a detached `screen` session. Console commands are pasted
+into that session (see `console_send` in scripts/lib.sh for why not `mc-cmd`), their output is
+read back from `logs/latest.log`, and status comes from a server list ping on localhost.
 """
 
 from __future__ import annotations
@@ -44,10 +45,10 @@ UNIT_STATES = {
 def check_settings(s: dict[str, Any]) -> None:
     if s["transport"] not in TRANSPORTS:
         raise ValueError(f"transport must be one of {', '.join(TRANSPORTS)}")
-    for key in ("distro", "ssh_host", "service"):
+    for key in ("distro", "ssh_host", "service", "screen_user", "screen_session"):
         if not SAFE_WORD.match(s[key]):
             raise ValueError(f"{key} has characters that are not allowed: {s[key]!r}")
-    for key in ("server_dir", "backup_dir"):
+    for key in ("server_dir", "backup_dir", "screen_dir"):
         if not s[key].startswith("/"):
             raise ValueError(f"{key} must be an absolute Linux path")
     if s["keep_backups"] < 1:
@@ -227,6 +228,9 @@ class Server:
             "BACKUP_DIR": settings["backup_dir"],
             "SERVICES": " ".join(settings["extra_services"]),
             "KEEP": settings["keep_backups"],
+            "SCREEN_DIR": settings["screen_dir"],
+            "SCREEN_USER": settings["screen_user"],
+            "SCREEN_SESSION": settings["screen_session"],
         }
 
     # -- plumbing -------------------------------------------------------------------------
@@ -234,7 +238,12 @@ class Server:
     def script(self, name: str, **variables: Any) -> str:
         lines = ["set -euo pipefail"]
         lines += [f"{k}={shlex.quote(str(v))}" for k, v in {**self._vars, **variables}.items()]
+        # The script arrives on bash's stdin. Wrapping it in { } makes bash read all of it
+        # before running anything, so detaching stdin can't let a command eat the rest.
+        lines += ["{", "exec </dev/null"]
+        lines.append((SCRIPTS / "lib.sh").read_text(encoding="utf-8"))
         lines.append((SCRIPTS / f"{name}.sh").read_text(encoding="utf-8"))
+        lines.append("}")
         return "\n".join(lines) + "\n"
 
     async def run(self, name: str, timeout: float = 30, **variables: Any) -> str:
@@ -353,10 +362,7 @@ class Server:
     async def command(self, command: str, wait_s: float = 1.0) -> dict[str, Any]:
         command = one_line(command, "the command", 256).lstrip("/")
         out = await self.run("command", timeout=30, CMD=command, WAIT_S=wait_s)
-        _, _, rest = out.partition("--out--\n")
-        direct, _, logged = rest.partition("--log--\n")
-        lines = [line for line in (direct + logged).splitlines() if line.strip()]
-        return {"command": command, "output": lines}
+        return {"command": command, "output": [line for line in out.splitlines() if line.strip()]}
 
     async def say(self, message: str) -> dict[str, Any]:
         return await self.command(f"say {one_line(message, 'the message', 200)}")

@@ -1,11 +1,17 @@
-"""Runs the real bash scripts against a fake server folder and fake systemctl/mc-cmd/mc-ping."""
+"""Runs the real bash scripts against a fake server: a fake folder, fake systemctl, screen
+and runuser, and a small TCP server that answers the Minecraft status ping."""
 
 import gzip
 import json
 import os
 import shutil
+import socket
+import socketserver
+import struct
+import subprocess
 import sys
 import textwrap
+import threading
 import time
 from pathlib import Path
 
@@ -18,8 +24,14 @@ pytestmark = pytest.mark.skipif(
     sys.platform == "win32" or shutil.which("bash") is None, reason="needs a Linux shell (GNU coreutils)"
 )
 
+STATUS = {
+    "version": {"name": "NeoForge 1.21.1", "protocol": 767},
+    "players": {"online": 1, "max": 20, "sample": [{"name": "Steve", "id": "0"}]},
+    "description": {"text": "Kernel"},
+}
+
 FAKES = {
-    # State lives in $FAKE/state. `systemctl stop` also stops answering pings.
+    # The unit's state lives in $FAKE/state.
     "systemctl": r"""
         case "$1" in
           is-active)
@@ -36,18 +48,69 @@ FAKES = {
           stop) echo inactive > "$FAKE/state" ;;
         esac
     """,
-    "mc-cmd": r"""
-        echo "[12:00:00] [Server thread/INFO] [minecraft/DedicatedServer]: ran: $1" >> "$FAKE_LOG"
-        echo "$1" >> "$FAKE/commands"
-        if [ "$1" = "save-all flush" ] && [ ! -e "$FAKE/no-save" ]; then
-          echo "[12:00:00] [Server thread/INFO] [minecraft/MinecraftServer]: Saved the game" >> "$FAKE_LOG"
-        fi
+    "runuser": r"""
+        [ "$1" = "-u" ] && { echo "$2" >> "$FAKE/runuser"; shift 2; }
+        [ "$1" = "--" ] && shift
+        exec "$@"
     """,
-    "mc-ping": r"""
-        [ -e "$FAKE/no-ping" ] && exit 1
-        echo '{"version":{"name":"NeoForge 1.21.1"},"players":{"online":1,"max":20,"sample":[{"name":"Steve"}]},"description":"Kernel"}'
+    # readbuf copies the file; paste "types" it into the console, one command per line.
+    "screen": r"""
+        echo "SCREENDIR=$SCREENDIR $*" >> "$FAKE/screen-calls"
+        while [ $# -gt 0 ] && [ "$1" != "-X" ]; do shift; done
+        shift
+        case "$1" in
+          readbuf) cp "$2" "$FAKE/buffer" ;;
+          paste)
+            line=$(tr -d '\r' < "$FAKE/buffer")
+            printf '[12:00:00] [Server thread/INFO] [minecraft/DedicatedServer]: ran: %s\n' "$line" >> "$FAKE_LOG"
+            printf '%s
+' "$line" >> "$FAKE/commands"
+            if [ "$line" = "save-all flush" ] && [ ! -e "$FAKE/no-save" ]; then
+              echo "[12:00:00] [Server thread/INFO] [minecraft/MinecraftServer]: Saved the game" >> "$FAKE_LOG"
+            fi ;;
+        esac
     """,
 }
+
+
+def read_varint(f) -> int:
+    n = shift = 0
+    while True:
+        b = f.read(1)
+        if not b:
+            raise EOFError
+        n |= (b[0] & 0x7F) << shift
+        shift += 7
+        if not b[0] & 0x80:
+            return n
+
+
+def varint(n: int) -> bytes:
+    out = b""
+    while True:
+        b, n = n & 0x7F, n >> 7
+        out += bytes([b | (0x80 if n else 0)])
+        if not n:
+            return out
+
+
+def ping_server(fake: Path) -> socketserver.TCPServer:
+    """Answers the status ping like a Minecraft server, unless $FAKE/no-ping exists."""
+
+    class Handler(socketserver.StreamRequestHandler):
+        def handle(self):
+            if (fake / "no-ping").exists():
+                return
+            for _ in range(2):  # handshake, then status request
+                self.rfile.read(read_varint(self.rfile))
+            body = json.dumps(STATUS).encode()
+            data = varint(0) + varint(len(body)) + body
+            self.wfile.write(varint(len(data)) + data)
+
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
 
 
 @pytest.fixture
@@ -60,6 +123,7 @@ def env(tmp_path):
         path.write_text("#!/usr/bin/env bash\n" + textwrap.dedent(body))
         path.chmod(0o755)
     (fake / "state").write_text("active\n")
+    pinger = ping_server(fake)
 
     mc = tmp_path / "srv" / "minecraft"
     (mc / "world").mkdir(parents=True)
@@ -67,7 +131,7 @@ def env(tmp_path):
     (mc / "mods").mkdir()
     (mc / "world" / "level.dat").write_bytes(gzip.compress(b"\x0a\x00\x00fake nbt"))
     (mc / "world" / "region.mca").write_bytes(os.urandom(4096))
-    (mc / "server.properties").write_text("level-name=world\nserver-port=25565\n")
+    (mc / "server.properties").write_text(f"level-name=world\nserver-port={pinger.server_address[1]}\n")
     (mc / "logs" / "latest.log").write_text("[11:59:59] [main/INFO]: Done (42.0s)!\n")
     (mc / "whitelist.json").write_text(json.dumps([{"uuid": "1", "name": "steve"}, {"uuid": "2", "name": "Alex"}]))
     for jar in ("create-6.0.jar", "terralith-2.5.jar"):
@@ -87,6 +151,9 @@ def env(tmp_path):
         "ssh_host": "pluto",
         "server_dir": str(mc),
         "service": "minecraft",
+        "screen_dir": "/run/screen-mc",
+        "screen_user": "minecraft",
+        "screen_session": "mc",
         "extra_services": ["playit", "mc-notify"],
         "backup_dir": str(backups),
         "keep_backups": 1,
@@ -96,7 +163,9 @@ def env(tmp_path):
     }
     server = Server(settings, shell=Shell(["bash", "-s"], env=shell_env))
     server.save_timeout_s = 2
-    return server, fake, mc, backups
+    yield server, fake, mc, backups
+    pinger.shutdown()
+    pinger.server_close()
 
 
 async def test_status_of_a_running_server(env):
@@ -131,12 +200,17 @@ async def test_command_returns_new_log_lines(env):
     assert r["output"] == ["[12:00:00] [Server thread/INFO] [minecraft/DedicatedServer]: ran: list"]
     await server.say("hi there")
     assert (fake / "commands").read_text().splitlines() == ["list", "say hi there"]
+    # Pasted into the server's own screen session, as the server's user.
+    assert set((fake / "runuser").read_text().split()) == {"minecraft"}
+    calls = (fake / "screen-calls").read_text().splitlines()
+    assert all(c.startswith("SCREENDIR=/run/screen-mc -S mc -p 0 -X ") for c in calls)
 
 
 async def test_values_cannot_escape_the_script(env):
     server, fake, *_ = env
-    await server.command("say $(touch pwned) `id` '; echo x", wait_s=0)
-    assert (fake / "commands").read_text().strip() == "say $(touch pwned) `id` '; echo x"
+    text = "say $(touch pwned) `id` '; echo x ^M \\015 $HOME"
+    await server.command(text, wait_s=0)
+    assert (fake / "commands").read_text().splitlines() == [text]
     assert not Path("pwned").exists()
 
 

@@ -138,7 +138,7 @@ only **after** the new one is written and verified (the zip opens and `level.dat
 there's never a moment with zero good backups.
 
 The Minecraft module runs on Pluto and drives the server inside **WSL Ubuntu** by piping
-small bash scripts to `wsl.exe ... bash -s` (systemd, `mc-cmd`, `mc-ping`). It also holds a
+small bash scripts to `wsl.exe ... bash -s` (systemd, the server's screen session, a status ping). It also holds a
 WSL session open, because WSL shuts down (and kills the server) when nothing is attached.
 
 ## 5. Assistant

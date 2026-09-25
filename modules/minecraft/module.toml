@@ -16,6 +16,10 @@ distro = "Ubuntu"
 ssh_host = "pluto"
 server_dir = "/srv/minecraft"
 service = "minecraft"
+# The detached screen session systemd runs the server in (see the minecraft unit).
+screen_dir = "/run/screen-mc"
+screen_user = "minecraft"
+screen_session = "mc"
 extra_services = ["playit", "mc-notify"]
 backup_dir = "/srv/minecraft-backups"
 keep_backups = 1

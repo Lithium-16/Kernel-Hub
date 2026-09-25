@@ -16,5 +16,5 @@ find "$BACKUP_DIR" -maxdepth 1 -name '*.tar.gz' -printf 'backup=%T@ %s %f\n' 2>/
 
 if [ "$(svc "$MC_SERVICE")" = "active" ]; then
   echo "--ping--"
-  timeout 5 mc-ping 2>&1 || echo "--ping-failed--"
+  server_ping 2>/dev/null || echo "--ping-failed--"
 fi

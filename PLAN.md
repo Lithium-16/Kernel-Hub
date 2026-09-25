@@ -320,7 +320,7 @@ The SDK handles:
 | `toolbar` | actions (ordered) | all |
 | `tiles` | status fields (+ optional meter) | Minecraft, PC monitor |
 | `metrics` | per-device groups of meters | PC monitor |
-| `console:<source>` | log/stream + command action | Minecraft (`mc-cmd` + log) |
+| `console:<source>` | log/stream + command action | Minecraft (screen paste + log) |
 | `table:<field>` | array status field, with row actions | players, backups |
 | `list:<field>` | array status field | backups, alerts |
 | `form:<action>` | action params | "generate image", settings |
@@ -620,9 +620,9 @@ to `*.db.bak` before each migration.
 ### 10.1 Minecraft (`modules/minecraft`, runs on Pluto)
 
 **The real setup** (settled, see D16): NeoForge 21.1.251 / MC 1.21.1 with about 30 mods in
-`/srv/minecraft`, inside **WSL Ubuntu on Pluto**, run by systemd as the `minecraft` user.
-Helpers on the Linux side: `mc-cmd "<command>"` (console), `mc-ping` (status ping as JSON),
-`mc-console` (attaches to the screen session). Other units: `playit` (the playit.gg tunnel that
+`/srv/minecraft`, inside **WSL Ubuntu on Pluto**, run by systemd as the `minecraft` user
+inside a detached `screen` session (`screen -DmS mc`, `SCREENDIR=/run/screen-mc`). My own helpers
+(`mc-cmd`, `mc-ping`, `mc-console`) stay for manual use; the module doesn't call them (below). Other units: `playit` (the playit.gg tunnel that
 is the only public way in, so no port forward and no exposed home IP) and `mc-notify` (Discord).
 The old Forge 1.20.1 install stays in `/srv/minecraft-1.20.1` as a backup.
 
@@ -655,7 +655,7 @@ asking for it writes to the console every poll.
 | `server.start` | safe | `systemctl start`, then waits until pings answer (`start_timeout_s`) |
 | `server.stop` | confirm | optional `delay_min` with a chat warning each minute, then `systemctl stop` |
 | `server.restart` | confirm | `systemctl restart`, then waits for pings |
-| `server.command` | confirm | one console line through `mc-cmd`; returns what the server logged after it |
+| `server.command` | confirm | one console line, pasted into the screen session; returns what the server logged after it |
 | `server.say` | safe | chat broadcast |
 | `console.tail` | safe | last N lines of `logs/latest.log` |
 | `player.kick`, `player.op`, `player.deop` | confirm | names checked against `[A-Za-z0-9_]{3,16}` |
@@ -669,8 +669,16 @@ Start, stop, restart and backup never overlap (the second one gets `busy`). Stil
 `player.joined`, `backup.failed`, ...) and the weekly backup automation (phase 3; until then run
 it by hand or from a timer).
 
-**Testing:** `tests/test_scripts.py` runs the real scripts against a fake server folder with fake
-`systemctl`, `mc-cmd` and `mc-ping`. `probe.sh` is a read-only check of the real server's
+**Console input:** the module pastes text into the screen session with `readbuf` + `paste`,
+never `screen -X stuff` (which `mc-cmd` uses). `stuff` interprets `^M`, `\015` and `$VARS` in its
+argument, so `say hi^Mop someone` would run **two** commands, and `server.say` is `safe` for the
+assistant. Checked against real screen 4.9 (`tests/test_real_screen.py`). **Status** comes from
+the module's own server list ping on localhost (a few lines of Python in `scripts/lib.sh`), so it
+doesn't depend on `mc-ping`'s output format. Each script is wrapped in `{ }` with stdin detached,
+because it arrives on bash's stdin.
+
+**Testing:** `tests/test_scripts.py` runs the real scripts against a fake server folder, fake
+`systemctl`, `screen` and `runuser`, and a TCP server that answers the status ping. `probe.sh` is a read-only check of the real server's
 assumptions. From PowerShell, in the repo root:
 `cmd /c 'ssh pluto "wsl -d Ubuntu -u root -- bash -s" < modules\minecraft\probe.sh'`
 (PowerShell has no `<`, and piping with `Get-Content` can add CRLFs that break bash).
@@ -785,7 +793,7 @@ Kernel's own secrets live in Credential Manager.
 | Unit | Rust crates, SDKs, modules (Minecraft scripts against fakes, backup logic, path checks, expression evaluation) | `cargo test`, `vitest`, `pytest` |
 | Contract | zod ⇄ Rust ⇄ pydantic round-trip of every message type, using golden JSON fixtures | CI job |
 | Module harness | `kernel-sdk test` runs a module against a fake node, asserts manifest ↔ handlers, and runs recorded scenarios | SDK |
-| Minecraft | the real bash scripts against a fake server folder with fake `systemctl`, `mc-cmd` and `mc-ping`, covering status, start, stop, commands and backup paths (`modules/minecraft/tests`) | pytest |
+| Minecraft | the real bash scripts against a fake server folder with fake `systemctl`/`screen`/`runuser` and a fake ping server, covering status, start, stop, commands and backup paths (`modules/minecraft/tests`) | pytest |
 | Integration | A real node plus fake modules plus a test desktop client: pairing, approvals, automations placement, offline/reconnect | Rust integration tests |
 | UI | component tests plus key flows (approve in chat, Minecraft start/stop, sleep confirm) against `tools/fake-node` | Playwright (web build of the UI) |
 | Assistant | recorded-response tests for tool selection and approval behavior; a small eval set of 30 requests ("start the server", "is Pluto hot?") with expected tool calls | vitest + recorded responses |
@@ -947,4 +955,4 @@ Resolved: Minecraft runs in WSL Ubuntu on Pluto under systemd (D16) · Pluto run
 | D13 | Pluto stays Windows and runs 24/7 | Roblox AFK needs Windows. Being on 24/7 is exactly what the home node needs |
 | D14 | STT on the main PC's 1080 Ti, TTS (Kokoro) on Pluto's CPU | lowest voice latency, and keeps Pluto's GPU free for Forge |
 | D15 | Weekly Minecraft backup, keep 1, verify before deleting the old one | my choice. Verification removes the "zero good backups" window |
-| D16 | Minecraft module drives WSL on Pluto through `wsl.exe` + bash scripts; no VM node, no RCON, no VM power module | that's how the server already runs (systemd, `mc-cmd`, `mc-ping`, playit.gg). One fewer node and secret |
+| D16 | Minecraft module drives WSL on Pluto through `wsl.exe` + bash scripts; no VM node, no RCON, no VM power module | that's how the server already runs (systemd + screen, playit.gg). One fewer node and secret |

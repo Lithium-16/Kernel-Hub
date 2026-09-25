@@ -17,10 +17,10 @@ running=0
 if systemctl is-active --quiet "$MC_SERVICE"; then running=1; fi
 if [ "$running" = 1 ]; then
   # Stop autosaves and flush, then wait until the server says the save is done.
-  trap 'mc-cmd "save-on" >/dev/null 2>&1 || true' EXIT
+  trap 'console_send "save-on" >/dev/null 2>&1 || true' EXIT
   before=$(size)
-  mc-cmd "save-off" >/dev/null
-  mc-cmd "save-all flush" >/dev/null
+  console_send "save-off"
+  console_send "save-all flush"
   saved=0
   for _ in $(seq 1 "$SAVE_TIMEOUT_S"); do
     # Not `tail | grep -q`: under pipefail, grep exiting early would fail the pipeline.
@@ -36,7 +36,7 @@ rm -f -- "$tmp"
 tar -C "$MC_DIR" -czf "$tmp" -- "$level" || { rm -f -- "$tmp"; fail "tar failed"; }
 
 if [ "$running" = 1 ]; then
-  mc-cmd "save-on" >/dev/null || true
+  console_send "save-on" || true
   trap - EXIT
 fi
 
