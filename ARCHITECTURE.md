@@ -37,8 +37,7 @@ PC monitor, Automations, Palette, Phone, Settings).
 | Node | Hardware | Role |
 |---|---|---|
 | **Main PC** | Windows, GTX 1080 Ti | Desktop app (UI, palette, tray, mic/wake word), **speech-to-text** (faster-whisper on its own GPU), local modules (PC monitor, files) |
-| **Pluto** | Windows, GTX 1080 Ti (11 GB), 64 GB RAM, **on 24/7** | **Home node**: assistant runtime, cross-node automations, activity log, phone web app, library and storage, AI media (Forge, TTS). Also my Roblox AFK machine, which stays on Windows because Roblox doesn't run on Linux |
-| **mc-vm** | VM (hypervisor TBD) | Minecraft (Forge) only, isolated. Runs a minimal node with just the Minecraft module |
+| **Pluto** | Windows, GTX 1080 Ti (11 GB), 64 GB RAM, **on 24/7** | **Home node**: assistant runtime, cross-node automations, activity log, phone web app, library and storage, AI media (Forge, TTS). Also my Roblox AFK machine, which stays on Windows because Roblox doesn't run on Linux. The **Minecraft server** runs in WSL Ubuntu here (systemd, playit.gg tunnel) |
 
 Pluto is the **home node** because it's meant to stay on. The phone app and AI
 automations need a machine that's awake, and the main PC is often off.
@@ -46,16 +45,16 @@ automations need a machine that's awake, and the main PC is often off.
 ## 3. Big picture
 
 ```
- Main PC                                   Pluto (home node)                      mc-vm
+ Main PC                                   Pluto (home node)
 ┌──────────────────────────┐   Tailscale  ┌──────────────────────────────┐       ┌────────────────┐
-│ Desktop app (Tauri 2)     │◄────────────►│ Kernel services                  │◄─────►│ Node (minimal)  │
-│  React UI · palette · tray│   WSS + MCP  │  assistant runtime (Agent SDK)│  WSS  │  minecraft      │
-│  voice capture/wake word  │              │  automation engine            │  +MCP │   module        │
-│ Node (local modules)      │              │  activity log · API proxy     │       └────────────────┘
+│ Desktop app (Tauri 2)     │◄────────────►│ Kernel services                  │
+│  React UI · palette · tray│   WSS + MCP  │  assistant runtime (Agent SDK)│
+│  voice capture/wake word  │              │  automation engine            │
+│ Node (local modules)      │              │  activity log · API proxy     │
 │  pc-monitor · files       │              │  phone web app                │
 └──────────────────────────┘              │ Node (modules)                │
                                            │  ai-media · storage ·          │
-                                           │  pc-monitor · vm-power         │
+                                           │  pc-monitor · minecraft ──► WSL│
                                            └──────────────────────────────┘
 ```
 
@@ -125,8 +124,7 @@ iframe.
 
 | Module | Node | Actions (buttons) | Status / views | Events |
 |---|---|---|---|---|
-| **Minecraft** (Forge) | mc-vm | start, stop (with delay), restart, backup now, say, kick, op, whitelist add/remove, restore backup | state, players, TPS, memory, uptime, RCON console, players table, backups list, mods count | started, stopped, crashed, player joined/left, backup done |
-| **VM power** | Pluto | start VM, stop VM, restart VM | VM state, CPU, RAM | VM stopped unexpectedly |
+| **Minecraft** (NeoForge) | Pluto (drives WSL) | start, stop (with delay), restart, backup now, say, kick, op, whitelist add/remove, restore backup | state, players, memory, uptime, console, players table, backups list, mods count | started, stopped, crashed, player joined/left, backup done |
 | **PC monitor** | every node | sleep, restart, shut down (all *confirm*), wake Pluto (Wake-on-LAN, from the main PC) | CPU, GPU, temperatures, RAM, disks | threshold crossed |
 | **AI media** | Pluto | generate / edit / upscale image (Forge `--api`), speak (TTS), transcribe (STT) | GPU job queue, models and LoRAs, library gallery | job done |
 | **Files / storage** | Pluto (+ main PC) | list, read, write, move between PCs, back up folder | allowed folders, usage | backup done / failed |
@@ -139,9 +137,9 @@ gameplay or sends input to the game.
 only **after** the new one is written and verified (the zip opens and `level.dat` reads), so
 there's never a moment with zero good backups.
 
-The Minecraft module talks to the server over **RCON bound to localhost inside the
-VM** (setup turns it on if needed). The VM keeps its isolation: its node exposes only
-the Minecraft module, and has no access to Pluto's files or GPU.
+The Minecraft module runs on Pluto and drives the server inside **WSL Ubuntu** by piping
+small bash scripts to `wsl.exe ... bash -s` (systemd, `mc-cmd`, `mc-ping`). It also holds a
+WSL session open, because WSL shuts down (and kills the server) when nothing is attached.
 
 ## 5. Assistant
 
@@ -223,7 +221,7 @@ Starter automations:
 | UI state, window layout, local cache (thumbnails, recent files) | SQLite in `%APPDATA%\Kernel` on the main PC |
 | Library files (images, audio), world backups | Pluto storage, e.g. `D:\Kernel\Library`, `D:\Kernel\Backups` |
 | Claude session transcripts | The Agent SDK's own store on the home node |
-| Anthropic key, node pairing tokens, module secrets (RCON password) | Windows Credential Manager on the node that uses them |
+| Anthropic key, node pairing tokens, module secrets | Windows Credential Manager on the node that uses them |
 
 **Backups:** one disk isn't a backup. There's an optional nightly copy of the library,
 world backups and the home node database to a second drive or the main PC. It's off by
@@ -281,7 +279,6 @@ packages/sdk-ts/       TypeScript module SDK
 sdk/python/            Python module SDK
 modules/minecraft/     first modules
 modules/pc-monitor/
-modules/vm-power/
 modules/roblox/
 modules/ai-media/
 modules/files/
@@ -295,7 +292,7 @@ Rough estimates for one person working focused.
 | Phase | Deliverable | Rough time |
 |---|---|---|
 | **0 · Test run** | Tauri shell; node daemon + pairing over Tailscale; module SDK "hello world"; **test that the Agent SDK runs from bundled Node on Windows** | 1–2 wk |
-| **1 · Buttons** | **Minecraft**, **VM power**, **PC monitor** and **Roblox** modules with full UI: tiles, console, tables, buttons, palette commands. Activity log. **Useful with no AI.** | 3–4 wk |
+| **1 · Buttons** | **Minecraft**, **PC monitor** and **Roblox** modules with full UI: tiles, console, tables, buttons, palette commands. Activity log. **Useful with no AI.** | 3–4 wk |
 | **2 · Assistant** | Assistant on the home node, module tools, permission tiers, approval prompts, API proxy + cost meter | 3 wk |
 | **3 · Automations + phone** | Automation engine on nodes, starter automations, phone web app | 3 wk |
 | **4 · AI media + storage** | Forge/TTS/STT module, library on Pluto, files module, backups | 3–4 wk |
@@ -320,8 +317,7 @@ Rough estimates for one person working focused.
 
 ## 15. Open questions
 
-- The Minecraft VM: which hypervisor, which guest OS, how the server is started today, and
-  whether RCON is on. (Waiting on details from an earlier chat.)
+- None blocking. (Minecraft: settled, it runs in WSL Ubuntu on Pluto.)
 
 ### Resolved
 

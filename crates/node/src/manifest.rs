@@ -223,13 +223,17 @@ mod tests {
     }
 
     #[test]
-    fn discover_finds_modules() {
+    fn every_repo_module_loads() {
         let found = discover(&repo_modules());
-        assert!(
-            found
-                .iter()
-                .any(|m| m.as_ref().is_ok_and(|m| m.id == "hello"))
-        );
+        let mut ids = Vec::new();
+        for m in found {
+            match m {
+                Ok(m) => ids.push(m.id),
+                Err(e) => panic!("{e}"),
+            }
+        }
+        ids.sort();
+        assert_eq!(ids, ["hello", "minecraft"]);
     }
 
     #[test]

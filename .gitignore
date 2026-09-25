@@ -20,3 +20,5 @@ __pycache__/
 Thumbs.db
 .vscode/
 .idea/
+# Per-machine module settings
+modules/*/settings.local.toml

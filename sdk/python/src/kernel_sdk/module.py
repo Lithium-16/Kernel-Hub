@@ -17,7 +17,7 @@ from mcp import types
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 
-from .manifest import Action, Manifest, Param, load_manifest
+from .manifest import Action, Manifest, Param, load_manifest, load_settings
 
 STATUS_URI = "kernel://status"
 
@@ -108,6 +108,8 @@ class Module:
             self.manifest = load_manifest(Path(manifest) if manifest else _find_manifest())
         self._handlers: dict[str, Handler] = {}
         self._status: Handler | None = None
+        self._background: list[Callable[[], Awaitable[None]]] = []
+        self.settings = load_settings(self.manifest)
         self.log = logging.getLogger(f"kernel.{self.manifest.id}")
 
     def action(self, action_id: str) -> Callable[[Handler], Handler]:
@@ -124,6 +126,22 @@ class Module:
     def status(self, fn: Handler) -> Handler:
         self._status = fn
         return fn
+
+    def background(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
+        """Run a coroutine for the life of the module. It is restarted if it raises."""
+        self._background.append(fn)
+        return fn
+
+    async def _keep_running(self, fn: Callable[[], Awaitable[None]]) -> None:
+        while True:
+            try:
+                await fn()
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.log.exception("background task %s failed; restarting in 5s", fn.__name__)
+                await asyncio.sleep(5)
 
     def validate(self) -> None:
         missing = [a.id for a in self.manifest.actions if a.id not in self._handlers]
@@ -226,7 +244,13 @@ class Module:
     async def run_async(self) -> None:
         server = self.server()
         async with stdio_server() as (read, write):
-            await server.run(read, write, server.create_initialization_options())
+            tasks = [asyncio.create_task(self._keep_running(fn)) for fn in self._background]
+            try:
+                await server.run(read, write, server.create_initialization_options())
+            finally:
+                for t in tasks:
+                    t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
 
     def run(self) -> None:
         logging.basicConfig(

@@ -81,6 +81,7 @@ class Manifest:
     runtime: str
     entry: str
     actions: tuple[Action, ...] = field(default=())
+    settings: dict[str, Any] = field(default_factory=dict)
     root: Path | None = None
 
     def action(self, action_id: str) -> Action | None:
@@ -154,6 +155,15 @@ def parse_manifest(data: dict[str, Any], root: Path | None = None) -> Manifest:
             )
         )
 
+    settings = data.get("settings", {})
+    if not isinstance(settings, dict):
+        raise ManifestError("settings: must be a table")
+    for key, value in settings.items():
+        if not PARAM_NAME.match(key):
+            raise ManifestError(f"settings: invalid name '{key}'")
+        if not isinstance(value, (str, int, float, bool, list)):
+            raise ManifestError(f"settings.{key}: must be a string, number, bool or list")
+
     return Manifest(
         id=module_id,
         name=data["name"],
@@ -162,6 +172,7 @@ def parse_manifest(data: dict[str, Any], root: Path | None = None) -> Manifest:
         runtime=data["runtime"],
         entry=data["entry"],
         actions=tuple(actions),
+        settings=dict(settings),
         root=root,
     )
 
@@ -169,3 +180,37 @@ def parse_manifest(data: dict[str, Any], root: Path | None = None) -> Manifest:
 def load_manifest(path: Path) -> Manifest:
     with path.open("rb") as f:
         return parse_manifest(tomllib.load(f), root=path.parent)
+
+
+LOCAL_SETTINGS = "settings.local.toml"
+
+
+def _same_kind(default: Any, value: Any) -> bool:
+    if isinstance(default, bool) or isinstance(value, bool):
+        return isinstance(default, bool) and isinstance(value, bool)
+    if isinstance(default, float):
+        return isinstance(value, (int, float))
+    return type(default) is type(value)
+
+
+def load_settings(manifest: Manifest) -> dict[str, Any]:
+    """The manifest's `[settings]` defaults, overridden by `settings.local.toml` next to it.
+
+    The local file is per machine (not committed). It may only set keys the manifest
+    declares, with the same type, so a typo fails loudly instead of being ignored.
+    """
+    settings = dict(manifest.settings)
+    if manifest.root is None:
+        return settings
+    path = manifest.root / LOCAL_SETTINGS
+    if not path.is_file():
+        return settings
+    with path.open("rb") as f:
+        local = tomllib.load(f)
+    for key, value in local.items():
+        if key not in settings:
+            raise ManifestError(f"{LOCAL_SETTINGS}: unknown setting '{key}'")
+        if not _same_kind(settings[key], value):
+            raise ManifestError(f"{LOCAL_SETTINGS}: '{key}' must be {type(settings[key]).__name__}")
+        settings[key] = float(value) if isinstance(settings[key], float) else value
+    return settings

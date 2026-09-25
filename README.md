@@ -19,6 +19,7 @@ SDK and a `hello` module work. The desktop app, pairing and the assistant are ne
 | `crates/node` | `kerneld`, the node daemon: runs modules, serves the WebSocket API, keeps the activity log |
 | `sdk/python` | `kernel_sdk`, for writing modules in Python (MCP over stdio) |
 | `modules/hello` | example module used by the tests |
+| `modules/minecraft` | the Minecraft server on Pluto (WSL): start/stop, console, players, whitelist, backups |
 
 ## Development
 
@@ -33,7 +34,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 KERNEL_TEST_PYTHON=$PWD/.venv/bin/python cargo test --workspace   # Windows: .venv\Scripts\python.exe
 pnpm lint && pnpm typecheck && pnpm test
-uv run --python .venv --no-project pytest sdk/python
+uv run --python .venv --no-project pytest            # SDK and module tests
 pnpm gen:schema   # after changing the zod schemas; commit the result
 ```
 

@@ -77,10 +77,9 @@ web browsing (web access stays `confirm`), code signing, macOS/Linux.
 │  └─ sdk-ts/                  # TypeScript module SDK
 ├─ sdk/python/kernel_sdk/         # Python module SDK (published locally as a wheel)
 ├─ modules/
-│  ├─ minecraft/  vm-power/  pc-monitor/  roblox/  ai-media/  files/
+│  ├─ minecraft/  pc-monitor/  roblox/  ai-media/  files/
 ├─ tools/
 │  ├─ fake-node/               # test double for the desktop app
-│  └─ mock-rcon/               # RCON server for Minecraft module tests
 └─ .github/workflows/
 ```
 
@@ -135,9 +134,8 @@ Binary: `kerneld.exe` (Rust, tokio). One per machine. On Pluto it's built with t
 
 - Runs **per user**, not as a Windows service, because modules need the user's session
   (desktop notifications, the GPU context for Forge, hypervisor CLI tools) and a tray icon.
-- Autostart via `HKCU\...\Run`. On Pluto and mc-vm, Windows auto-login plus "never sleep"
-  are documented setup steps. For mc-vm on Linux, a systemd **user** service with lingering
-  enabled.
+- Autostart via `HKCU\...\Run`. On Pluto, Windows auto-login plus "never sleep" are documented
+  setup steps (the Minecraft module's WSL keepalive only runs while kerneld does).
 - One copy per user, enforced with a named mutex.
 
 ### Folders
@@ -322,7 +320,7 @@ The SDK handles:
 | `toolbar` | actions (ordered) | all |
 | `tiles` | status fields (+ optional meter) | Minecraft, PC monitor |
 | `metrics` | per-device groups of meters | PC monitor |
-| `console:<source>` | log/stream + command action | Minecraft (RCON) |
+| `console:<source>` | log/stream + command action | Minecraft (`mc-cmd` + log) |
 | `table:<field>` | array status field, with row actions | players, backups |
 | `list:<field>` | array status field | backups, alerts |
 | `form:<action>` | action params | "generate image", settings |
@@ -548,8 +546,8 @@ mic (WASAPI, 16 kHz mono) → Silero VAD → openWakeWord ("Hey Kernel")
 1. Welcome, and choose "This is my main PC".
 2. Pair the home node (Pluto): the code-entry screen.
 3. Enter the Anthropic API key. It's stored on the home node, never on the main PC.
-4. Pair the other nodes (mc-vm), or skip.
-5. Enable modules. Per-module setup forms appear (Minecraft asks for the server path and the RCON port).
+4. Pair the other nodes, or skip.
+5. Enable modules. Per-module setup forms appear (Minecraft shows its WSL settings with Pluto's defaults filled in).
 6. Permissions: review the defaults.
 7. Voice: mic test, wake word test, or skip.
 
@@ -619,67 +617,65 @@ to `*.db.bak` before each migration.
 
 ## 10. Module specs
 
-### 10.1 Minecraft (`modules/minecraft`, runs on mc-vm)
+### 10.1 Minecraft (`modules/minecraft`, runs on Pluto)
 
-**Settings:** `server_dir`, `start_command` (default `run.bat` or `./run.sh`),
-`rcon_port` (25575), `rcon_password` (secret), `backup_target` (a Files path on Pluto),
-`backup_schedule` (weekly, Sunday 03:00), `keep_backups` (1), `java_max_mem`.
+**The real setup** (settled, see D16): NeoForge 21.1.251 / MC 1.21.1 with about 30 mods in
+`/srv/minecraft`, inside **WSL Ubuntu on Pluto**, run by systemd as the `minecraft` user.
+Helpers on the Linux side: `mc-cmd "<command>"` (console), `mc-ping` (status ping as JSON),
+`mc-console` (attaches to the screen session). Other units: `playit` (the playit.gg tunnel that
+is the only public way in, so no port forward and no exposed home IP) and `mc-notify` (Discord).
+The old Forge 1.20.1 install stays in `/srv/minecraft-1.20.1` as a backup.
 
-**Status:**
+**How the module reaches it:** kerneld on Pluto runs the module on Windows, and the module pipes
+small bash scripts (`modules/minecraft/scripts/*.sh`) to `wsl.exe -d Ubuntu -u root -- bash -s`
+over stdin. Values go in as shell-quoted variables, never through cmd.exe quoting. There's no RCON
+and no node inside Linux. Transports `ssh` (from another PC, `ssh pluto "wsl ... bash -s"`) and
+`direct` (already on Linux, used by tests) exist too.
 
-- `state` (`stopped`/`starting`/`running`/`stopping`/`crashed`)
-- `players[]` (name, uuid, ping, joined_at)
-- `max_players`
-- `tps`
-- `memory_mb`
-- `uptime_s`
-- `version`
-- `mods_count`
-- `last_backup`
-- `backups[]`
+**WSL keepalive:** WSL shuts its VM down when no session is attached, which kills the server
+(`vmIdleTimeout` doesn't help). The module holds `wsl -d Ubuntu -u root -- sleep infinity` open for
+as long as it runs and restarts it if it ends. Status shows `keepalive`. Until kerneld runs as a
+service at boot, keep `MC-KEEPALIVE.bat` as well.
+
+**Settings** (`module.toml` defaults, per-machine `settings.local.toml`): `transport`, `distro`,
+`ssh_host`, `server_dir`, `service`, `extra_services`, `backup_dir` (`/srv/minecraft-backups`),
+`keep_backups` (1), `keep_wsl_alive`, `refresh_s`, `start_timeout_s`.
+
+**Status** (refreshed every `refresh_s` by one script run, cached between polls):
+`state` (`running`/`starting`/`stopping`/`stopped`/`crashed`/`unknown`; "running" means systemd
+says active **and** the server answers pings), `players[]` (the ping's sample), `players_online`,
+`players_max`, `version`, `motd`, `uptime_s`, `memory_mb` (the unit's cgroup), `mods_count`,
+`services` (playit, mc-notify), `backups[]`, `last_backup`, `keepalive`. TPS is left out for now:
+asking for it writes to the console every poll.
 
 **Actions:**
 
 | Action | Tier | Notes |
 |---|---|---|
-| `server.start` | safe | runs `start_command` as a child process and waits for `Done (` in the log |
-| `server.stop` | confirm when `players > 0` | optional `delay_min` with countdown messages in chat, then `stop` over RCON, then waits for exit (kills after 60s) |
-| `server.restart` | confirm when `players > 0` | stop + start |
-| `server.command` | confirm | raw console command (the console block uses this) |
+| `server.start` | safe | `systemctl start`, then waits until pings answer (`start_timeout_s`) |
+| `server.stop` | confirm | optional `delay_min` with a chat warning each minute, then `systemctl stop` |
+| `server.restart` | confirm | `systemctl restart`, then waits for pings |
+| `server.command` | confirm | one console line through `mc-cmd`; returns what the server logged after it |
 | `server.say` | safe | chat broadcast |
-| `player.kick`, `player.op`, `player.deop` | confirm | |
+| `console.tail` | safe | last N lines of `logs/latest.log` |
+| `player.kick`, `player.op`, `player.deop` | confirm | names checked against `[A-Za-z0-9_]{3,16}` |
 | `whitelist.add` / `whitelist.remove` / `whitelist.list` | confirm / confirm / safe | |
-| `world.backup` | safe | `save-off` → `save-all flush` → zip the world folders → `save-on`, then upload through the Files module to Pluto, **verify** (the zip opens and `level.dat` parses), and only then delete backups beyond `keep_backups`. A failed verify keeps the old backup and raises `backup.failed` |
-| `world.restore` | never | stop → move the current world aside → extract → start |
-| `mods.list` | safe | read the `mods/` folder and the jar metadata |
+| `world.backup` | safe | `save-off` → `save-all flush` → waits for "Saved the game" → `tar.gz` of the world → `save-on` (always, via a trap) → **verify** (the archive reads and `level.dat` is valid gzip) → only then delete backups beyond `keep_backups`. Checks free space first. A failed verify keeps the old backup |
+| `mods.list` | safe | jars in `mods/` |
+| `service.restart` | confirm | `playit` or `mc-notify` |
 
-**Events:** `server.started`, `server.stopped`, `server.crashed` (process exited
-unexpectedly, or a new file appeared in `crash-reports/`), `player.joined`, `player.left`,
-`backup.done`, `backup.failed`.
+Start, stop, restart and backup never overlap (the second one gets `busy`). Still to come:
+`world.restore` (never, for the assistant), `confirm_when players > 0`, events (`server.crashed`,
+`player.joined`, `backup.failed`, ...) and the weekly backup automation (phase 3; until then run
+it by hand or from a timer).
 
-**Getting TPS:** Forge's `/forge tps` over RCON, parsed. Falls back to "unknown".
+**Testing:** `tests/test_scripts.py` runs the real scripts against a fake server folder with fake
+`systemctl`, `mc-cmd` and `mc-ping`. `probe.sh` is a read-only check of the real server's
+assumptions: `ssh pluto "wsl -d Ubuntu -u root -- bash -s" < modules/minecraft/probe.sh`.
 
-**RCON:** a small async client (the Source RCON protocol). `enable-rcon=true`,
-`rcon.port`, `rcon.password` and `broadcast-rcon-to-ops=false` in `server.properties`. The
-module's setup offers to write these. RCON binds to localhost only, since the module runs
-inside the VM.
+### 10.2 VM power (dropped)
 
-**Open:** the VM's OS and how the server is started today (§15). The module supports
-both Windows (`run.bat`) and Linux (`run.sh`).
-
-### 10.2 VM power (`modules/vm-power`, runs on Pluto)
-
-- **Adapters, chosen by setting:**
-  - Hyper-V (PowerShell `Get-VM` / `Start-VM` / `Stop-VM`. The user must be in *Hyper-V Administrators*)
-  - VirtualBox (`VBoxManage startvm --type headless`, `controlvm acpipowerbutton`)
-  - VMware Workstation (`vmrun`)
-  - Proxmox (REST API with a token)
-- **Actions:**
-  - `vm.start` (safe)
-  - `vm.stop` (confirm, graceful ACPI shutdown, forced off after a timeout)
-  - `vm.restart` (confirm)
-- **Status:** `state`, `cpu_pct`, `mem_mb`, `uptime_s`.
-- **Events:** `vm.stopped_unexpectedly`.
+Not needed: the server runs in WSL on Pluto, and the Minecraft module keeps WSL alive itself (§10.1).
 
 ### 10.3 PC monitor (`modules/pc-monitor`, every node)
 
@@ -771,12 +767,12 @@ sends input to the game or automates gameplay.
 | Prompt injection (web pages, chat messages, player names in logs) | The assistant only has module tools · anything from the web can't trigger a `confirm` action without a human · `never` tier · status text is marked as data in prompts |
 | The assistant reading secrets | The API key only exists in the proxy · module secrets only in that module's process · the assistant process gets a scrubbed environment |
 | A buggy or rogue module | Its own process with a scrubbed environment and its own data folder · no network ports opened by modules (they reach out, nothing reaches in) · modules are local, trusted code (no marketplace) |
-| A compromised Minecraft VM | The mc-vm node only knows its own token and module. It **cannot** send actions to other nodes (the home node refuses actions from mc-vm to anything except its own module) |
+| A compromised Minecraft server (a bad mod, say) | It runs in WSL as the `minecraft` user, and the only public way in is the playit.gg tunnel. **WSL is weaker isolation than a real VM:** by default Linux can read Windows drives (`/mnt/c`) and start Windows programs. Recommended hardening in `/etc/wsl.conf`: `[automount] enabled=false` and `[interop] enabled=false` (Kernel doesn't need either; it calls *into* WSL, not out). Nothing in WSL holds a Kernel token |
 | Mistaken destructive actions | `confirm_when` also applies to humans · restore is `never` · the activity log records who did what |
 
 **Secrets inventory:** Anthropic key (home node), peer tokens (each node), device tokens
-(stored hashed on the home node), RCON password (mc-vm), Proxmox token if used (Pluto).
-All in Credential Manager (or `libsecret` on a Linux VM).
+(stored hashed on the home node), and the Discord webhook, which stays where it is (`/etc/mc-notify/webhook`, root only).
+Kernel's own secrets live in Credential Manager.
 
 ---
 
@@ -784,14 +780,14 @@ All in Credential Manager (or `libsecret` on a Linux VM).
 
 | Level | What | Tools |
 |---|---|---|
-| Unit | Rust crates, SDKs, modules (RCON client, backup logic, path checks, expression evaluation) | `cargo test`, `vitest`, `pytest` |
+| Unit | Rust crates, SDKs, modules (Minecraft scripts against fakes, backup logic, path checks, expression evaluation) | `cargo test`, `vitest`, `pytest` |
 | Contract | zod ⇄ Rust ⇄ pydantic round-trip of every message type, using golden JSON fixtures | CI job |
 | Module harness | `kernel-sdk test` runs a module against a fake node, asserts manifest ↔ handlers, and runs recorded scenarios | SDK |
-| Minecraft | `tools/mock-rcon` plus a fake server process that prints Forge log lines, covering start, stop, crash and backup paths | pytest |
+| Minecraft | the real bash scripts against a fake server folder with fake `systemctl`, `mc-cmd` and `mc-ping`, covering status, start, stop, commands and backup paths (`modules/minecraft/tests`) | pytest |
 | Integration | A real node plus fake modules plus a test desktop client: pairing, approvals, automations placement, offline/reconnect | Rust integration tests |
 | UI | component tests plus key flows (approve in chat, Minecraft start/stop, sleep confirm) against `tools/fake-node` | Playwright (web build of the UI) |
 | Assistant | recorded-response tests for tool selection and approval behavior; a small eval set of 30 requests ("start the server", "is Pluto hot?") with expected tool calls | vitest + recorded responses |
-| Manual | a release checklist on real hardware: WoL, sleep/wake, VM power, voice latency, fresh install | `docs/release-checklist.md` |
+| Manual | a release checklist on real hardware: WoL, sleep/wake, WSL keepalive, voice latency, fresh install | `docs/release-checklist.md` |
 
 Coverage targets: 80% lines for `crates/node`, the SDKs, and the `minecraft` and `files`
 modules. None for UI code, where behavior tests matter more.
@@ -839,8 +835,8 @@ command-line harness.
 
 - [ ] Protocol v1 message types from §4.3 except `chat.*`, `voice.*` and `automation.*`
 - [ ] Module manifest parser and validator, UI blocks `toolbar`, `tiles`, `metrics`, `console`, `table`, `list`, `note`
-- [ ] **Minecraft** module (§10.1), all actions except `world.restore`'s upload path. Backups go to a local folder for now
-- [ ] **VM power** module with the adapter for whatever the VM turns out to use
+- [~] **Minecraft** module (§10.1): actions, status, WSL keepalive and verified backups done and tested against fakes. **Still to do:** a run against the real server (`probe.sh` first), events, `confirm_when`
+- [x] ~~**VM power** module~~ dropped: the server is in WSL on Pluto (D16)
 - [ ] **PC monitor** module on all three nodes, including WoL and power actions with confirms
 - [ ] **Roblox** module on Pluto (§10.5): status, crash/disconnect detection, relaunch
 - [ ] Activity log screen, and a basic `approvals` flow for human `confirm_when`
@@ -922,17 +918,13 @@ Candidates, not commitments:
 | Agent SDK packaging on Windows | medium | high | Phase 0 test. Fallback: Electron, or calling the Claude API directly with our own tool loop |
 | Pluto restarting for Windows Update breaks the home node and the Roblox session | medium | medium | Pluto runs 24/7 (D13). Set active hours, pause auto-restart, and schedule update restarts for when I'm not AFK. Degraded mode on the main PC |
 | 1080 Ti support dropped by PyTorch/CUDA | medium | medium | Pinned lockfile. CPU fallback for TTS and STT |
-| Forge server specifics (VM, OS, startup) unknown | certain | low | Module supports both OSes. Settle in phase 1 |
+| WSL shuts down with no session attached, killing the server | high | high | The Minecraft module holds a session open. Keep `MC-KEEPALIVE.bat` until kerneld starts at boot |
 | Voice false triggers or latency | medium | medium | Push-to-talk first, tunable wake threshold, measured latency |
 | Scope creep | high | high | Phases gated on acceptance criteria. "After v1" list for new ideas |
 
 ### Open questions
 
-1. Minecraft VM: hypervisor, guest OS, current start method, RCON status, whether it's on
-   Pluto. Waiting on details from an earlier chat. The module supports every combination,
-   so this only blocks the **VM power** adapter choice.
-
-Resolved: Pluto runs 24/7 (D13) · TTS voice is Kokoro (D14) · backups (D15) · main PC GPU is a 1080 Ti (D14).
+Resolved: Minecraft runs in WSL Ubuntu on Pluto under systemd (D16) · Pluto runs 24/7 (D13) · TTS voice is Kokoro (D14) · backups (D15) · main PC GPU is a 1080 Ti (D14).
 
 ### Decision log
 
@@ -953,3 +945,4 @@ Resolved: Pluto runs 24/7 (D13) · TTS voice is Kokoro (D14) · backups (D15) ·
 | D13 | Pluto stays Windows and runs 24/7 | Roblox AFK needs Windows. Being on 24/7 is exactly what the home node needs |
 | D14 | STT on the main PC's 1080 Ti, TTS (Kokoro) on Pluto's CPU | lowest voice latency, and keeps Pluto's GPU free for Forge |
 | D15 | Weekly Minecraft backup, keep 1, verify before deleting the old one | my choice. Verification removes the "zero good backups" window |
+| D16 | Minecraft module drives WSL on Pluto through `wsl.exe` + bash scripts; no VM node, no RCON, no VM power module | that's how the server already runs (systemd, `mc-cmd`, `mc-ping`, playit.gg). One fewer node and secret |
