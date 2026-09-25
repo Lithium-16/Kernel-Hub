@@ -1,5 +1,8 @@
-# Read-only check of the assumptions this module makes. Run on the machine with `ssh pluto`:
-#   ssh pluto "wsl -d Ubuntu -u root -- bash -s" < modules/minecraft/probe.sh
+# Read-only check of the assumptions this module makes. Run from the repo root on a machine
+# with `ssh pluto`. PowerShell has no `<`, and piping with Get-Content can turn line endings
+# into CRLF, so hand the redirect to cmd:
+#   cmd /c 'ssh pluto "wsl -d Ubuntu -u root -- bash -s" < modules\minecraft\probe.sh'
+# (bash/cmd: ssh pluto "wsl -d Ubuntu -u root -- bash -s" < modules/minecraft/probe.sh)
 # It prints no secrets (no rcon password, no webhook).
 set -u
 echo "== tools"; for t in systemctl mc-cmd mc-ping mc-console tar gzip; do printf '%-10s %s\n' "$t" "$(command -v "$t" || echo MISSING)"; done

@@ -671,7 +671,9 @@ it by hand or from a timer).
 
 **Testing:** `tests/test_scripts.py` runs the real scripts against a fake server folder with fake
 `systemctl`, `mc-cmd` and `mc-ping`. `probe.sh` is a read-only check of the real server's
-assumptions: `ssh pluto "wsl -d Ubuntu -u root -- bash -s" < modules/minecraft/probe.sh`.
+assumptions. From PowerShell, in the repo root:
+`cmd /c 'ssh pluto "wsl -d Ubuntu -u root -- bash -s" < modules\minecraft\probe.sh'`
+(PowerShell has no `<`, and piping with `Get-Content` can add CRLFs that break bash).
 
 ### 10.2 VM power (dropped)
 
