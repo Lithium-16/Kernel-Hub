@@ -290,6 +290,9 @@
                             ],
                             "additionalProperties": false
                           }
+                        },
+                        "quiet": {
+                          "type": "boolean"
                         }
                       },
                       "required": [

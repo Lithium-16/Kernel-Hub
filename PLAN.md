@@ -269,6 +269,7 @@ The UI maps each code to one line of copy plus a suggested next step.
 | `enabled_when` | expression over status. When false, the button is disabled, the tool is hidden and the reason is shown |
 | `long_running` | enables `action.progress` and a cancel button |
 | `timeout_s` | default 60 |
+| `quiet` | `true` keeps a read-only, frequently polled action (like `console.tail`) out of the activity log. Only allowed on `safe` actions, so anything that needs a confirm is always logged |
 
 Expressions use a tiny, side-effect-free language (`cel-interpreter` crate: comparisons,
 `&&`, `||`, and field access on status only).
@@ -828,10 +829,19 @@ modules. None for UI code, where behavior tests matter more.
 ### Phase 0: test run (1–2 weeks)
 
 - [x] Repo scaffold per §2 (Cargo + pnpm workspaces, Biome, uv), CI on Windows and Linux runners
-- [ ] Tauri window with the design tokens, sidebar, and a palette window on Alt+Space
+- [x] Tauri window with the design tokens, sidebar, and a palette window on Alt+Space
+  (`apps/desktop`). Module screens are generated from the catalog: action buttons (inputs go in
+  a More menu, anything above `safe` needs a second click), status tiles, lists and tables, and
+  a live console for modules with `console.tail` + `server.command`. Activity and Settings
+  screens. The installer is a CI artifact. Node address and token live in local storage until
+  pairing
 - [~] `kerneld` skeleton: config, logs, WebSocket listener with token auth and a LAN/tailnet
-  address filter, module supervisor, activity log in SQLite. **Still to do:** tray, TLS,
-  SPAKE2 pairing between two machines over Tailscale
+  address filter, module supervisor, activity log in SQLite, single-instance lock.
+  **Still to do:** tray, TLS, SPAKE2 pairing between two machines over Tailscale
+- [x] **Node install and self-update** (D17): CI publishes `node-build-N` on every merge to main;
+  `scripts/install-node.ps1` sets up Pluto (scheduled task with a 5-minute watchdog, firewall
+  rule for LAN + Tailscale); the built-in **Node** module has Check for updates / Install update /
+  Restart node. Full cycle covered by `crates/node/tests/self_update.rs`
 - [x] Python SDK "hello" module: status fields, four actions (one per tier, plus a timeout
   case), supervised with restart and backoff, covered by `crates/node/tests/e2e.rs`
 - [ ] **Agent SDK test:** a bundled Node 22 runs `packages/assistant` on Windows, calls one module tool through the proxy, and the key isn't visible from inside the assistant process (checked by test)
@@ -956,3 +966,4 @@ Resolved: Minecraft runs in WSL Ubuntu on Pluto under systemd (D16) · Pluto run
 | D14 | STT on the main PC's 1080 Ti, TTS (Kokoro) on Pluto's CPU | lowest voice latency, and keeps Pluto's GPU free for Forge |
 | D15 | Weekly Minecraft backup, keep 1, verify before deleting the old one | my choice. Verification removes the "zero good backups" window |
 | D16 | Minecraft module drives WSL on Pluto through `wsl.exe` + bash scripts; no VM node, no RCON, no VM power module | that's how the server already runs (systemd + screen, playit.gg). One fewer node and secret |
+| D17 | Nodes update themselves from GitHub Releases: every merge to main is a release, installs are a button (or `auto_install`), a helper swaps the app folder and rolls back on failure | updating Pluto shouldn't need a trip to Pluto. SHA-256 over HTTPS from the one configured repo; whoever can publish releases there can run code on the node, same as whoever can push to main |

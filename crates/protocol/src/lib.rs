@@ -106,6 +106,9 @@ pub struct ActionSpec {
     pub description: Option<String>,
     pub ai: AiTier,
     pub params: Map<String, Value>,
+    /// Read-only and frequent: not written to the activity log. Only allowed on safe actions.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quiet: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -40,6 +40,8 @@ export const ActionSpec = z.object({
   description: z.string().optional(),
   ai: AiTier,
   params: z.record(z.string(), ParamSpec),
+  /** Read-only and frequent (like tailing a log): not written to the activity log. Safe actions only. */
+  quiet: z.boolean().optional(),
 });
 
 export const ModuleState = z.enum(['starting', 'running', 'failed', 'stopped']);

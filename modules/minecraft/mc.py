@@ -273,8 +273,9 @@ class Server:
         return self.snapshot
 
     def status(self) -> dict[str, Any]:
-        keepalive = self.keepalive_up if self.keeps_wsl_alive else None
-        return {**self.snapshot, "keepalive": keepalive}
+        if not self.keeps_wsl_alive:
+            return dict(self.snapshot)
+        return {**self.snapshot, "keepalive": self.keepalive_up}
 
     @property
     def keeps_wsl_alive(self) -> bool:

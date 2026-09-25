@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import tomllib
 from dataclasses import dataclass, field
@@ -57,6 +58,7 @@ class Action:
     description: str | None = None
     params: tuple[Param, ...] = ()
     timeout_s: float = 60.0
+    quiet: bool = False
 
     @property
     def tool_name(self) -> str:
@@ -143,6 +145,11 @@ def parse_manifest(data: dict[str, Any], root: Path | None = None) -> Manifest:
         if ai not in ("safe", "confirm", "never"):
             raise ManifestError(f"{where}: ai must be safe, confirm or never")
         params = tuple(_parse_param(n, p, f"{where}.params") for n, p in raw.get("params", {}).items())
+        quiet = raw.get("quiet", False)
+        if not isinstance(quiet, bool):
+            raise ManifestError(f"{where}: quiet must be true or false")
+        if quiet and ai != "safe":
+            raise ManifestError(f"{where}: only safe actions can be quiet (everything else is always logged)")
         actions.append(
             Action(
                 id=action_id,
@@ -152,6 +159,7 @@ def parse_manifest(data: dict[str, Any], root: Path | None = None) -> Manifest:
                 description=raw.get("description"),
                 params=params,
                 timeout_s=float(raw.get("timeout_s", 60)),
+                quiet=quiet,
             )
         )
 
@@ -193,24 +201,33 @@ def _same_kind(default: Any, value: Any) -> bool:
     return type(default) is type(value)
 
 
+def local_settings_path(manifest: Manifest) -> Path | None:
+    """kerneld passes `KERNEL_SETTINGS_FILE` (in its data folder, so updates keep it).
+    Without it, `settings.local.toml` next to the manifest is used (handy in development)."""
+    env = os.environ.get("KERNEL_SETTINGS_FILE")
+    if env and Path(env).is_file():
+        return Path(env)
+    if manifest.root is not None and (manifest.root / LOCAL_SETTINGS).is_file():
+        return manifest.root / LOCAL_SETTINGS
+    return None
+
+
 def load_settings(manifest: Manifest) -> dict[str, Any]:
-    """The manifest's `[settings]` defaults, overridden by `settings.local.toml` next to it.
+    """The manifest's `[settings]` defaults, overridden by this machine's settings file.
 
     The local file is per machine (not committed). It may only set keys the manifest
     declares, with the same type, so a typo fails loudly instead of being ignored.
     """
     settings = dict(manifest.settings)
-    if manifest.root is None:
-        return settings
-    path = manifest.root / LOCAL_SETTINGS
-    if not path.is_file():
+    path = local_settings_path(manifest)
+    if path is None:
         return settings
     with path.open("rb") as f:
         local = tomllib.load(f)
     for key, value in local.items():
         if key not in settings:
-            raise ManifestError(f"{LOCAL_SETTINGS}: unknown setting '{key}'")
+            raise ManifestError(f"{path.name}: unknown setting '{key}'")
         if not _same_kind(settings[key], value):
-            raise ManifestError(f"{LOCAL_SETTINGS}: '{key}' must be {type(settings[key]).__name__}")
+            raise ManifestError(f"{path.name}: '{key}' must be {type(settings[key]).__name__}")
         settings[key] = float(value) if isinstance(settings[key], float) else value
     return settings

@@ -8,7 +8,8 @@ that can operate all of them. Every assistant action is also a button.
 - **[PLAN.md](PLAN.md):** specs, data model, module specs, testing, and the phased build plan
 
 Status: phase 0 (test run) is in progress. The node daemon, the protocol, the Python module
-SDK and a `hello` module work. The desktop app, pairing and the assistant are next.
+SDK, the Minecraft module, the desktop app (Tauri) and node self-updates work. Setting up
+Pluto: **[docs/pluto-setup.md](docs/pluto-setup.md)**. Pairing, the tray and the assistant are next.
 
 ## What's here
 
@@ -16,10 +17,12 @@ SDK and a `hello` module work. The desktop app, pairing and the assistant are ne
 |---|---|
 | `packages/protocol` | zod schemas for the node protocol (source of truth), JSON Schema output, fixtures |
 | `crates/protocol` | Rust types for the same protocol, checked against the fixtures |
-| `crates/node` | `kerneld`, the node daemon: runs modules, serves the WebSocket API, keeps the activity log |
+| `crates/node` | `kerneld`, the node daemon: runs modules, serves the WebSocket API, keeps the activity log, updates itself |
+| `scripts/install-node.ps1` | installs a node on a Windows PC (Pluto) from the newest release |
 | `sdk/python` | `kernel_sdk`, for writing modules in Python (MCP over stdio) |
 | `modules/hello` | example module used by the tests |
 | `modules/minecraft` | the Minecraft server on Pluto (WSL): start/stop, console, players, whitelist, backups |
+| `apps/desktop` | the desktop app: Tauri 2 shell + React. Screens are built from each module's actions and status |
 
 ## Development
 
@@ -39,6 +42,18 @@ pnpm gen:schema   # after changing the zod schemas; commit the result
 ```
 
 The node end-to-end test (`crates/node/tests/e2e.rs`) only runs when `KERNEL_TEST_PYTHON` is set.
+
+### Running the desktop app
+
+```sh
+pnpm --filter @kernel/desktop dev          # in a browser at http://localhost:1420 (no window controls)
+pnpm --filter @kernel/desktop tauri dev    # the real window, with Alt+Space for the palette
+pnpm --filter @kernel/desktop tauri build  # Windows installer in apps/desktop/src-tauri/target/release/bundle/nsis
+```
+
+On first run it opens Settings: enter the node's address (`ws://pluto:47800/ws`) and its token.
+Every CI run also uploads the Windows installer as the `kernel-desktop-windows` artifact.
+Tauri on Linux needs the WebKitGTK dev packages (`libwebkit2gtk-4.1-dev` and friends).
 
 ### Running a node locally
 

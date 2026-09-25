@@ -122,6 +122,7 @@ struct RunCtx {
     python: String,
     node: String,
     logs_dir: PathBuf,
+    settings_dir: PathBuf,
 }
 
 pub struct Supervisor {
@@ -139,6 +140,7 @@ impl Supervisor {
             python: cfg.python.clone(),
             node: cfg.node.clone(),
             logs_dir: cfg.logs_dir().join("modules"),
+            settings_dir: cfg.module_settings_dir(),
         };
         let mut slots = BTreeMap::new();
         let mut handles = Vec::new();
@@ -241,12 +243,20 @@ fn command_for(m: &Manifest, ctx: &RunCtx) -> Command {
     }
     cmd.env("KERNEL_MODULE_ID", &m.id)
         .env("KERNEL_MODULE_DIR", &m.dir)
+        // Per-machine settings live in the data folder so updates don't replace them.
+        .env(
+            "KERNEL_SETTINGS_FILE",
+            ctx.settings_dir.join(format!("{}.toml", m.id)),
+        )
         .env("KERNEL_LOG_LEVEL", "INFO")
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .kill_on_drop(true);
+    // kerneld has no console in release builds; without this every module would get a window.
+    #[cfg(windows)]
+    cmd.creation_flags(crate::update::CREATE_NO_WINDOW);
     let log = std::fs::create_dir_all(&ctx.logs_dir).and_then(|_| {
         std::fs::OpenOptions::new()
             .create(true)

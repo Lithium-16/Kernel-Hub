@@ -166,7 +166,7 @@ async fn serve_client(
         match env.payload {
             Payload::CatalogGet(_) => {
                 let catalog = Catalog {
-                    modules: state.node.supervisor.catalog(),
+                    modules: state.node.catalog(),
                 };
                 let _ = tx
                     .send(Envelope::reply(&env.id, Payload::Catalog(catalog)))

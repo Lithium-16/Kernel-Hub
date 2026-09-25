@@ -6,7 +6,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel a run on main halfway through publishing a release.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   rust:
@@ -51,6 +52,93 @@ jobs:
         run: |
           pnpm gen:schema
           git diff --exit-code packages/protocol/schema
+
+  desktop:
+    name: Desktop app (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: pnpm install --frozen-lockfile
+      # The Rust side embeds the built frontend, so build it before clippy.
+      - run: pnpm --filter @kernel/desktop build
+      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Build the installer
+        run: pnpm --filter @kernel/desktop tauri build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-desktop-windows
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+  node-bundle:
+    name: Node bundle (windows-latest)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Baked into kerneld; installed nodes compare it to decide whether a release is newer.
+      KERNEL_BUILD: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - uses: astral-sh/setup-uv@v6
+      - run: cargo build --release -p kernel-node
+      - name: Package kernel-node-windows-x64.zip
+        run: |
+          set -euo pipefail
+          rm -rf bundle && mkdir -p bundle/sdk
+          cp target/release/kerneld.exe scripts/install-node.ps1 bundle/
+          cp -r modules bundle/modules
+          rm -rf bundle/modules/*/tests bundle/modules/*/settings.local.toml
+          find bundle/modules -name __pycache__ -type d -prune -exec rm -rf {} +
+          uv build --wheel --out-dir bundle/sdk sdk/python
+          echo "$KERNEL_BUILD" > bundle/BUILD
+          # Python's zipfile writes / separators (PowerShell 5's Compress-Archive doesn't).
+          uv run --no-project python -c "import shutil; shutil.make_archive('kernel-node-windows-x64', 'zip', 'bundle')"
+          sha256sum kernel-node-windows-x64.zip > kernel-node-windows-x64.zip.sha256
+          cat kernel-node-windows-x64.zip.sha256
+          uv run --no-project python -c "import zipfile; n = zipfile.ZipFile('kernel-node-windows-x64.zip').namelist(); assert 'kerneld.exe' in n and 'BUILD' in n, n[:5]; print(len(n), 'files')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kernel-node-windows
+          path: |
+            kernel-node-windows-x64.zip
+            kernel-node-windows-x64.zip.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish node build
+    # Every green push to main becomes a release that installed nodes can update to.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [rust, typescript, python, node-bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernel-node-windows
+      - name: Create release node-build-${{ github.run_number }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "node-build-${{ github.run_number }}" \
+            kernel-node-windows-x64.zip kernel-node-windows-x64.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Node build ${{ github.run_number }}" \
+            --notes "kerneld from $GITHUB_SHA. Installed nodes find it with Node > Check for updates."
 
   python:
     name: Python SDK (${{ matrix.os }})

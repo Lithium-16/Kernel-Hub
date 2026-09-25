@@ -10,6 +10,14 @@ python = "C:/Users/you/AppData/Local/Kernel/node/runtimes/python312/python.exe"
 # Only start these modules (leave empty to start every module found).
 enabled_modules = []
 
+# Self-update from GitHub Releases (node-build-N). install-node.ps1 fills this in.
+[update]
+repo = "B0RE16/laughing-waffle"
+token = ""                  # read-only token; the repo is private
+check_interval_h = 6
+auto_install = false
+scheduled_task = "Kernel node"
+
 [supervisor]
 ping_interval_ms = 10000
 ping_misses = 3

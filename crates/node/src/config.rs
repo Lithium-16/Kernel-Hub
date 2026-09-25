@@ -27,6 +27,46 @@ pub struct Config {
     pub enabled_modules: Vec<String>,
     #[serde(default)]
     pub supervisor: SupervisorConfig,
+    #[serde(default)]
+    pub update: UpdateConfig,
+    /// The file this config was loaded from; the update helper restarts kerneld with it.
+    #[serde(skip)]
+    pub path: Option<PathBuf>,
+}
+
+/// Self-update from GitHub Releases (see `update.rs`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UpdateConfig {
+    /// `owner/repo` to take `node-build-*` releases from. Empty turns updates off.
+    pub repo: String,
+    /// Read-only GitHub token, needed when the repo is private.
+    pub token: String,
+    /// GitHub API base URL (changed only by tests).
+    pub api: String,
+    /// How often to look for a new build. 0 = only when asked.
+    pub check_interval_h: u64,
+    /// Install new builds as soon as they're found, instead of waiting for the button.
+    pub auto_install: bool,
+    /// `uv`, used to reinstall the Python SDK that ships with each build.
+    pub uv: String,
+    /// Windows scheduled task that runs kerneld. When set, restarts go through it so its
+    /// watchdog keeps covering the new process.
+    pub scheduled_task: String,
+}
+
+impl Default for UpdateConfig {
+    fn default() -> Self {
+        Self {
+            repo: String::new(),
+            token: String::new(),
+            api: "https://api.github.com".into(),
+            check_interval_h: 6,
+            auto_install: false,
+            uv: "uv".into(),
+            scheduled_task: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -97,6 +137,7 @@ impl Config {
         let base = path.parent().unwrap_or(Path::new("."));
         cfg.modules_dir = absolutize(base, &cfg.modules_dir);
         cfg.data_dir = absolutize(base, &cfg.data_dir);
+        cfg.path = Some(std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()));
         cfg.validate()?;
         Ok(cfg)
     }
@@ -108,6 +149,10 @@ impl Config {
         if self.token.len() < 8 {
             bail!("token must be at least 8 characters");
         }
+        let repo = &self.update.repo;
+        if !repo.is_empty() && repo.split('/').filter(|p| !p.is_empty()).count() != 2 {
+            bail!("update.repo must look like owner/repo");
+        }
         Ok(())
     }
 
@@ -117,6 +162,17 @@ impl Config {
 
     pub fn db_path(&self) -> PathBuf {
         self.data_dir.join("node.db")
+    }
+
+    /// Held for as long as kerneld runs: one node per data folder, and the update helper
+    /// waits on it to know the old process is gone.
+    pub fn lock_path(&self) -> PathBuf {
+        self.data_dir.join("kerneld.lock")
+    }
+
+    /// Per-machine settings for each module, kept outside the app folder so updates keep them.
+    pub fn module_settings_dir(&self) -> PathBuf {
+        self.data_dir.join("settings")
     }
 }
 

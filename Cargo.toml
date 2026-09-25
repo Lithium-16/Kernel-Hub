@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# The desktop app is its own workspace (it needs WebView system libraries).
+exclude = ["apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -26,6 +28,10 @@ time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 tokio-tungstenite = "0.30"
 tempfile = "3"
 regex = "1"
+reqwest = { version = "0.13", default-features = false, features = ["native-tls", "json"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
+sha2 = "0.11"
+hex = "0.4"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

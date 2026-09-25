@@ -192,7 +192,7 @@ class Module:
                         title=a.label,
                         description=a.description or a.label,
                         input_schema=a.input_schema(),
-                        meta={"kernel/action": a.id, "kernel/ai": a.ai},
+                        meta={"kernel/action": a.id, "kernel/ai": a.ai, "kernel/quiet": a.quiet},
                     )
                     for a in m.actions
                 ]
