@@ -112,6 +112,24 @@ workflow has one, otherwise into the text box wired to the sampler's positive in
 `{{negative}}`). Downloads take Hugging Face links and Civitai *download* links; set
 `civitai_token` for Civitai files that need an account.
 
+**VRAM.** Shares the GPU between Roblox, ComfyUI and Ollama out of the box: while ComfyUI has
+jobs queued, Ollama's models are unloaded (ComfyUI is `exclusive`), and if free VRAM stays under
+1 GB, the lowest-priority idle app is unloaded. Roblox is only watched. Add your other GPU apps
+in `data\settings\vram.toml` (this replaces the whole list, so keep the three):
+
+```toml
+apps = [
+  { name = "Roblox", kind = "watch", process = "RobloxPlayerBeta.exe", priority = 100 },
+  { name = "ComfyUI", kind = "comfyui", url = "http://127.0.0.1:8188", priority = 50, exclusive = true },
+  { name = "Ollama", kind = "ollama", url = "http://127.0.0.1:11434", priority = 30 },
+  { name = "LM Studio", kind = "process", process = "LM Studio.exe", priority = 20, stop_when_needed = true },
+]
+```
+
+Higher priority keeps its VRAM. A `process` app is closed to make room only with
+`stop_when_needed = true`; without it, it's just measured. **Give the GPU to…** frees
+everything else for one app; **Free idle VRAM** unloads whatever isn't busy.
+
 **Roblox.** Works with no settings. Low-power AFK mode is on by default. `data\settings\roblox.toml`
 options:
 

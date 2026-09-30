@@ -250,7 +250,7 @@ mod tests {
             }
         }
         ids.sort();
-        assert_eq!(ids, ["comfyui", "hello", "minecraft", "pc-monitor", "roblox"]);
+        assert_eq!(ids, ["comfyui", "hello", "minecraft", "pc-monitor", "roblox", "vram"]);
     }
 
     #[test]

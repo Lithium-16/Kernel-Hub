@@ -1,0 +1,59 @@
+id = "vram"
+name = "VRAM"
+icon = "gauge"
+version = "0.1.0"
+runtime = "python"
+entry = "main.py"
+
+# Shares the GPU between the apps that want it: shows who uses how much VRAM, and makes room
+# by priority. Override per machine in the node's data\settings\vram.toml.
+[settings]
+# Make room on its own (see exclusive and min_free_mb). Off: only the buttons do anything.
+auto = true
+# Keep at least this much VRAM free: below it for after_s, the lowest-priority idle app is
+# unloaded (one at a time). 0 turns it off.
+min_free_mb = 1024
+after_s = 15
+poll_s = 3.0
+# The apps sharing the GPU. Higher priority keeps its VRAM; lower gets unloaded first.
+#   kind = "ollama"   unloads models through Ollama's API (url)
+#   kind = "comfyui"  frees VRAM through ComfyUI's API (url), only when its queue is empty
+#   kind = "process"  measured by process name; closed to make room only if stop_when_needed
+#   kind = "watch"    only measured, never touched
+# exclusive = true: while this app is busy, every lower-priority app is unloaded (video gen).
+apps = [
+  { name = "Roblox", kind = "watch", process = "RobloxPlayerBeta.exe", priority = 100 },
+  { name = "ComfyUI", kind = "comfyui", url = "http://127.0.0.1:8188", priority = 50, exclusive = true },
+  { name = "Ollama", kind = "ollama", url = "http://127.0.0.1:11434", priority = 30 },
+]
+
+[[actions]]
+id = "vram.free_idle"
+label = "Free idle VRAM"
+icon = "memory-stick"
+description = "Unloads every app that isn't busy (Ollama models, ComfyUI's cache). Never closes apps."
+ai = "safe"
+
+[[actions]]
+id = "vram.focus"
+label = "Give the GPU to…"
+icon = "crosshair"
+description = "Makes room for one app: unloads every other app (and closes the ones marked stop_when_needed). Busy ComfyUI jobs are left alone."
+ai = "confirm"
+params.app = { type = "string", description = "App name from the list" }
+
+[[actions]]
+id = "app.free"
+label = "Unload an app"
+icon = "circle-minus"
+description = "Unloads one app's VRAM now (closes it if it's a process marked stop_when_needed)."
+ai = "confirm"
+params.app = { type = "string", description = "App name from the list" }
+
+[[actions]]
+id = "auto.set"
+label = "Automatic mode"
+icon = "wand"
+description = "Turns automatic room-making on or off until the module restarts."
+ai = "safe"
+params.on = { type = "bool" }

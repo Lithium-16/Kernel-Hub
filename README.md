@@ -25,6 +25,7 @@ Pluto: **[docs/pluto-setup.md](docs/pluto-setup.md)**. Pairing, the tray and the
 | `modules/pc-monitor` | CPU, memory, disks, GPU, network; sleep/restart/shut down; Wake-on-LAN |
 | `modules/roblox` | watches the Roblox AFK client: in game or disconnected, session time; rejoin/relaunch/close |
 | `modules/comfyui` | ComfyUI queue and saved workflows (prompt, seed, count), stop/clear, free VRAM, model list and downloads, job done/failed alerts |
+| `modules/vram` | shares the GPU: VRAM per app (Ollama, ComfyUI, any process, Roblox), unloads by priority, exclusive apps for video gen |
 | `apps/desktop` | the desktop app: Tauri 2 shell + React. Screens are built from each module's actions and status |
 
 ## Development
