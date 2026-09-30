@@ -48,7 +48,7 @@ automations need a machine that's awake, and the main PC is often off.
  Main PC                                   Pluto (home node)
 ┌──────────────────────────┐   Tailscale  ┌──────────────────────────────┐       ┌────────────────┐
 │ Desktop app (Tauri 2)     │◄────────────►│ Kernel services                  │
-│  React UI · palette · tray│   WSS + MCP  │  assistant runtime (Agent SDK)│
+│  React UI · palette · tray│   WSS + MCP  │  assistant (Ollama → Claude)  │
 │  voice capture/wake word  │              │  automation engine            │
 │ Node (local modules)      │              │  activity log · API proxy     │
 │  pc-monitor · files       │              │  phone web app                │
@@ -143,12 +143,12 @@ WSL session open, because WSL shuts down (and kills the server) when nothing is 
 
 ## 5. Assistant
 
-- **Brain:** Claude through the Claude Agent SDK, running on the home node. A local model
-  (Ollama) is an option, labeled experimental.
-- **Account:** an **Anthropic API key** (pay per use). The Agent SDK docs say apps built on
-  it can't use claude.ai subscription login or rate limits without Anthropic's approval, so
-  my Pro/Max subscription stays for the Claude apps and Claude Code. Default monthly cap
-  **$10** with alerts at 80%, and routine turns use a cheaper model.
+- **Brain: local first.** Ollama on Pluto (an ~8B model) answers by default, for free.
+  **Claude is the fallback** (Haiku 4.5 through the API) when the local model gets stuck or
+  you ask for it. One tool loop of our own serves both (PLAN §6.1, D20).
+- **Account:** an **Anthropic API key**, optional, only for the fallback (pay per use;
+  subscription login isn't allowed for apps like this). Default monthly cap **$3** with alerts
+  at 80%. Without a key, Kernel is local-only.
 - **Persona: "Kernel".** A personality prompt makes it a tsundere catgirl, the same voice as
   the Claude that designed it. It's editable in Settings → Assistant. Branding line:
   "Kernel, powered by Claude". **The personality never touches safety text:** approval
@@ -171,8 +171,8 @@ WSL session open, because WSL shuts down (and kills the server) when nothing is 
 
 ### API proxy (on the home node)
 
-The agent never sees the Anthropic key. The Agent SDK is pointed at
-`ANTHROPIC_BASE_URL=http://127.0.0.1:<port>` with a short-lived session token. The proxy:
+The assistant never sees the Anthropic key. Its Claude backend is pointed at
+`http://127.0.0.1:<port>` with a short-lived session token. The proxy:
 
 - adds the real key
 - streams responses unchanged, so prompt caching still works
@@ -220,7 +220,7 @@ Starter automations:
 | Activity log, automations, chats, module settings, library catalog | SQLite on the home node (versioned migrations) |
 | UI state, window layout, local cache (thumbnails, recent files) | SQLite in `%APPDATA%\Kernel` on the main PC |
 | Library files (images, audio), world backups | Pluto storage, e.g. `D:\Kernel\Library`, `D:\Kernel\Backups` |
-| Claude session transcripts | The Agent SDK's own store on the home node |
+| Chat transcripts | `chats` in the node's database, whichever backend answered |
 | Anthropic key, node pairing tokens, module secrets | Windows Credential Manager on the node that uses them |
 
 **Backups:** one disk isn't a backup. There's an optional nightly copy of the library,
@@ -259,8 +259,7 @@ default, and the app nags you until it's configured.
 | UI | React 19, TypeScript, Vite, Tailwind v4, Zustand, TanStack Query, CodeMirror 6, xterm.js, **Lucide** icons (1.5px, square caps), Geist fonts |
 | Node daemon | Rust (tokio, axum for HTTPS/WSS, `rusqlite`, `keyring`, `tracing`), tray icon, starts at sign-in |
 | Module SDKs | Python (MCP Python SDK + pydantic), TypeScript (MCP TS SDK + zod) |
-| Assistant runtime | Node (TypeScript) + Claude Agent SDK, bundled Node runtime |
-| Local brain (optional) | Ollama |
+| Assistant runtime | our own tool loop on the home node: Ollama first, Claude Messages API as fallback |
 | Voice | openWakeWord (main PC), faster-whisper + Kokoro/Piper/XTTS (Pluto) |
 | Transport | Tailscale; WSS for status/events, MCP (streamable HTTP) for tools |
 | Protocol source of truth | zod schemas in `packages/protocol` → JSON Schema → Rust types at build time |
@@ -291,7 +290,7 @@ Rough estimates for one person working focused.
 
 | Phase | Deliverable | Rough time |
 |---|---|---|
-| **0 · Test run** | Tauri shell; node daemon + pairing over Tailscale; module SDK "hello world"; **test that the Agent SDK runs from bundled Node on Windows** | 1–2 wk |
+| **0 · Test run** | Tauri shell; node daemon + pairing over Tailscale; module SDK "hello world"; **test that a local model on Pluto calls a module tool, with Claude as fallback** | 1–2 wk |
 | **1 · Buttons** | **Minecraft**, **PC monitor** and **Roblox** modules with full UI: tiles, console, tables, buttons, palette commands. Activity log. **Useful with no AI.** | 3–4 wk |
 | **2 · Assistant** | Assistant on the home node, module tools, permission tiers, approval prompts, API proxy + cost meter | 3 wk |
 | **3 · Automations + phone** | Automation engine on nodes, starter automations, phone web app | 3 wk |
@@ -300,8 +299,9 @@ Rough estimates for one person working focused.
 
 ## 14. Risks
 
-- **Packaging the Agent SDK:** it runs the Claude Code engine as a child process, so ship
-  a real Node runtime. Verify in phase 0.
+- **Small local models make mistakes:** they pick the wrong action or bad params more often
+  than Claude. Every call still goes through tiers and approvals, and two failures fall back
+  to Claude.
 - **The home node is a single point of failure:** if Pluto is down, the assistant, phone and
   cross-node automations are down. Single-node automations and local buttons still work.
 - **The 1080 Ti is aging:** pin CUDA and PyTorch versions that still support Pascal cards.
@@ -323,6 +323,6 @@ Rough estimates for one person working focused.
 
 - Pluto stays on Windows (Roblox needs it), runs 24/7, and is the home node.
 - Both PCs have a GTX 1080 Ti. Speech-to-text runs on the main PC, TTS (Kokoro) on Pluto's CPU.
-- Claude access uses an API key with a $10/month cap. Subscription login isn't allowed for SDK apps.
+- AI brain: local first (Ollama on Pluto), Claude Haiku as the fallback, $3/month cap.
 - iPhone, so web push needs Add to Home Screen.
 - Name: **Kernel**, wake word "Hey Kernel", tsundere catgirl persona.

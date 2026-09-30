@@ -72,7 +72,7 @@ web browsing (web access stays `confirm`), code signing, macOS/Linux.
 │  └─ common/                  # logging, paths, keyring, config
 ├─ packages/
 │  ├─ protocol/                # zod schemas = source of truth; emits JSON Schema
-│  ├─ assistant/               # Node process: Claude Agent SDK runtime
+│  ├─ assistant/               # tool loop: Ollama first, Claude API as fallback
 │  ├─ ui/                      # shared React components (desktop + phone)
 │  └─ sdk-ts/                  # TypeScript module SDK
 ├─ sdk/python/kernel_sdk/         # Python module SDK (published locally as a wheel)
@@ -347,34 +347,33 @@ There's no module-supplied UI code in v1 (a sandboxed iframe block comes **later
 
 ## 6. Kernel services (home node)
 
-### 6.1 Assistant runtime
+### 6.1 Assistant runtime (local first, Claude as fallback: D20)
 
-- A Node process (`packages/assistant`), supervised by the home node like a module (but not
-  a module), talking to the node over a local socket.
-- Uses the **Claude Agent SDK** with:
-  - **tools:** one in-process MCP server built by the home node from the live catalog. Tool
-    name `<module>__<action>` with dots replaced by underscores, the description from the
-    manifest, and a JSON Schema input built from `params`.
-  - **built-in tools:** Claude Code's file, shell and web tools are **not** enabled in v1.
-    The assistant acts only through module tools. Web search/fetch is a `confirm` tool.
-  - **permissions:** the SDK's `canUseTool` callback checks the action's tier plus
-    `confirm_when`. A `confirm` result → create an approval (§6.2) and wait.
-  - **context:** a compact status summary of all online modules, refreshed each turn, sent as a
-    system message.
-  - **model:** the Settings → Assistant choice. Effort defaults to `medium` for chat.
-    Short routine turns ("start the server") go to a cheaper model, and longer conversations
-    use the main one.
-  - **persona:** a system prompt that makes it **Kernel**, the tsundere catgirl, with its
-    text editable in Settings → Assistant. Hard rule in the prompt, and enforced by the UI:
-    approval cards, errors and descriptions of what an action will do are generated from the
-    manifest and never styled by the persona.
-- **Account:** an Anthropic **API key**, entered once during onboarding and stored on the home
-  node. Per the Agent SDK docs, apps built on the SDK can't use claude.ai subscription login
-  or rate limits without Anthropic's approval, so this isn't optional.
-- A local brain (Ollama) is an optional **later** backend behind the same tool list, labeled
-  experimental.
-- **Conversations:** the SDK owns transcripts. `chats` (§9) stores id, title, timestamps
-  and the SDK session id for resume.
+- **Our own tool loop** on the home node, not the Claude Agent SDK. The loop is small: send the
+  conversation and the tool list, run the tool calls the model asks for (through the normal
+  action path, so tiers, approvals and the activity log all apply), repeat. It talks to two
+  backends through one interface:
+  - **Local (default): Ollama on Pluto**, a ~8B model with good tool calling (e.g. Qwen 3 8B,
+    Q4, about 5–6 GB of VRAM). It shares the 1080 Ti with Forge through the GPU queue, and is
+    unloaded after 5 idle minutes so Forge and Roblox get the memory back. Free.
+  - **Claude (fallback): the Anthropic Messages API** with an API key, **Haiku 4.5 by
+    default** (the cheapest model), Sonnet only if chosen in Settings.
+- **When it falls back to Claude:**
+  - the local model fails twice in a row: no valid tool call, a made-up action, or bad params
+  - you ask for it ("ask Claude …", or a button on the reply)
+  - Pluto is unreachable or its GPU is busy past a timeout
+  - Never silently: the reply is marked "Claude" with its cost, and the budget below applies.
+- **tools:** built from the live catalog, `<module>__<action>`, description and JSON Schema
+  from the manifest. No shell, file or web tools in v1. Only module actions.
+- **permissions:** each tool call goes through the node's tier check plus `confirm_when`.
+  `confirm` → an approval (§6.2), then wait.
+- **context:** a compact status summary of the online modules, refreshed each turn. Kept
+  short, since small local models get worse with long prompts.
+- **persona:** a system prompt that makes it **Kernel**, the tsundere catgirl, editable in
+  Settings → Assistant. Approval cards, errors and action descriptions come from the manifest
+  and are never styled by the persona.
+- **Account:** an Anthropic **API key** is optional. Without one, Kernel is local-only.
+- **Conversations:** stored in `chats` (§9) by the node, whichever backend answered.
 - **Save as automation:** takes the chat's successful tool calls as steps, has the model
   suggest which values should become inputs, and opens the automation editor pre-filled.
 
@@ -432,7 +431,7 @@ State machine: `pending → approved | denied | expired | cancelled`.
 - Streams responses through unchanged, so prompt caching works.
 - Records `usage` (input, output, cache read/write tokens) per request into `usage`, with
   the cost from a price table that ships with the app and can be edited.
-- **Budget:** a monthly cap from settings (default **$10**). At 80% → notification. At 100% → requests get a
+- **Budget:** a monthly cap from settings (default **$3**; Claude is only the fallback). At 80% → notification. At 100% → requests get a
   402, the assistant tells the user, and automations with `assistant` steps pause.
 - **Concurrency:** 4 requests in flight. Retries 429 and 529 errors with jittered backoff,
   respecting `retry-after`.
@@ -847,7 +846,7 @@ modules. None for UI code, where behavior tests matter more.
   Restart node. Full cycle covered by `crates/node/tests/self_update.rs`
 - [x] Python SDK "hello" module: status fields, four actions (one per tier, plus a timeout
   case), supervised with restart and backoff, covered by `crates/node/tests/e2e.rs`
-- [ ] **Agent SDK test:** a bundled Node 22 runs `packages/assistant` on Windows, calls one module tool through the proxy, and the key isn't visible from inside the assistant process (checked by test)
+- [ ] **Local brain test:** Ollama on Pluto with an ~8B model calls one module tool correctly through the tool loop, and falls back to Claude Haiku when it can't (D20)
 - [ ] Decision recorded: the Tauri + Node process split holds (or switch to Electron)
 
 **Accept when:** clicking a button in the desktop app on the main PC runs the hello action
@@ -879,7 +878,7 @@ buttons, with no crashes that lose state, and Sleep on Pluto → Wake from the m
 
 ### Phase 2: assistant (3 weeks)
 
-- [ ] `packages/assistant` with the Agent SDK, the tool catalog built from manifests, a status summary in context
+- [ ] The assistant tool loop with the Ollama and Claude backends and the fallback rules (§6.1), the tool catalog built from manifests, a status summary in context
 - [ ] API proxy with usage metering, budget cap and concurrency limit
 - [ ] Full approval flow (§6.2) in chat, toasts and notifications
 - [ ] Assistant screen as designed: chat, tool-call rows, the approval card, and the live and activity panels
@@ -922,7 +921,6 @@ in chat and in the library on Pluto, and a world restore from a Pluto backup wor
 - [ ] Latency measured and logged. p50 ≤ 2.0 s, p90 ≤ 3.0 s on the home network
 - [ ] Onboarding step 7, a mic indicator in the tray and sidebar
 - [ ] Installers (§13), the updater, export diagnostics, release checklist
-- [ ] Optional local brain (Ollama) behind a setting, labeled experimental
 - [ ] Accessibility pass (keyboard-only walkthrough of every screen)
 
 **Accept when:** the v1 definition in §1 holds for a full week.
@@ -946,7 +944,7 @@ Candidates, not commitments:
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Agent SDK packaging on Windows | medium | high | Phase 0 test. Fallback: Electron, or calling the Claude API directly with our own tool loop |
+| The local model picks wrong actions | high | medium | Tiers and approvals still apply to every call · two failures fall back to Claude · the 30-request eval set runs against the local model too |
 | Pluto restarting for Windows Update breaks the home node and the Roblox session | medium | medium | Pluto runs 24/7 (D13). Set active hours, pause auto-restart, and schedule update restarts for when I'm not AFK. Degraded mode on the main PC |
 | 1080 Ti support dropped by PyTorch/CUDA | medium | medium | Pinned lockfile. CPU fallback for TTS and STT |
 | WSL shuts down with no session attached, killing the server | high | high | The Minecraft module holds a session open. Keep `MC-KEEPALIVE.bat` until kerneld starts at boot |
@@ -962,7 +960,7 @@ Resolved: Minecraft runs in WSL Ubuntu on Pluto under systemd (D16) · Pluto run
 | # | Decision | Why |
 |---|---|---|
 | D1 | Windows-first, single user, unsigned | the audience is me |
-| D2 | Tauri 2 + Rust node + Node assistant process | small footprint and Rust experience. Agent SDK is Node-only. Revisit after phase 0 |
+| D2 | Tauri 2 + Rust node (the Node assistant process is dropped by D20) | small footprint and Rust experience |
 | D3 | Pluto is the home node | needs to be always on for the phone, automations and the assistant |
 | D4 | Modules are processes speaking MCP + a manifest | isolation, any language (Python/TS), assistant tools for free |
 | D5 | Buttons = palette = phone = AI tools = automation steps (one action path) | "use it without AI", consistency, one permission check |
@@ -972,7 +970,7 @@ Resolved: Minecraft runs in WSL Ubuntu on Pluto under systemd (D16) · Pluto run
 | D9 | Automations run on the owning node when possible | keep working when the main PC or Pluto are off |
 | D10 | Square, Raycast-style design, Geist, Lucide icons | per the design canvas |
 | D11 | Name **Kernel**, wake word "Hey Kernel", tsundere catgirl persona | my choice. Persona never styles safety text |
-| D12 | Anthropic API key, $10/month default cap | the Agent SDK can't use subscription login without approval |
+| D12 | Anthropic API key, optional, for the Claude fallback. $3/month default cap (was $10 when Claude was the main brain) | subscription login isn't allowed for SDK-style apps; see D20 |
 | D13 | Pluto stays Windows and runs 24/7 | Roblox AFK needs Windows. Being on 24/7 is exactly what the home node needs |
 | D14 | STT on the main PC's 1080 Ti, TTS (Kokoro) on Pluto's CPU | lowest voice latency, and keeps Pluto's GPU free for Forge |
 | D15 | Weekly Minecraft backup, keep 1, verify before deleting the old one | my choice. Verification removes the "zero good backups" window |
@@ -980,3 +978,4 @@ Resolved: Minecraft runs in WSL Ubuntu on Pluto under systemd (D16) · Pluto run
 | D17 | Nodes update themselves from GitHub Releases: every merge to main is a release, installs are a button (or `auto_install`), a helper swaps the app folder and rolls back on failure | updating Pluto shouldn't need a trip to Pluto. SHA-256 over HTTPS from the one configured repo; whoever can publish releases there can run code on the node, same as whoever can push to main |
 | D18 | Roblox "low-power AFK mode" instead of a custom/headless client: allowlisted Fast Flags, Roblox's own frame cap, and Windows window/priority/EcoQoS controls | a truly headless client means patching or injecting into Roblox, which its anti-cheat (Hyperion) bans for and its terms forbid; Bloxstrap/Fishstrap already cover bootstrapping. Since 2025-09-29 only allowlisted flags work anyway |
 | D19 | Nodes accept only Tailscale and localhost; the home network is opt-in (`allow_lan`), and the firewall rule is Tailscale-only | my choice. Tailscale encrypts the traffic (ws:// on the LAN isn't encrypted until TLS lands) and nothing else on the home Wi-Fi can reach Kernel |
+| D20 | Local first: Ollama on Pluto answers, Claude (Haiku 4.5 via the API) is the fallback; our own tool loop instead of the Agent SDK | my choice, to keep it nearly free. The Agent SDK is Claude-only, and a plain tool loop serves both backends, drops the bundled Node runtime and the Windows packaging risk |
