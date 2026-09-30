@@ -20,6 +20,17 @@ const MODULE = {
   status: { greetings: 0 },
 };
 
+const EVENT = {
+  id: 'e1',
+  ts: '2026-09-25T00:00:00Z',
+  node_id: 'pluto',
+  module: 'minecraft',
+  kind: 'player.joined',
+  level: 'info',
+  message: 'Steve joined',
+  data: { player: 'Steve' },
+};
+
 /** A fake kerneld on the other end of a fake WebSocket. */
 class FakeSocket {
   static last: FakeSocket | null = null;
@@ -74,6 +85,9 @@ class FakeSocket {
           ok: true,
           result: { message: `hi ${String((msg.body.params as { name?: string }).name)}` },
         });
+        break;
+      case 'events.query':
+        reply('events', { events: [EVENT] });
         break;
       default:
         reply('error', { code: 'bad_request', message: 'nope' });
@@ -181,6 +195,25 @@ describe('NodeClient', () => {
     FakeSocket.last?.onmessage?.({ data: 'not json' });
     FakeSocket.last?.onmessage?.({ data: JSON.stringify({ v: 2, id: 'x', type: 'welcome' }) });
     expect(c.getSnapshot().conn).toBe('online');
+    c.stop();
+  });
+
+  it('loads events and hears pushed ones', async () => {
+    const c = client();
+    c.start();
+    await flush();
+    await flush();
+    expect(await c.events(10)).toEqual([EVENT]);
+    const heard: string[] = [];
+    const off = c.onEvent((e) => heard.push(e.message));
+    const push = (id: string) =>
+      FakeSocket.last?.onmessage?.({
+        data: JSON.stringify({ v: 1, id, ts: '2026-09-25T00:00:01Z', type: 'event', body: EVENT }),
+      });
+    push('p1');
+    off();
+    push('p2');
+    expect(heard).toEqual(['Steve joined']);
     c.stop();
   });
 });

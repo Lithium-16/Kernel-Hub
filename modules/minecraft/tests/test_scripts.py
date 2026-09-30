@@ -183,8 +183,12 @@ async def test_status_of_a_running_server(env):
 
 async def test_stop_and_start(env):
     server, fake, *_ = env
+    got = []
+    server.emit = lambda kind, message, level="info", **data: got.append((kind, level))
+    await server.refresh()
     assert (await server.stop())["state"] == "stopped"
     assert (await server.start())["state"] == "running"
+    assert got == [("server.stopped", "info"), ("server.started", "info")]
     (fake / "no-ping").touch()
     await server.stop()
     with pytest.raises(ActionError) as e:
@@ -230,7 +234,10 @@ async def test_backup_verifies_then_replaces_the_old_one(env):
     old.write_bytes(b"old")
     os.utime(old, (time.time() - 3600, time.time() - 3600))
 
+    got = []
+    server.emit = lambda kind, message, level="info", **data: got.append((kind, level))
     r = await server.backup()
+    assert got == [("backup.done", "info")]
     assert r["file"].startswith("world-") and r["file"].endswith(".tar.gz")
     assert r["bytes"] > 0
     assert r["deleted"] == [old.name]
@@ -244,8 +251,11 @@ async def test_backup_that_fails_to_verify_keeps_the_old_one(env):
     backups.mkdir()
     (backups / "world-20200101T000000Z.tar.gz").write_bytes(b"old")
     (mc / "world" / "level.dat").write_bytes(b"not gzip")
+    got = []
+    server.emit = lambda kind, message, level="info", **data: got.append((kind, level))
     with pytest.raises(ActionError, match="did not verify"):
         await server.backup()
+    assert got == [("backup.failed", "error")]
     assert [p.name for p in backups.iterdir()] == ["world-20200101T000000Z.tar.gz"]
     assert (fake / "commands").read_text().splitlines()[-1] == "save-on"
 

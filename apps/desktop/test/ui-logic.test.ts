@@ -82,6 +82,8 @@ describe('PC monitor status', () => {
       gpu: 'NVIDIA GeForce GTX 1080 Ti',
       gpu_pct: 37,
       gpu_temp_c: 64,
+      gpu_power_w: 231,
+      gpu_power_limit_w: 250,
       vram_used_mb: 3072,
       vram_total_mb: 11264,
       net_down_bps: null,
@@ -95,6 +97,7 @@ describe('PC monitor status', () => {
       'memory_used_mb',
       'gpu_pct',
       'gpu_temp_c',
+      'gpu_power_w',
       'vram_used_mb',
       'net_down_bps',
       'uptime_s',
@@ -102,6 +105,9 @@ describe('PC monitor status', () => {
     expect(label(byKey.memory_used_mb?.name ?? '')).toBe('Memory');
     expect(byKey.memory_used_mb?.max).toBe(65536);
     expect(label(byKey.vram_used_mb?.name ?? '')).toBe('VRAM');
+    expect(label(byKey.gpu_power_w?.name ?? '')).toBe('GPU power');
+    expect(byKey.gpu_power_w?.max).toBe(250);
+    expect(value('gpu_power_w', 231.4)).toBe('231 W');
     expect(sections.map((s) => [s.key, s.kind])).toEqual([['disks', 'table']]);
     expect(details.map(([k]) => k)).toEqual(['gpu']);
   });

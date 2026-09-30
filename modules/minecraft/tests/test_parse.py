@@ -112,3 +112,17 @@ def test_transports():
 def test_rejects_bad_settings(change):
     with pytest.raises(ValueError):
         check_settings({**SETTINGS, **change})
+
+
+def test_changes_between_snapshots():
+    from mc import changes
+
+    running = {"state": "running", "players": ["Alex", "Steve"], "version": "1.21"}
+    assert changes({"state": "unknown"}, running, busy=False) == []
+    assert changes({"state": "starting"}, running, busy=False)[0][:2] == ("server.started", "info")
+    assert changes(running, {"state": "crashed"}, busy=False)[0][:2] == ("server.crashed", "error")
+    assert changes(running, {"state": "stopped"}, busy=False)[0][:2] == ("server.stopped", "warn")
+    assert changes({"state": "stopping"}, {"state": "stopped"}, busy=True)[0][:2] == ("server.stopped", "info")
+    assert changes(running, {"state": "unknown"}, busy=False) == []
+    moved = changes(running, {"state": "running", "players": ["Steve", "Notch"]}, busy=False)
+    assert [(k, m) for k, _, m, _ in moved] == [("player.joined", "Notch joined"), ("player.left", "Alex left")]

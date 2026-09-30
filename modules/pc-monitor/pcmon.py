@@ -101,13 +101,67 @@ class Gpu:
             name = n.nvmlDeviceGetName(self.handle)
         except Exception:
             return {}
-        return {
+        out = {
             "gpu": name.decode() if isinstance(name, bytes) else str(name),
             "gpu_pct": int(util.gpu),
             "gpu_temp_c": int(temp),
             "vram_used_mb": mem.used // (1024 * 1024),
             "vram_total_mb": mem.total // (1024 * 1024),
         }
+        try:  # not every card reports power
+            out["gpu_power_w"] = round(n.nvmlDeviceGetPowerUsage(self.handle) / 1000)
+            out["gpu_power_limit_w"] = round(n.nvmlDeviceGetEnforcedPowerLimit(self.handle) / 1000)
+        except Exception:
+            pass
+        return out
+
+
+class Alerts:
+    """Reports a reading that stays past its limit for `after_s`, once, until it recovers."""
+
+    MARGIN = 5  # must drop this far below the limit to count as recovered
+
+    def __init__(self, settings: dict[str, Any], emit: Callable[..., None], clock: Callable[[], float] = time.monotonic):
+        self.limits = {
+            "gpu_temp": float(settings["alert_gpu_temp_c"]),
+            "memory": float(settings["alert_memory_pct"]),
+            "disk": float(settings["alert_disk_pct"]),
+        }
+        self.after_s = float(settings["alert_after_s"])
+        self.emit, self.clock = emit, clock
+        self.over_since: dict[str, float] = {}
+        self.fired: set[str] = set()
+
+    def readings(self, snap: dict[str, Any]) -> dict[str, tuple[str, float, str]]:
+        """name -> (limit key, value, what it is)."""
+        out: dict[str, tuple[str, float, str]] = {}
+        if snap.get("gpu_temp_c") is not None:
+            out["gpu_temp"] = ("gpu_temp", snap["gpu_temp_c"], f"GPU at {snap['gpu_temp_c']}°C")
+        if snap.get("memory_total_mb"):
+            pct = round(100 * snap["memory_used_mb"] / snap["memory_total_mb"])
+            out["memory"] = ("memory", pct, f"Memory {pct}% used")
+        for d in snap.get("disks") or []:
+            out[f"disk:{d['disk']}"] = ("disk", d["used_pct"], f"Disk {d['disk']} {d['used_pct']:g}% full")
+        return out
+
+    def check(self, snap: dict[str, Any]) -> None:
+        now = self.clock()
+        for name, (key, value, text) in self.readings(snap).items():
+            limit = self.limits[key]
+            if not limit:
+                continue
+            if value >= limit:
+                since = self.over_since.setdefault(name, now)
+                if name not in self.fired and now - since >= self.after_s:
+                    self.fired.add(name)
+                    self.emit(f"{key}.high", text, level="warn", value=value, limit=limit)
+            elif value < limit - self.MARGIN:
+                self.over_since.pop(name, None)
+                if name in self.fired:
+                    self.fired.discard(name)
+                    self.emit(f"{key}.ok", f"{text}, back to normal", value=value, limit=limit)
+            else:
+                self.over_since.pop(name, None)
 
 
 class Monitor:
@@ -117,8 +171,10 @@ class Monitor:
         runner: Runner = run_command,
         platform: str = sys.platform,
         gpu: Gpu | None = None,
+        emit: Callable[..., None] | None = None,
     ) -> None:
         self.settings = settings
+        self.alerts = Alerts(settings, emit or (lambda *args, **kwargs: None))
         self.targets = parse_targets(settings["wake_targets"])
         self.runner = runner
         self.commands = power_commands(platform, int(settings["power_delay_s"]))
@@ -172,6 +228,7 @@ class Monitor:
         if self.pending:
             snap["power"] = self.pending
         self.snapshot = snap
+        self.alerts.check(snap)
         return snap
 
     async def poll(self) -> None:

@@ -4,7 +4,7 @@ from kernel_sdk import ActionContext, Module
 from pcmon import Monitor
 
 mod = Module()
-monitor = Monitor(mod.settings)
+monitor = Monitor(mod.settings, emit=mod.emit)
 mod.background(monitor.poll)
 
 

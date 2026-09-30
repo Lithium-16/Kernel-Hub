@@ -4,7 +4,7 @@ from kernel_sdk import ActionContext, Module
 from watcher import Watcher
 
 mod = Module()
-watcher = Watcher(mod.settings)
+watcher = Watcher(mod.settings, emit=mod.emit)
 mod.background(watcher.poll)
 
 

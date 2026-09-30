@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from kernel_sdk import ActionError
-from pcmon import Gpu, Monitor, magic_packet, parse_mac, parse_targets, power_commands
+from pcmon import Alerts, Gpu, Monitor, magic_packet, parse_mac, parse_targets, power_commands
 
 MAC = "AA:BB:CC:DD:EE:0F"
 
@@ -19,6 +19,10 @@ def settings(**over):
         "sample_s": 2.0,
         "power_delay_s": 60,
         "disks": [],
+        "alert_gpu_temp_c": 85,
+        "alert_memory_pct": 0,
+        "alert_disk_pct": 0,
+        "alert_after_s": 60,
     }
     return {**base, **over}
 
@@ -56,6 +60,12 @@ class FakeNvml:
 
     def nvmlDeviceGetName(self, h):
         return b"NVIDIA GeForce GTX 1080 Ti"
+
+    def nvmlDeviceGetPowerUsage(self, h):
+        return 231_400  # milliwatts
+
+    def nvmlDeviceGetEnforcedPowerLimit(self, h):
+        return 250_000
 
 
 class NoNvml(FakeNvml):
@@ -150,6 +160,7 @@ def test_sample_with_a_gpu():
     s = m.sample()
     assert s["gpu"] == "NVIDIA GeForce GTX 1080 Ti"
     assert (s["gpu_pct"], s["gpu_temp_c"], s["vram_used_mb"], s["vram_total_mb"]) == (37, 64, 3072, 11264)
+    assert (s["gpu_power_w"], s["gpu_power_limit_w"]) == (231, 250)
     assert 0 <= s["cpu_pct"] <= 100
     assert s["memory_total_mb"] >= s["memory_used_mb"] > 0
     assert s["uptime_s"] > 0
@@ -184,3 +195,41 @@ def test_manifest_and_handlers(monkeypatch):
         "power.cancel": "safe",
         "power.wake": "safe",
     }
+
+
+def test_gpu_without_power_readings():
+    class NoPower(FakeNvml):
+        def nvmlDeviceGetPowerUsage(self, h):
+            raise RuntimeError("not supported")
+
+    s = Gpu(NoPower()).sample()
+    assert s["gpu_temp_c"] == 64 and "gpu_power_w" not in s
+
+
+def test_alerts_fire_once_after_the_delay_and_recover():
+    got, now = [], [0.0]
+    a = Alerts(
+        settings(alert_disk_pct=90),
+        emit=lambda kind, message, level="info", **data: got.append((kind, level, message)),
+        clock=lambda: now[0],
+    )
+
+    def snap(temp, disk):
+        return {"gpu_temp_c": temp, "disks": [{"disk": "C:\\", "used_pct": disk}]}
+
+    a.check(snap(90, 50))
+    now[0] = 30
+    a.check(snap(90, 50))
+    assert got == []  # not long enough yet
+    now[0] = 61
+    a.check(snap(91, 50))
+    now[0] = 200
+    a.check(snap(92, 95))
+    assert got == [("gpu_temp.high", "warn", "GPU at 91°C")]
+    now[0] = 300
+    a.check(snap(83, 95))  # under the limit, but not by the margin
+    a.check(snap(70, 95))
+    assert got[1:] == [
+        ("disk.high", "warn", "Disk C:\\ 95% full"),
+        ("gpu_temp.ok", "info", "GPU at 70°C, back to normal"),
+    ]

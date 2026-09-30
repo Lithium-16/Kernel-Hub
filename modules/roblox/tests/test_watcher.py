@@ -198,12 +198,14 @@ async def test_auto_rejoin_after_a_disconnect_with_cooldown(tmp_path):
     procs = [FakeProc(started=0)]
     launched = []
     clock = [at("2026-09-25T01:21:00.000Z")]
+    events = []
     w = Watcher(
         roots=[],
         settings=settings(tmp_path, auto_rejoin=True),
         processes=lambda: procs,
         launch=launched.append,
         clock=lambda: clock[0],
+        emit=lambda kind, message, level="info", **data: events.append((kind, level, message)),
     )
     log = write_log(tmp_path, "a_Player_1.log", "join", "joined")
     await w.refresh()
@@ -214,6 +216,10 @@ async def test_auto_rejoin_after_a_disconnect_with_cooldown(tmp_path):
     assert launched == ["roblox://experiences/start?placeId=606849621"]
     assert procs[0].calls == ["terminate"]
     assert w.snapshot["last_event"] == "disconnected from the game"
+    assert events == [
+        ("game.joined", "info", "Joined the game"),
+        ("game.disconnected", "warn", "Disconnected from the game; rejoining"),
+    ]
     # A second disconnect inside the cooldown doesn't rejoin again.
     procs[:] = [FakeProc(started=0)]
     clock[0] += 60
@@ -221,6 +227,29 @@ async def test_auto_rejoin_after_a_disconnect_with_cooldown(tmp_path):
         f.write(LINES["join"] + "\n" + LINES["joined"] + "\n" + LINES["disconnect"] + "\n")
     await w.refresh()
     assert len(launched) == 1
+    assert events[-1] == ("game.disconnected", "warn", "Disconnected from the game; not rejoining (rejoined recently)")
+
+
+async def test_reports_the_client_closing_unless_we_closed_it(tmp_path):
+    procs = [FakeProc(started=0)]
+    events = []
+    w = Watcher(
+        roots=[],
+        settings=settings(tmp_path),
+        processes=lambda: procs,
+        launch=lambda uri: None,
+        emit=lambda kind, message, level="info", **data: events.append(kind),
+    )
+    await w.refresh()
+    procs.clear()
+    await w.refresh()
+    assert events == ["client.closed"]
+    procs.append(FakeProc(started=0))
+    await w.refresh()
+    await w.close(timeout=0.1)
+    procs.clear()
+    await w.refresh()
+    assert events == ["client.closed"]
 
 
 def test_manifest_and_handlers(monkeypatch):
