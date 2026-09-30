@@ -13,6 +13,7 @@ use tokio::sync::watch;
 use crate::activity::ActivityStore;
 use crate::builtin;
 use crate::config::Config;
+use crate::events::EventHub;
 use crate::mcp::McpError;
 use crate::supervisor::Supervisor;
 use crate::update::{self, Updater};
@@ -24,6 +25,7 @@ pub struct Node {
     pub cfg: Config,
     pub supervisor: Arc<Supervisor>,
     pub activity: ActivityStore,
+    pub events: Arc<EventHub>,
     pub updater: Updater,
     /// Set to true to ask the process to exit (after handing off to the update helper).
     pub exit: watch::Sender<bool>,

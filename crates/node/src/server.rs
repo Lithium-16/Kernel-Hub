@@ -11,14 +11,17 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use futures::{SinkExt, StreamExt};
-use kernel_protocol::{Activity, Catalog, Envelope, ErrorCode, ErrorInfo, Payload, Welcome};
+use kernel_protocol::{
+    Activity, Catalog, Envelope, ErrorCode, ErrorInfo, Events, Payload, Welcome,
+};
+use tokio::sync::broadcast;
 use tokio::sync::{mpsc, watch};
 
 use crate::netfilter;
 use crate::node::Node;
 
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
-const CAPABILITIES: &[&str] = &["catalog", "actions", "activity"];
+const CAPABILITIES: &[&str] = &["catalog", "actions", "activity", "events"];
 
 #[derive(Clone)]
 pub struct AppState {
@@ -138,9 +141,18 @@ async fn serve_client(
     state: &AppState,
 ) {
     let mut shutdown = state.shutdown.clone();
+    let mut live = state.node.events.subscribe();
     loop {
         let text = tokio::select! {
             t = next_text(stream) => t,
+            e = live.recv() => {
+                match e {
+                    Ok(event) => { let _ = tx.send(Envelope::new(Payload::Event(event))).await; }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => return,
+                }
+                continue;
+            }
             _ = shutdown.changed() => None,
         };
         let Some(text) = text else { return };
@@ -192,6 +204,17 @@ async fn serve_client(
                     Ok(entries) => {
                         Envelope::reply(&env.id, Payload::Activity(Activity { entries }))
                     }
+                    Err(e) => error(Some(&env.id), ErrorCode::Internal, e.to_string()),
+                };
+                let _ = tx.send(reply).await;
+            }
+            Payload::EventsQuery(q) => {
+                let reply = match state
+                    .node
+                    .events
+                    .query(q.limit.unwrap_or(50), q.module.as_deref())
+                {
+                    Ok(events) => Envelope::reply(&env.id, Payload::Events(Events { events })),
                     Err(e) => error(Some(&env.id), ErrorCode::Internal, e.to_string()),
                 };
                 let _ = tx.send(reply).await;

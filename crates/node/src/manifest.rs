@@ -221,7 +221,8 @@ mod tests {
                 "counter.reset",
                 "slow.wait",
                 "greet.count",
-                "debug.crash"
+                "debug.crash",
+                "event.emit"
             ]
         );
         assert_eq!(m.action("greet.say").unwrap().tool_name(), "greet__say");

@@ -8,10 +8,10 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use futures::{SinkExt, StreamExt};
-use kernel_node::config::{Config, SupervisorConfig};
+use kernel_node::config::{Config, NotifyConfig, SupervisorConfig};
 use kernel_protocol::{
     ActionInvoke, ActionResult, ActivityQuery, ActivityResult, Actor, ActorKind, ClientInfo, Empty,
-    Envelope, ErrorCode, Hello, ModuleInfo, ModuleState, Payload,
+    Envelope, ErrorCode, EventsQuery, Hello, ModuleInfo, ModuleState, Payload,
 };
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
@@ -23,6 +23,8 @@ const TOKEN: &str = "e2e-test-token";
 
 struct Client {
     ws: Ws,
+    /// Events pushed by the node while waiting for replies.
+    pushed: Vec<kernel_protocol::NodeEvent>,
 }
 
 impl Client {
@@ -30,7 +32,10 @@ impl Client {
         let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
             .await
             .expect("connect");
-        Self { ws }
+        Self {
+            ws,
+            pushed: Vec::new(),
+        }
     }
 
     async fn send(&mut self, payload: Payload) -> String {
@@ -57,7 +62,13 @@ impl Client {
 
     async fn request(&mut self, payload: Payload) -> Payload {
         let id = self.send(payload).await;
-        let env = self.recv().await.expect("reply");
+        let env = loop {
+            let env = self.recv().await.expect("reply");
+            match env.payload {
+                Payload::Event(e) => self.pushed.push(e),
+                _ => break env,
+            }
+        };
         assert_eq!(
             env.re.as_deref(),
             Some(id.as_str()),
@@ -133,6 +144,44 @@ impl Client {
     }
 }
 
+/// Stands in for a Discord webhook and keeps every message it is sent.
+struct FakeDiscord {
+    url: String,
+    got: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl FakeDiscord {
+    async fn start() -> Self {
+        use axum::{Json, Router, extract::State, routing::post};
+        type Got = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+        async fn hook(State(got): State<Got>, Json(body): Json<Value>) {
+            got.lock()
+                .unwrap()
+                .push(body["content"].as_str().unwrap_or_default().to_owned());
+        }
+        let got: Got = Default::default();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/hook", listener.local_addr().unwrap());
+        let app = Router::new()
+            .route("/hook", post(hook))
+            .with_state(got.clone());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        Self { url, got }
+    }
+
+    async fn wait_for(&self, n: usize) -> Vec<String> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let got = self.got.lock().unwrap().clone();
+            if got.len() >= n {
+                return got;
+            }
+            assert!(Instant::now() < deadline, "Discord got {got:?}");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
 fn error_code(r: &ActionResult) -> Option<ErrorCode> {
     r.error.as_ref().map(|e| e.code)
 }
@@ -144,6 +193,7 @@ async fn node_runs_hello_module_end_to_end() {
         return;
     };
     let data = tempfile::tempdir().unwrap();
+    let discord = FakeDiscord::start().await;
     let cfg = Config {
         node_id: "test-node".into(),
         node_name: "Test node".into(),
@@ -165,6 +215,12 @@ async fn node_runs_hello_module_end_to_end() {
         },
         allow_lan: false,
         update: Default::default(),
+        notify: NotifyConfig {
+            discord_webhook: discord.url.clone(),
+            min_level: "warn".into(),
+            include: vec!["hello.test.*".into()],
+            mute: vec![],
+        },
         path: None,
     };
     let running = kernel_node::start(cfg).await.expect("node starts");
@@ -190,7 +246,7 @@ async fn node_runs_hello_module_end_to_end() {
     }
 
     let hello = c.wait_for_state(ModuleState::Running).await;
-    assert_eq!(hello.actions.len(), 5);
+    assert_eq!(hello.actions.len(), 6);
 
     // A button press works, and parameter validation comes from the module.
     let r = c
@@ -294,6 +350,43 @@ async fn node_runs_hello_module_end_to_end() {
             .iter()
             .any(|e| e.actor.kind == ActorKind::Phone && e.action == "counter.reset")
     );
+
+    // Events: reported by the module, pushed to clients, kept, and sent to Discord.
+    let r = c
+        .invoke(
+            ActorKind::User,
+            "event.emit",
+            json!({"message": "Steve joined @everyone"}),
+        )
+        .await;
+    assert!(r.ok, "{r:?}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !c.pushed.iter().any(|e| e.kind == "test.event") {
+        assert!(Instant::now() < deadline, "event was never pushed");
+        if let Some(Envelope {
+            payload: Payload::Event(e),
+            ..
+        }) = c.recv().await
+        {
+            c.pushed.push(e);
+        }
+    }
+    let events = match c
+        .request(Payload::EventsQuery(EventsQuery {
+            limit: None,
+            module: Some("hello".into()),
+        }))
+        .await
+    {
+        Payload::Events(e) => e.events,
+        other => panic!("expected events, got {other:?}"),
+    };
+    assert_eq!(events[0].kind, "test.event");
+    assert_eq!(events[0].data["source"], "hello");
+    assert_eq!(events[0].node_id, "test-node");
+    let text = discord.wait_for(1).await.remove(0);
+    assert!(text.contains("Test node · Hello"), "{text}");
+    assert!(text.contains("@\u{200b}everyone"), "{text}");
 
     let node = running.node.clone();
     running.shutdown().await;

@@ -3,10 +3,12 @@
 pub mod activity;
 pub mod builtin;
 pub mod config;
+pub mod events;
 pub mod manifest;
 pub mod mcp;
 pub mod netfilter;
 pub mod node;
+pub mod notify;
 pub mod server;
 pub mod supervisor;
 pub mod update;
@@ -21,6 +23,7 @@ use tokio::task::JoinHandle;
 
 use crate::activity::ActivityStore;
 use crate::config::Config;
+use crate::events::EventHub;
 use crate::node::Node;
 use crate::supervisor::Supervisor;
 use crate::update::Updater;
@@ -49,6 +52,7 @@ impl Running {
 /// Look for new builds a minute after start, then every `every`.
 async fn check_for_updates(node: Arc<Node>, every: Duration, mut stop: watch::Receiver<bool>) {
     let mut wait = Duration::from_secs(60);
+    let mut announced = 0;
     loop {
         tokio::select! {
             _ = tokio::time::sleep(wait) => {}
@@ -60,7 +64,19 @@ async fn check_for_updates(node: Arc<Node>, every: Duration, mut stop: watch::Re
                 tracing::info!(build = r.build, "new build found; installing");
                 node.auto_install().await;
             }
-            Ok(Some(r)) => tracing::info!(build = r.build, "new build available"),
+            Ok(Some(r)) => {
+                tracing::info!(build = r.build, "new build available");
+                if r.build != announced {
+                    announced = r.build;
+                    node.events.emit(
+                        builtin::ID,
+                        "update.available",
+                        kernel_protocol::EventLevel::Info,
+                        format!("Build {} is out (running {})", r.build, update::build()),
+                        Default::default(),
+                    );
+                }
+            }
             Ok(None) => tracing::debug!("up to date"),
             Err(e) => tracing::warn!(error = %e, "update check failed"),
         }
@@ -71,6 +87,8 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
     std::fs::create_dir_all(cfg.logs_dir().join("modules"))
         .with_context(|| format!("creating {}", cfg.data_dir.display()))?;
     let activity = ActivityStore::open(&cfg.db_path()).context("opening activity log")?;
+    let events =
+        Arc::new(EventHub::open(&cfg.db_path(), &cfg.node_id).context("opening event log")?);
 
     let mut manifests = Vec::new();
     for found in manifest::discover(&cfg.modules_dir) {
@@ -88,7 +106,8 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
     tracing::info!(count = manifests.len(), dir = %cfg.modules_dir.display(), "modules discovered");
 
     let (shutdown, shutdown_rx) = watch::channel(false);
-    let (supervisor, mut tasks) = Supervisor::start(manifests, &cfg, shutdown_rx.clone());
+    let (supervisor, mut tasks) =
+        Supervisor::start(manifests, &cfg, events.clone(), shutdown_rx.clone());
 
     let listener = tokio::net::TcpListener::bind(cfg.listen)
         .await
@@ -100,6 +119,7 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
         cfg,
         supervisor,
         activity,
+        events,
         updater,
         exit,
         started: Instant::now(),
@@ -111,6 +131,22 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
             Duration::from_secs(interval * 3600),
             shutdown_rx.clone(),
         )));
+    }
+
+    if !node.cfg.notify.discord_webhook.is_empty() {
+        let notifier = notify::Notifier {
+            cfg: node.cfg.notify.clone(),
+            node_name: node.cfg.node_name.clone(),
+            names: node.catalog().into_iter().map(|m| (m.id, m.name)).collect(),
+            http: reqwest::Client::builder()
+                .user_agent(concat!("kerneld/", env!("CARGO_PKG_VERSION")))
+                .timeout(Duration::from_secs(20))
+                .build()
+                .context("building HTTP client")?,
+        };
+        tasks.push(tokio::spawn(
+            notifier.run(node.events.subscribe(), shutdown_rx.clone()),
+        ));
     }
 
     let app = server::router(server::AppState {

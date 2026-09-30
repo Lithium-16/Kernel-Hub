@@ -25,3 +25,11 @@ ping_misses = 3
 status_interval_ms = 2000
 max_crashes = 5
 crash_window_s = 300
+
+# Alerts for events (crashes, disconnects, new builds) through a Discord channel webhook:
+# channel settings > Integrations > Webhooks > New Webhook > Copy Webhook URL.
+[notify]
+discord_webhook = ""
+min_level = "warn"          # info, warn or error
+include = []                # also send these, e.g. ["player.joined", "minecraft.*"]
+mute = []                   # never send these

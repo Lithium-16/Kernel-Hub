@@ -38,6 +38,12 @@ async def wait(ctx: ActionContext, seconds: float) -> dict:
     return {"waited": seconds}
 
 
+@mod.action("event.emit")
+def emit(ctx: ActionContext, message: str, level: str) -> dict:
+    mod.emit("test.event", message, level=level, source="hello")
+    return {"emitted": message}
+
+
 @mod.action("debug.crash")
 def crash(ctx: ActionContext) -> None:
     os._exit(3)
