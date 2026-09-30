@@ -3,6 +3,7 @@ import { Palette } from './components/Palette.tsx';
 import { Sidebar, type View } from './components/Sidebar.tsx';
 import { TitleBar } from './components/TitleBar.tsx';
 import { NodeClient } from './lib/node.ts';
+import { loadNotifyLevel, shouldNotify, show, title } from './lib/notify.ts';
 import { loadSettings, type NodeSettings, saveSettings } from './lib/settings.ts';
 import { ActivityView } from './views/ActivityView.tsx';
 import { ModuleView } from './views/ModuleView.tsx';
@@ -28,6 +29,19 @@ export function App() {
     client.start();
     return () => client.stop();
   }, [client, settings.token]);
+
+  // Windows notifications for events at or above the chosen level.
+  const modulesRef = useRef(snap.modules);
+  modulesRef.current = snap.modules;
+  useEffect(
+    () =>
+      client.onEvent((e) => {
+        if (!shouldNotify(loadNotifyLevel(), e)) return;
+        const name = modulesRef.current.find((m) => m.id === e.module)?.name ?? e.module;
+        void show(title(e, name), e.message).catch(() => {});
+      }),
+    [client],
+  );
 
   // Open the first module once the catalog arrives, unless the user already went somewhere.
   useEffect(() => {

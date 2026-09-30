@@ -4,6 +4,7 @@ import { type Action, coerce, defaults, needsConfirm } from '../src/lib/actions.
 import { bytes, duration, label, stateTone, summary, value } from '../src/lib/format.ts';
 import { layoutStatus } from '../src/lib/layout.ts';
 import { edits, fromText, HIDDEN, type SettingField, toText } from '../src/lib/module-settings.ts';
+import { shouldNotify } from '../src/lib/notify.ts';
 
 describe('format', () => {
   it('formats values by key convention', () => {
@@ -193,5 +194,15 @@ describe('module settings form', () => {
     expect(fromText(field({}), 'fast')).toEqual({ error: 'poll_s must be a number' });
     expect(fromText(field({ type: 'list', key: 'apps' }), '{"a": 1}')).toHaveProperty('error');
     expect(toText(field({ type: 'list', value: ['x'] }))).toBe('["x"]');
+  });
+});
+
+describe('notifications', () => {
+  it('filters by level', () => {
+    expect(shouldNotify('warn', { level: 'error' })).toBe(true);
+    expect(shouldNotify('warn', { level: 'warn' })).toBe(true);
+    expect(shouldNotify('warn', { level: 'info' })).toBe(false);
+    expect(shouldNotify('info', { level: 'info' })).toBe(true);
+    expect(shouldNotify('off', { level: 'error' })).toBe(false);
   });
 });

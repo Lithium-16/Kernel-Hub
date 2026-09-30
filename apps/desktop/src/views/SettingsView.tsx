@@ -3,6 +3,12 @@ import { Icon } from '../components/Icon.tsx';
 import { TitleBar } from '../components/TitleBar.tsx';
 import { stateTone } from '../lib/format.ts';
 import type { Snapshot } from '../lib/node.ts';
+import {
+  loadNotifyLevel,
+  type NotifyLevel,
+  show as notify,
+  saveNotifyLevel,
+} from '../lib/notify.ts';
 import { type NodeSettings, validUrl } from '../lib/settings.ts';
 
 const CONN_TEXT = {
@@ -23,6 +29,7 @@ export function SettingsView({ settings, snapshot, onSave }: Props) {
   const [url, setUrl] = useState(settings.url);
   const [token, setToken] = useState(settings.token);
   const [show, setShow] = useState(false);
+  const [level, setLevel] = useState<NotifyLevel>(loadNotifyLevel);
   const urlOk = validUrl(url);
   const changed = url !== settings.url || token !== settings.token;
 
@@ -94,6 +101,40 @@ export function SettingsView({ settings, snapshot, onSave }: Props) {
             </button>
           </div>
         </form>
+        <div className="form" style={{ marginTop: 24 }}>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>Notifications</div>
+          <label className="field">
+            <span>Show Windows notifications for</span>
+            <span style={{ display: 'flex', gap: 6 }}>
+              <select
+                className="input"
+                style={{ flex: 1 }}
+                value={level}
+                onChange={(e) => {
+                  const v = e.target.value as NotifyLevel;
+                  setLevel(v);
+                  saveNotifyLevel(v);
+                }}
+              >
+                <option value="off">Nothing</option>
+                <option value="error">Errors only (crashes, failed backups)</option>
+                <option value="warn">Warnings and errors (disconnects, low VRAM, too)</option>
+                <option value="info">Everything (players joining, jobs done, too)</option>
+              </select>
+              <button
+                type="button"
+                className="btn"
+                disabled={level === 'off'}
+                onClick={() => void notify('🟢 Kernel', 'Notifications work.').catch(() => {})}
+              >
+                Test
+              </button>
+            </span>
+            <span className="hint">
+              While the app is running. For your phone, set up Discord alerts on the node.
+            </span>
+          </label>
+        </div>
       </div>
     </div>
   );
