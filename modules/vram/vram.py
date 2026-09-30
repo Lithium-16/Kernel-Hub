@@ -8,19 +8,25 @@ closed when their `stop_when_needed` says so. `watch` apps (Roblox) are never to
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from gate import Gate, Request, Turns
 from kernel_sdk import ActionError
 
-KINDS = ("ollama", "comfyui", "process", "watch")
+KINDS = ("ollama", "llm", "comfyui", "process", "watch")
+# Which turn an app's work belongs to (see gate.py).
+LLM_KINDS = ("ollama", "llm")
+OOM = ("out of memory", "outofmemory", "allocation on device")
 MB = 1024 * 1024
 # A process app counts as busy (holding the GPU for real work) above this much VRAM.
 BUSY_MB = 512
@@ -61,6 +67,7 @@ class App:
     process: tuple[str, ...] = ()
     exclusive: bool = False
     stop_when_needed: bool = False
+    proxy_port: int = 0
 
     @classmethod
     def parse(cls, raw: Any) -> App:
@@ -76,9 +83,23 @@ class App:
         if kind in ("process", "watch") and not process:
             raise ValueError(f"app '{name}': a {kind} app needs process = \"name.exe\"")
         url = str(raw.get("url", "")).rstrip("/")
-        if kind in ("ollama", "comfyui") and not url.startswith(("http://", "https://")):
+        if kind in ("ollama", "llm", "comfyui") and not url.startswith("http://"):
             raise ValueError(f"app '{name}': needs url = \"http://127.0.0.1:port\"")
-        unknown = set(raw) - {"name", "kind", "priority", "url", "process", "exclusive", "stop_when_needed"}
+        proxy_port = int(raw.get("proxy_port", 0))
+        if proxy_port and kind not in ("ollama", "llm", "comfyui"):
+            raise ValueError(f"app '{name}': only ollama, llm and comfyui apps can have a proxy_port")
+        if not 0 <= proxy_port < 65536:
+            raise ValueError(f"app '{name}': proxy_port must be a port number")
+        unknown = set(raw) - {
+            "name",
+            "kind",
+            "priority",
+            "url",
+            "process",
+            "exclusive",
+            "stop_when_needed",
+            "proxy_port",
+        }
         if unknown:
             raise ValueError(f"app '{name}': unknown key(s) {', '.join(sorted(unknown))}")
         return cls(
@@ -89,11 +110,17 @@ class App:
             process=tuple(p.lower() for p in process),
             exclusive=bool(raw.get("exclusive", False)),
             stop_when_needed=bool(raw.get("stop_when_needed", False)),
+            proxy_port=proxy_port,
         )
 
     @property
     def freeable(self) -> bool:
-        return self.kind in ("ollama", "comfyui") or (self.kind == "process" and self.stop_when_needed)
+        return self.kind in ("ollama", "comfyui") or (self.kind in ("process", "llm") and self.stop_when_needed)
+
+    @property
+    def upstream(self) -> tuple[str, int]:
+        u = urllib.parse.urlparse(self.url)
+        return u.hostname or "127.0.0.1", u.port or 80
 
 
 @dataclass
@@ -189,6 +216,16 @@ class Manager:
         self.last_freed: dict[str, float] = {}
         self.last_action: tuple[str, float] | None = None
         self.snapshot: dict[str, Any] = {}
+        self.turns = Turns(
+            float(settings["llm_max_wait_s"]),
+            float(settings["image_max_wait_s"]),
+            before_llm=self.make_room_for_llm,
+            log=self.log,
+        )
+        self.gates: list[Gate] = []
+        self.history_seen: set[str] | None = None
+        self.retried: set[str] = set()  # jobs we queued again, never retried twice
+        self.retries = 0
 
     def app(self, name: str) -> App:
         for a in self.apps:
@@ -204,6 +241,7 @@ class Manager:
     async def measure(self, app: App, per_pid: dict[int, int], by_name: dict[str, list[int]]) -> Usage:
         pids = tuple(pid for name in app.process for pid in by_name.get(name, []))
         by_process = sum(per_pid.get(pid, 0) for pid in pids) // MB
+        running = self.turns.inflight.get(app.name, 0)
         if app.kind == "ollama":
             try:
                 ps = await self.call("GET", f"{app.url}/api/ps")
@@ -212,7 +250,13 @@ class Manager:
             models = [m for m in (ps or {}).get("models") or [] if isinstance(m, dict)]
             mb = sum(int(m.get("size_vram") or 0) for m in models) // MB
             names = tuple(str(m.get("name") or m.get("model")) for m in models)
-            return Usage(mb=mb, state="loaded" if models else "idle", detail=", ".join(names), models=names)
+            state = "busy" if running else "loaded" if models else "idle"
+            return Usage(mb=mb, state=state, detail=", ".join(names), models=names)
+        if app.kind == "llm":
+            if not pids and not running:
+                return Usage()
+            state = "busy" if running else "loaded" if by_process >= 256 else "idle"
+            return Usage(mb=by_process, state=state, pids=pids)
         if app.kind == "comfyui":
             try:
                 stats = await self.call("GET", f"{app.url}/system_stats")
@@ -234,6 +278,7 @@ class Manager:
         by_name = await asyncio.to_thread(self.processes)
         results = await asyncio.gather(*(self.measure(a, per_pid, by_name) for a in self.apps))
         self.usage = {a.name: u for a, u in zip(self.apps, results, strict=True)}
+        self.turns.set_image_busy(any(self.usage[a.name].state == "busy" for a in self.apps if a.kind == "comfyui"))
         totals = self.gpu.totals()
         snap: dict[str, Any] = {"auto": self.auto}
         if totals:
@@ -253,6 +298,10 @@ class Manager:
             other = totals[0] // MB - sum(r["vram_mb"] for r in rows)
             rows.append({"app": "Everything else", "vram_mb": max(0, other), "state": "", "priority": None, "detail": ""})
         snap["apps"] = rows
+        if self.gates:
+            snap.update(self.turns.status())
+        if self.retries:
+            snap["retried_jobs"] = self.retries
         if self.last_action:
             text, at = self.last_action
             snap["last_action"] = text
@@ -267,6 +316,8 @@ class Manager:
         u = self.usage.get(app.name, Usage())
         if u.state == "off" or not app.freeable and not stop:
             return 0
+        if u.state == "busy" and app.kind in LLM_KINDS:
+            return 0  # never pull a model out from under a request
         held = u.mb
         try:
             if app.kind == "ollama":
@@ -278,7 +329,7 @@ class Manager:
                 if u.state == "busy" or held < 256:
                     return 0
                 await self.call("POST", f"{app.url}/free", {"unload_models": True, "free_memory": True}, 30)
-            elif app.kind == "process" and (app.stop_when_needed if stop is None else stop) and u.pids:
+            elif app.kind in ("process", "llm") and (app.stop_when_needed if stop is None else stop) and u.pids:
                 await asyncio.to_thread(self.stop_process, list(u.pids))
             else:
                 return 0
@@ -335,10 +386,108 @@ class Manager:
             )
 
     async def poll(self) -> None:
+        await self.start_gates()
         while True:
             await self.refresh()
             await self.balance()
-            await asyncio.sleep(float(self.settings["poll_s"]))
+            if self.settings["retry_out_of_memory"]:
+                await self.retry_failed()
+            await self.turns.tick()
+            # Someone is waiting for a turn: look again soon, so the turn changes on time.
+            waiting = self.turns.llm_waiting or self.turns.image_waiting
+            await asyncio.sleep(1.0 if waiting else float(self.settings["poll_s"]))
+
+    # -- turns ----------------------------------------------------------------------------
+
+    async def start_gates(self) -> None:
+        host = str(self.settings["proxy_host"])
+        for app in self.apps:
+            if not app.proxy_port:
+                continue
+            gate = Gate(app.name, app.upstream, self._hold_for(app), log=self.log)
+            try:
+                await gate.start(host, app.proxy_port)
+            except OSError as e:
+                self.log.error("can't listen on %s:%s for %s: %s", host, app.proxy_port, app.name, e)
+                self.emit(
+                    "gate.failed",
+                    f"Couldn't open port {app.proxy_port} for {app.name}: {e}",
+                    level="warn",
+                )
+                continue
+            self.gates.append(gate)
+            self.log.info("%s takes turns through %s:%s", app.name, host, app.proxy_port)
+
+    def _hold_for(self, app: App) -> Callable[[Request], Any]:
+        if app.kind in LLM_KINDS:
+            # Only requests that make the model work; lists and versions pass straight through.
+            return lambda req: self.turns.llm(app.name) if req.method == "POST" else None
+
+        @contextlib.asynccontextmanager
+        async def image_turn() -> AsyncIterator[None]:
+            await self.turns.image()
+            yield
+
+        return lambda req: image_turn() if req.method == "POST" and req.path.split("?")[0] == "/prompt" else None
+
+    async def make_room_for_llm(self) -> None:
+        """Before the LLM's turn: unload an idle ComfyUI if VRAM is short."""
+        await self.refresh()
+        need = int(self.settings["llm_reserve_mb"])
+        if self.free_mb is None or self.free_mb >= need:
+            return
+        for app in self.apps:
+            if app.kind == "comfyui" and self.usage[app.name].state != "busy":
+                await self.free(app, "for the LLM's turn")
+
+    # -- retries --------------------------------------------------------------------------
+
+    async def retry_failed(self) -> None:
+        """Queue a job again, once, if it failed for lack of VRAM."""
+        for app in self.apps:
+            if app.kind != "comfyui" or self.usage.get(app.name, Usage()).state == "off":
+                continue
+            try:
+                history = await self.call("GET", f"{app.url}/history?max_items=16")
+            except (Offline, ActionError, ValueError):
+                continue
+            if not isinstance(history, dict):
+                continue
+            if self.history_seen is None:
+                self.history_seen = set(history)
+                continue
+            for pid, entry in history.items():
+                if pid in self.history_seen:
+                    continue
+                self.history_seen.add(pid)
+                if pid not in self.retried and out_of_memory(entry):
+                    await self.retry(app, pid, entry)
+
+    async def retry(self, app: App, pid: str, entry: dict[str, Any]) -> None:
+        prompt = entry.get("prompt") or []
+        if len(prompt) < 3 or not isinstance(prompt[2], dict):
+            return
+        extra = prompt[3] if len(prompt) > 3 and isinstance(prompt[3], dict) else {}
+        # Make room first: every idle app below ComfyUI, and any idle LLM.
+        for other in self.apps:
+            u = self.usage.get(other.name, Usage())
+            if other is not app and u.state != "busy" and (other.priority < app.priority or other.kind in LLM_KINDS):
+                await self.free(other, f"to retry a {app.name} job that ran out of VRAM")
+        body = {"prompt": prompt[2], "extra_data": extra, "client_id": extra.get("client_id") or "kernel"}
+        try:
+            r = await self.call("POST", f"{app.url}/prompt", body, 30)
+        except (Offline, ActionError) as e:
+            self.log.warning("couldn't queue the job again: %s", e)
+            return
+        if isinstance(r, dict) and r.get("prompt_id"):
+            self.retried.add(str(r["prompt_id"]))
+            self.retries += 1
+            self.emit(
+                "job.retried",
+                f"A {app.name} job ran out of VRAM; made room and queued it again",
+                failed=pid,
+                retry=r["prompt_id"],
+            )
 
     # -- actions --------------------------------------------------------------------------
 
@@ -384,6 +533,17 @@ class Manager:
         self.auto = on
         self.snapshot["auto"] = on
         return {"auto": on}
+
+
+def out_of_memory(entry: dict[str, Any]) -> bool:
+    status = entry.get("status") or {}
+    if status.get("status_str") != "error":
+        return False
+    for message in status.get("messages") or []:
+        if isinstance(message, list) and len(message) == 2 and message[0] == "execution_error":
+            text = f"{message[1].get('exception_type', '')} {message[1].get('exception_message', '')}".lower()
+            return any(k in text for k in OOM)
+    return False
 
 
 def terminate(pids: list[int]) -> int:

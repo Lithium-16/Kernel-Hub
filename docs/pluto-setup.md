@@ -130,6 +130,22 @@ Higher priority keeps its VRAM. A `process` app is closed to make room only with
 `stop_when_needed = true`; without it, it's just measured. **Give the GPU to…** frees
 everything else for one app; **Free idle VRAM** unloads whatever isn't busy.
 
+**Taking turns.** So LLMs and image/video generation don't fight over the GPU, point your apps
+at the VRAM module's proxies instead of the apps themselves:
+
+| Instead of | Use | For |
+|---|---|---|
+| `http://127.0.0.1:11434` (Ollama) | `http://127.0.0.1:11435` | Open WebUI, scripts, anything that talks to Ollama |
+| `http://127.0.0.1:8188` (ComfyUI) | `http://127.0.0.1:8189` | the ComfyUI page in your browser, and `url` in `comfyui.toml` |
+
+Then: while ComfyUI is working, LLM requests wait, and new images join the queue, so images
+around an LLM request run back to back and models swap once. A running LLM request makes new
+image jobs wait for it (a few seconds). No LLM request waits more than `llm_max_wait_s` (90 s).
+An image job that fails for lack of VRAM is queued again once, after making room. Apps that
+still talk to Ollama or ComfyUI directly aren't held back, but the unloading above still covers
+them. Other LLM servers (LM Studio, KoboldCpp) can take turns too: add them as
+`kind = "llm"` with their `url` and a `proxy_port`.
+
 **Roblox.** Works with no settings. Low-power AFK mode is on by default. `data\settings\roblox.toml`
 options:
 

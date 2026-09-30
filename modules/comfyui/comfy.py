@@ -365,7 +365,8 @@ class Comfy:
         for i in range(count):
             s = random.randint(0, MAX_SEED) if seed < 0 else seed + i
             body = {"prompt": prepare(graph, prompt, negative, s), "client_id": "kernel"}
-            r = await self.api("POST", "/prompt", body)
+            # Through the VRAM module's proxy this can wait for an LLM's turn to end.
+            r = await self.api("POST", "/prompt", body, timeout=620)
             if not isinstance(r, dict) or "prompt_id" not in r:
                 errors = r.get("node_errors") if isinstance(r, dict) else None
                 detail = (r or {}).get("error", {}).get("message") if isinstance(r, dict) else None

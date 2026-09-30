@@ -8,6 +8,8 @@ entry = "main.py"
 # Talks to ComfyUI's own HTTP API: queue, workflows, models and downloads.
 # Override per machine in the node's data\settings\comfyui.toml.
 [settings]
+# ComfyUI's address. Use the VRAM module's proxy (http://127.0.0.1:8189) so jobs from Kernel
+# take turns with LLMs.
 url = "http://127.0.0.1:8188"
 # The ComfyUI folder (the one with main.py), or the portable build's root folder.
 comfy_dir = ""
@@ -33,6 +35,7 @@ params.workflow = { type = "string", description = "Name of a workflow file in w
 params.prompt = { type = "string", description = "Positive prompt (empty keeps the workflow's)", default = "" }
 params.negative = { type = "string", description = "Negative prompt (empty keeps the workflow's)", default = "" }
 params.seed = { type = "int", description = "Seed, -1 for random", default = -1, min = -1 }
+timeout_s = 660
 params.count = { type = "int", description = "How many to queue", default = 1, min = 1, max = 32 }
 
 [[actions]]

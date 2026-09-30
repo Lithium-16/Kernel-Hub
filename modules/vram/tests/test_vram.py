@@ -17,6 +17,19 @@ APPS = [
 ]
 
 
+BASE = {
+    "auto": True,
+    "min_free_mb": 1024,
+    "after_s": 15,
+    "poll_s": 3.0,
+    "llm_max_wait_s": 90,
+    "image_max_wait_s": 600,
+    "llm_reserve_mb": 6144,
+    "proxy_host": "127.0.0.1",
+    "retry_out_of_memory": True,
+}
+
+
 class FakeGpu:
     def __init__(self):
         self.used, self.total = 6 * GB, 11 * GB
@@ -68,7 +81,7 @@ class World:
 
 def make(**over):
     world, gpu, events, now = World(), FakeGpu(), [], [0.0]
-    settings = {"auto": True, "min_free_mb": 1024, "after_s": 15, "poll_s": 3.0, "apps": APPS, **over}
+    settings = {**BASE, "apps": APPS, **over}
     m = Manager(
         settings,
         gpu=gpu,
