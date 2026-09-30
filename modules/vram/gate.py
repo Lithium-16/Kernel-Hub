@@ -233,8 +233,9 @@ class Gate:
 
     async def forward(self, req: Request, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
-            up_reader, up_writer = await asyncio.open_connection(*self.upstream)
-        except OSError:
+            # Windows takes ~2 s to refuse a port nobody listens on; don't hang longer than that.
+            up_reader, up_writer = await asyncio.wait_for(asyncio.open_connection(*self.upstream), 10)
+        except (OSError, TimeoutError):
             body = f"{self.name} isn't running".encode()
             writer.write(
                 b"HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nConnection: close\r\n"

@@ -225,7 +225,8 @@ async def test_proxy_holds_comfyui_prompts_while_an_llm_runs():
 async def test_proxy_reports_a_stopped_app():
     m = manager_with_proxies(1)  # nothing listens on port 1
     _, llm_port = await start_gate(m, "Ollama")
-    reply = await asyncio.wait_for(request(llm_port, "GET", "/api/tags"), 2)
+    # Windows takes about 2 s to refuse a connection to a closed port.
+    reply = await asyncio.wait_for(request(llm_port, "GET", "/api/tags"), 15)
     assert reply.startswith("HTTP/1.1 502") and "Ollama isn't running" in reply
 
 
