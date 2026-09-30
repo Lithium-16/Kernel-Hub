@@ -38,8 +38,8 @@ async fn ws_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
 ) -> Response {
-    if !netfilter::is_allowed(addr.ip()) {
-        tracing::warn!(%addr, "rejected connection from outside the LAN/tailnet");
+    if !netfilter::is_allowed(addr.ip(), state.node.cfg.allow_lan) {
+        tracing::warn!(%addr, "rejected connection from outside the tailnet");
         return StatusCode::FORBIDDEN.into_response();
     }
     ws.on_upgrade(move |socket| handle_socket(socket, addr, state))

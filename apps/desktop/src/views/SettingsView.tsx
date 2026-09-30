@@ -60,7 +60,7 @@ export function SettingsView({ settings, snapshot, onSave }: Props) {
             <span className={`hint ${url && !urlOk ? 'c-bad' : ''}`}>
               {url && !urlOk
                 ? 'Use ws://host:port/ws'
-                : "Pluto's Tailscale name or LAN address, and the port from its node.toml."}
+                : "Pluto's Tailscale address (100.x.x.x) or name. The node only accepts Tailscale connections."}
             </span>
           </label>
           <label className="field">

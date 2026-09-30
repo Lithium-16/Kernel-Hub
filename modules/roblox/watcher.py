@@ -19,6 +19,21 @@ from typing import Any
 import psutil
 
 from kernel_sdk import ActionError
+from lowpower import (
+    WindowControl,
+    apply_flags,
+    global_settings_path,
+    newest_version_dir,
+    set_framerate_cap,
+    version_roots,
+    window_control,
+)
+
+PRIORITIES = {
+    "normal": getattr(psutil, "NORMAL_PRIORITY_CLASS", 0),
+    "below_normal": getattr(psutil, "BELOW_NORMAL_PRIORITY_CLASS", 10),
+    "idle": getattr(psutil, "IDLE_PRIORITY_CLASS", 19),
+}
 
 JOINING = re.compile(r"! Joining game '([0-9a-f\-]{36})' place ([0-9]+) at ([0-9.]+)")
 
@@ -146,8 +161,19 @@ class Watcher:
         processes: Callable[[], list[Any]] | None = None,
         launch: Callable[[str], None] = launch_uri,
         clock: Callable[[], float] = time.time,
+        windows: WindowControl | None = None,
+        roots: list[Path] | None = None,
+        global_settings: Path | None = None,
     ) -> None:
         self.settings = settings
+        if settings["priority"] not in PRIORITIES:
+            raise ValueError(f"priority must be one of {', '.join(PRIORITIES)}")
+        self.win = windows if windows is not None else window_control()
+        self.roots = roots if roots is not None else version_roots()
+        self.global_settings = global_settings or global_settings_path()
+        self.tuned_pid: int | None = None
+        self.hidden: list[int] = []
+        self.low_power: dict[str, Any] = {}
         self.markers = Markers(settings["joining"], settings["joined"], settings["disconnected"], settings["left"])
         folder = Path(settings["logs_dir"]) if settings["logs_dir"] else default_logs_dir()
         self.tail = LogTail(folder)
@@ -197,10 +223,84 @@ class Watcher:
                 timespec="seconds"
             )
         snap["auto_rejoin"] = bool(self.settings["auto_rejoin"])
+        if procs:
+            self.tune_running(procs[0])
+        else:
+            self.prepare_launch()
+        snap.update(self.low_power)
         self.snapshot = snap
         if disconnected_now:
             await self.maybe_auto_rejoin()
         return snap
+
+    # -- low-power AFK mode ---------------------------------------------------------------
+
+    def prepare_launch(self) -> None:
+        """While Roblox is closed: graphics flags and the frame cap for its next start."""
+        self.tuned_pid, self.hidden = None, []
+        on = bool(self.settings["low_power"])
+        version = newest_version_dir(self.roots)
+        if version is None:
+            self.low_power["flags"] = "Roblox isn't installed here"
+        else:
+            try:
+                apply_flags(version, on)
+                self.low_power["flags"] = "applied" if on else "off"
+            except OSError as e:
+                self.low_power["flags"] = f"couldn't write ({e.strerror})"
+        if on:
+            try:
+                self.low_power["fps_cap"] = set_framerate_cap(self.global_settings, max(1, int(self.settings["fps_cap"])))
+            except OSError as e:
+                self.low_power["fps_cap"] = f"couldn't write ({e.strerror})"
+        self.low_power["window"] = "closed"
+
+    def tune_running(self, proc: Any) -> None:
+        """Once per client process, after it has joined: hide it, lower its priority, save power."""
+        if not self.settings["low_power"] or self.log.state != "in_game" or self.tuned_pid == proc.pid:
+            if self.low_power.get("window") == "closed":
+                self.low_power["window"] = "shown"
+            return
+        self.tuned_pid = proc.pid
+        notes = []
+        try:
+            proc.nice(PRIORITIES[self.settings["priority"]])
+        except (psutil.Error, OSError):
+            notes.append("priority refused")
+        cores = int(self.settings["cpu_cores"])
+        if cores > 0:
+            try:
+                proc.cpu_affinity(list(range(min(cores, psutil.cpu_count() or cores))))
+            except (psutil.Error, OSError, AttributeError):
+                notes.append("core limit refused")
+        if self.win is None:
+            self.low_power["window"] = "window control needs Windows"
+        else:
+            if self.settings["efficiency_mode"] and not self.win.efficiency(proc.pid, True):
+                notes.append("efficiency mode refused")
+            if self.settings["hide_window"]:
+                self.hidden = self.win.windows(proc.pid)
+                for hwnd in self.hidden:
+                    self.win.hide(hwnd)
+                self.low_power["window"] = "hidden" if self.hidden else "no window found"
+            else:
+                self.low_power["window"] = "shown"
+        self.low_power["tuning"] = ", ".join(notes) if notes else "applied"
+
+    def set_window(self, visible: bool) -> dict[str, Any]:
+        if self.win is None:
+            raise ActionError("module_failed", "showing and hiding the window only works on Windows")
+        procs = self.processes()
+        if not procs:
+            raise ActionError("invalid_params", "Roblox isn't running")
+        handles = self.hidden or self.win.windows(procs[0].pid)
+        if not handles:
+            raise ActionError("module_failed", "couldn't find Roblox's window")
+        for hwnd in handles:
+            (self.win.show if visible else self.win.hide)(hwnd)
+        self.hidden = [] if visible else handles
+        self.low_power["window"] = "shown" if visible else "hidden"
+        return {"window": self.low_power["window"]}
 
     async def poll(self) -> None:
         while True:

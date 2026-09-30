@@ -8,7 +8,7 @@
   - Writes <Root>\node.toml with a new node token (kept if it already exists).
   - Registers the "Kernel node" scheduled task: starts at logon, and every 5 minutes starts
     kerneld again if it isn't running (a watchdog). Self-updates restart through it too.
-  - Opens the port in Windows Firewall for your LAN and Tailscale only (needs admin).
+  - Opens the port in Windows Firewall for Tailscale only (needs admin). Not your home network.
 
   After this, updates come from the app: Node > Install update. You don't need this script again.
 
@@ -168,7 +168,8 @@ if (Test-Path $Config) {
 # Kernel node. Written by install-node.ps1; edit freely.
 node_id = "$id"
 node_name = "$env:COMPUTERNAME"
-listen = "0.0.0.0:$Port"          # kerneld itself only accepts LAN, Tailscale and localhost peers
+listen = "0.0.0.0:$Port"          # kerneld only accepts Tailscale and this PC
+allow_lan = false                 # true would also allow your home network
 token = "$nodeToken"
 modules_dir = 'app\modules'
 data_dir = 'data'
@@ -207,11 +208,11 @@ if (-not $NoFirewall) {
   if ($admin) {
     Get-NetFirewallRule -DisplayName 'Kernel node' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
     New-NetFirewallRule -DisplayName 'Kernel node' -Direction Inbound -Action Allow -Protocol TCP `
-      -LocalPort $Port -Program $exe -RemoteAddress @('LocalSubnet', '100.64.0.0/10') -Profile Any | Out-Null
-    Note "Port $Port open to your LAN and Tailscale (100.64.0.0/10) only"
+      -LocalPort $Port -Program $exe -RemoteAddress '100.64.0.0/10' -Profile Any | Out-Null
+    Note "Port $Port open to Tailscale (100.64.0.0/10) only"
   } else {
     Note 'Not running as admin, so the firewall rule was skipped. As admin, run:'
-    Note "  New-NetFirewallRule -DisplayName 'Kernel node' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Program '$exe' -RemoteAddress LocalSubnet,100.64.0.0/10 -Profile Any"
+    Note "  New-NetFirewallRule -DisplayName 'Kernel node' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port -Program '$exe' -RemoteAddress 100.64.0.0/10 -Profile Any"
   }
 }
 
@@ -233,8 +234,11 @@ $ts = $null
 if (Get-Command tailscale -ErrorAction SilentlyContinue) { $ts = (& tailscale ip -4 2>$null | Select-Object -First 1) }
 Write-Host ''
 Write-Host 'Done. In the Kernel app, open Settings and enter:' -ForegroundColor Green
-if ($ts) { Write-Host "   Address  ws://${ts}:$Port/ws   (Tailscale)" }
-Write-Host "   Address  ws://$($env:COMPUTERNAME.ToLower()):$Port/ws"
+if ($ts) {
+  Write-Host "   Address  ws://${ts}:$Port/ws"
+} else {
+  Write-Warning 'Tailscale not found on this PC. The node only accepts Tailscale connections, so install and sign in to Tailscale.'
+}
 if ($nodeToken) {
   Write-Host "   Token    $nodeToken"
 } else {

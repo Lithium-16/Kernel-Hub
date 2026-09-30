@@ -18,6 +18,19 @@ rejoin_cooldown_min = 10
 logs_dir = ""
 process = "RobloxPlayerBeta.exe"
 poll_s = 3.0
+# Low-power AFK mode. Graphics flags (only ones on Roblox's allowlist) and the frame cap apply
+# the next time Roblox starts; the rest applies once it has joined a game.
+low_power = true
+# Roblox's own frame-rate cap. Its menu offers 30 and up; lower values are written as-is,
+# and Roblox decides whether to honor them.
+fps_cap = 30
+hide_window = true
+# normal, below_normal or idle.
+priority = "below_normal"
+# Windows 11 Efficiency mode (EcoQoS).
+efficiency_mode = true
+# Limit Roblox to this many CPU cores. 0 = no limit.
+cpu_cores = 0
 # Log markers, from Bloxstrap's log reader. If Roblox changes its log format, fix them here.
 joining = ["[FLog::Output] ! Joining game"]
 joined = ["[FLog::Network] Replicator created:"]
@@ -37,6 +50,20 @@ label = "Relaunch"
 icon = "rotate-cw"
 description = "Closes the client and rejoins the place."
 ai = "confirm"
+
+[[actions]]
+id = "window.show"
+label = "Show Roblox"
+icon = "eye"
+description = "Brings the hidden Roblox window back."
+ai = "safe"
+
+[[actions]]
+id = "window.hide"
+label = "Hide Roblox"
+icon = "eye-off"
+description = "Hides the Roblox window again."
+ai = "safe"
 
 [[actions]]
 id = "client.close"

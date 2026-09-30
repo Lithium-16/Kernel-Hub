@@ -838,8 +838,8 @@ modules. None for UI code, where behavior tests matter more.
   a live console for modules with `console.tail` + `server.command`. Activity and Settings
   screens. The installer is a CI artifact. Node address and token live in local storage until
   pairing
-- [~] `kerneld` skeleton: config, logs, WebSocket listener with token auth and a LAN/tailnet
-  address filter, module supervisor, activity log in SQLite, single-instance lock.
+- [~] `kerneld` skeleton: config, logs, WebSocket listener with token auth and a Tailscale-only
+  address filter (home network opt-in, D19), module supervisor, activity log in SQLite, single-instance lock.
   **Still to do:** tray, TLS, SPAKE2 pairing between two machines over Tailscale
 - [x] **Node install and self-update** (D17): CI publishes `node-build-N` on every merge to main;
   `scripts/install-node.ps1` sets up Pluto (scheduled task with a 5-minute watchdog, firewall
@@ -867,7 +867,9 @@ command-line harness.
 - [~] **Roblox** module (`modules/roblox`, §10.5): process + log watching (state
   closed/menu/joining/in_game/disconnected, session time, memory, disconnect count), Rejoin /
   Relaunch / Close, optional auto-rejoin with a cooldown. Log markers are settings, taken from
-  Bloxstrap's log reader. **Still to do:** a run on Pluto, events
+  Bloxstrap's log reader. **Low-power AFK mode** (D18): allowlisted graphics flags, Roblox's frame
+  cap, and once in game a hidden window, lower priority and Efficiency mode, with Show/Hide
+  buttons. **Still to do:** a run on Pluto (measure the savings), events
 - [ ] Activity log screen, and a basic `approvals` flow for human `confirm_when`
 - [ ] Degraded mode when the home node is offline
 - [ ] Onboarding steps 1, 2, 4, 5
@@ -976,3 +978,5 @@ Resolved: Minecraft runs in WSL Ubuntu on Pluto under systemd (D16) · Pluto run
 | D15 | Weekly Minecraft backup, keep 1, verify before deleting the old one | my choice. Verification removes the "zero good backups" window |
 | D16 | Minecraft module drives WSL on Pluto through `wsl.exe` + bash scripts; no VM node, no RCON, no VM power module | that's how the server already runs (systemd + screen, playit.gg). One fewer node and secret |
 | D17 | Nodes update themselves from GitHub Releases: every merge to main is a release, installs are a button (or `auto_install`), a helper swaps the app folder and rolls back on failure | updating Pluto shouldn't need a trip to Pluto. SHA-256 over HTTPS from the one configured repo; whoever can publish releases there can run code on the node, same as whoever can push to main |
+| D18 | Roblox "low-power AFK mode" instead of a custom/headless client: allowlisted Fast Flags, Roblox's own frame cap, and Windows window/priority/EcoQoS controls | a truly headless client means patching or injecting into Roblox, which its anti-cheat (Hyperion) bans for and its terms forbid; Bloxstrap/Fishstrap already cover bootstrapping. Since 2025-09-29 only allowlisted flags work anyway |
+| D19 | Nodes accept only Tailscale and localhost; the home network is opt-in (`allow_lan`), and the firewall rule is Tailscale-only | my choice. Tailscale encrypts the traffic (ws:// on the LAN isn't encrypted until TLS lands) and nothing else on the home Wi-Fi can reach Kernel |
