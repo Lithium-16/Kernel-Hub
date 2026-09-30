@@ -4,6 +4,7 @@ pub mod activity;
 pub mod builtin;
 pub mod config;
 pub mod events;
+pub mod maintenance;
 pub mod manifest;
 pub mod mcp;
 pub mod netfilter;
@@ -84,6 +85,24 @@ async fn check_for_updates(node: Arc<Node>, every: Duration, mut stop: watch::Re
     }
 }
 
+/// Back up node.db ten minutes after start, then daily.
+async fn nightly_backups(node: Arc<Node>, mut stop: watch::Receiver<bool>) {
+    let mut wait = Duration::from_secs(600);
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(wait) => {}
+            _ = stop.changed() => return,
+        }
+        wait = maintenance::BACKUP_EVERY;
+        let n = node.clone();
+        match tokio::task::spawn_blocking(move || maintenance::backup(&n.cfg, &n.activity)).await {
+            Ok(Ok(path)) => tracing::info!(path = %path.display(), "backed up node.db"),
+            Ok(Err(e)) => tracing::warn!(error = %e, "backup failed"),
+            Err(e) => tracing::warn!(error = %e, "backup task failed"),
+        }
+    }
+}
+
 pub async fn start(cfg: Config) -> anyhow::Result<Running> {
     std::fs::create_dir_all(cfg.logs_dir().join("modules"))
         .with_context(|| format!("creating {}", cfg.data_dir.display()))?;
@@ -135,6 +154,11 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
             shutdown_rx.clone(),
         )));
     }
+
+    tasks.push(tokio::spawn(nightly_backups(
+        node.clone(),
+        shutdown_rx.clone(),
+    )));
 
     for index in 0..node.scheduler.entries.len() {
         tasks.push(tokio::spawn(schedule::run(

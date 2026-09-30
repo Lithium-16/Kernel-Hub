@@ -389,6 +389,47 @@ async fn node_runs_hello_module_end_to_end() {
     assert!(text.contains("Test node · Hello"), "{text}");
     assert!(text.contains("@\u{200b}everyone"), "{text}");
 
+    // Upkeep: logs, diagnostics and backups from the app.
+    let r = c
+        .invoke_on(
+            "node",
+            ActorKind::User,
+            "logs.tail",
+            json!({"module": "hello", "lines": 5}),
+        )
+        .await;
+    assert!(r.ok, "{r:?}");
+    let r = c
+        .invoke_on(
+            "node",
+            ActorKind::User,
+            "logs.tail",
+            json!({"module": "../../etc"}),
+        )
+        .await;
+    assert_eq!(error_code(&r), Some(ErrorCode::InvalidParams));
+    let r = c
+        .invoke_on("node", ActorKind::Assistant, "diag.bundle", json!({}))
+        .await;
+    let saved = r.result.expect("diagnostics saved")["saved"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let names: Vec<String> = zip::ZipArchive::new(std::fs::File::open(&saved).unwrap())
+        .unwrap()
+        .file_names()
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        names.contains(&"modules.json".to_string())
+            && names.contains(&"logs/hello.log".to_string()),
+        "{names:?}"
+    );
+    let r = c
+        .invoke_on("node", ActorKind::User, "backup.now", json!({}))
+        .await;
+    assert!(std::path::Path::new(r.result.unwrap()["saved"].as_str().unwrap()).is_file());
+
     // Schedules run as automations: confirm actions only when the schedule is approved.
     let scheduled = |approved| {
         let node = running.node.clone();

@@ -92,6 +92,13 @@ impl ActivityStore {
         Ok(())
     }
 
+    /// A consistent copy of the whole database (activity and events) at `path`.
+    pub fn backup_to(&self, path: &Path) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().expect("activity db lock");
+        conn.execute("VACUUM INTO ?1", params![path.to_string_lossy()])?;
+        Ok(())
+    }
+
     /// Newest first. `limit` is clamped to 1..=500.
     pub fn query(&self, limit: u32, module: Option<&str>) -> rusqlite::Result<Vec<ActivityEntry>> {
         let limit = limit.clamp(1, 500);
@@ -191,5 +198,20 @@ mod tests {
             1,
             "limit is clamped to at least 1"
         );
+    }
+}
+
+#[cfg(test)]
+mod backup_tests {
+    use super::*;
+
+    #[test]
+    fn backs_up_to_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ActivityStore::open(&dir.path().join("node.db")).unwrap();
+        let copy = dir.path().join("copy.db");
+        store.backup_to(&copy).unwrap();
+        let again = ActivityStore::open(&copy).unwrap();
+        assert!(again.query(10, None).unwrap().is_empty());
     }
 }

@@ -225,12 +225,66 @@ impl Node {
                 }
                 Err(e) => fail(ErrorCode::ModuleFailed, e),
             },
+            "logs.tail" => self.logs_tail(req),
+            "diag.bundle" => {
+                let extra = [
+                    ("modules.json", json!(self.catalog())),
+                    (
+                        "events.json",
+                        json!(self.events.query(200, None).unwrap_or_default()),
+                    ),
+                    (
+                        "activity.json",
+                        json!(self.activity.query(200, None).unwrap_or_default()),
+                    ),
+                ];
+                match crate::maintenance::diagnostics(&self.cfg, &extra) {
+                    Ok(path) => ActionResult::success(crate::maintenance::diag_summary(&path)),
+                    Err(e) => fail(ErrorCode::ModuleFailed, e.to_string()),
+                }
+            }
+            "backup.now" => match crate::maintenance::backup(&self.cfg, &self.activity) {
+                Ok(path) => ActionResult::success(json!({ "saved": path.to_string_lossy() })),
+                Err(e) => fail(ErrorCode::ModuleFailed, e),
+            },
             _ => fail(ErrorCode::Internal, "unhandled built-in action"),
+        }
+    }
+
+    fn logs_tail(&self, req: &ActionInvoke) -> ActionResult {
+        let module = req
+            .params
+            .get("module")
+            .and_then(|v| v.as_str())
+            .unwrap_or(builtin::ID);
+        let lines = req
+            .params
+            .get("lines")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100)
+            .clamp(1, 1000) as usize;
+        if module != builtin::ID && self.supervisor.get(module).is_none() {
+            return fail(
+                ErrorCode::InvalidParams,
+                format!("unknown module '{module}'"),
+            );
+        }
+        let Some(path) = crate::maintenance::log_path(&self.cfg, module) else {
+            return fail(ErrorCode::InvalidParams, "no log yet");
+        };
+        match crate::maintenance::tail(&path, lines) {
+            Ok(lines) => ActionResult::success(json!({ "module": module, "lines": lines })),
+            Err(e) => fail(ErrorCode::InvalidParams, format!("no log yet ({e})")),
         }
     }
 
     /// Quiet actions (safe, read-only, polled) stay out of the activity log.
     fn is_quiet(&self, req: &ActionInvoke) -> bool {
+        if req.module == builtin::ID {
+            return builtin::actions()
+                .iter()
+                .any(|a| a.id == req.action && a.quiet);
+        }
         self.supervisor
             .get(&req.module)
             .and_then(|slot| slot.manifest.action(&req.action).map(|a| a.spec.quiet))
