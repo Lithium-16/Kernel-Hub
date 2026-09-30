@@ -37,6 +37,12 @@ pub struct Config {
     /// Actions to run on a timer (`[[schedule]]` tables).
     #[serde(default)]
     pub schedule: Vec<crate::schedule::ScheduleConfig>,
+    /// Actions run when an event happens (`[[on_event]]` tables).
+    #[serde(default)]
+    pub on_event: Vec<crate::automations::OnEventConfig>,
+    /// Actions run when a module's status meets a condition for a while (`[[when]]` tables).
+    #[serde(default)]
+    pub when: Vec<crate::automations::WhenConfig>,
     /// The file this config was loaded from; the update helper restarts kerneld with it.
     #[serde(skip)]
     pub path: Option<PathBuf>,
@@ -190,6 +196,8 @@ impl Config {
         if !repo.is_empty() && repo.split('/').filter(|p| !p.is_empty()).count() != 2 {
             bail!("update.repo must look like owner/repo");
         }
+        crate::automations::Automations::new(&self.on_event, &self.when)
+            .map_err(|e| anyhow::anyhow!(e))?;
         for s in &self.schedule {
             crate::schedule::parse(&s.at)
                 .map_err(|e| anyhow::anyhow!("schedule \"{}\": {e}", s.name))?;

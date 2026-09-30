@@ -222,6 +222,13 @@ async fn node_runs_hello_module_end_to_end() {
             mute: vec![],
         },
         schedule: vec![],
+        on_event: vec![
+            toml::from_str(
+                "name = 'Reset on test events'\nevent = 'hello.test.*'\nmodule = 'hello'\naction = 'counter.reset'\napproved = true",
+            )
+            .unwrap(),
+        ],
+        when: vec![],
         path: None,
     };
     let running = kernel_node::start(cfg).await.expect("node starts");
@@ -388,6 +395,39 @@ async fn node_runs_hello_module_end_to_end() {
     let text = discord.wait_for(1).await.remove(0);
     assert!(text.contains("Test node · Hello"), "{text}");
     assert!(text.contains("@\u{200b}everyone"), "{text}");
+
+    // The event also triggered the [[on_event]] automation, as an automation.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let log = match c
+            .request(Payload::ActivityQuery(ActivityQuery {
+                limit: Some(5),
+                module: Some("hello".into()),
+            }))
+            .await
+        {
+            Payload::Activity(a) => a.entries,
+            other => panic!("expected activity, got {other:?}"),
+        };
+        if let Some(e) = log.iter().find(|e| e.actor.kind == ActorKind::Automation) {
+            assert_eq!(e.action, "counter.reset");
+            assert_eq!(
+                e.result,
+                ActivityResult::Ok,
+                "approved = true lets confirm actions run"
+            );
+            assert_eq!(
+                e.actor.reference.as_deref(),
+                Some("automation: Reset on test events")
+            );
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the automation never ran: {log:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     // Upkeep: logs, diagnostics and backups from the app.
     let r = c

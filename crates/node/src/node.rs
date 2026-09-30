@@ -28,6 +28,7 @@ pub struct Node {
     pub activity: ActivityStore,
     pub events: Arc<EventHub>,
     pub scheduler: Scheduler,
+    pub automations: crate::automations::Automations,
     pub updater: Updater,
     /// Set to true to ask the process to exit (after handing off to the update helper).
     pub exit: watch::Sender<bool>,
@@ -74,6 +75,9 @@ impl Node {
         status.insert("uptime_s".into(), json!(self.started.elapsed().as_secs()));
         if !self.scheduler.entries.is_empty() {
             status.insert("schedules".into(), self.scheduler.status());
+        }
+        if !self.automations.is_empty() {
+            status.insert("automations".into(), self.automations.status());
         }
         modules.push(ModuleInfo {
             id: builtin::ID.into(),

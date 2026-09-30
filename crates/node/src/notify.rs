@@ -21,7 +21,7 @@ fn rank(level: EventLevel) -> u8 {
 
 /// `pattern` names a kind (`player.joined`) or a module and kind (`minecraft.player.joined`);
 /// a trailing `*` matches anything after it (`minecraft.*`).
-fn matches(pattern: &str, e: &NodeEvent) -> bool {
+pub fn matches(pattern: &str, e: &NodeEvent) -> bool {
     let full = format!("{}.{}", e.module, e.kind);
     match pattern.strip_suffix('*') {
         Some(prefix) => e.kind.starts_with(prefix) || full.starts_with(prefix),

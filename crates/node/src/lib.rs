@@ -1,6 +1,7 @@
 //! kerneld: runs modules, exposes them over a WebSocket API, and logs every action.
 
 pub mod activity;
+pub mod automations;
 pub mod builtin;
 pub mod config;
 pub mod events;
@@ -136,12 +137,15 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
     let (exit, _) = watch::channel(false);
     let updater = Updater::new(&cfg);
     let cfg_schedules = cfg.schedule.clone();
+    let automations =
+        automations::Automations::new(&cfg.on_event, &cfg.when).map_err(anyhow::Error::msg)?;
     let node = Arc::new(Node {
         cfg,
         supervisor,
         activity,
         events,
         scheduler: schedule::Scheduler::new(&cfg_schedules),
+        automations,
         updater,
         exit,
         started: Instant::now(),
@@ -157,6 +161,15 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
 
     tasks.push(tokio::spawn(nightly_backups(
         node.clone(),
+        shutdown_rx.clone(),
+    )));
+    tasks.push(tokio::spawn(automations::on_events(
+        node.clone(),
+        shutdown_rx.clone(),
+    )));
+    tasks.push(tokio::spawn(automations::on_status(
+        node.clone(),
+        Duration::from_secs(10),
         shutdown_rx.clone(),
     )));
 

@@ -81,6 +81,30 @@ approved = true                 # needed for actions that normally ask first
 Runs missed while Pluto was off are skipped. The **Node** page lists each schedule with its next
 and last run, and a failed run is an event (so it can reach Discord).
 
+## Automations
+
+Also in node.toml: run an action when something happens, or when a status holds for a while.
+
+```toml
+[[on_event]]
+name = "Free VRAM after a batch"
+event = "comfyui.queue.finished"    # an event kind; "roblox.*" matches all of Roblox's
+module = "vram"
+action = "vram.free_idle"
+
+[[when]]
+name = "Stop an empty server"
+status = "minecraft"                 # whose status to check
+condition = "players_online == 0"    # ==, !=, <, <=, >, >= against a status value
+for_min = 30
+module = "minecraft"
+action = "server.stop"
+approved = true
+```
+
+A `when` automation runs once each time its condition starts holding, not over and over. The
+Node page lists every automation with its last run and result; a failure is an event.
+
 ## Module settings
 
 Per-machine settings go in `%LOCALAPPDATA%\Kernel\node\data\settings\<module>.toml` (they

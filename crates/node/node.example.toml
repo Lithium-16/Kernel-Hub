@@ -51,3 +51,24 @@ mute = []                   # never send these
 # action = "server.stop"
 # params = { delay_min = 5 }
 # approved = true
+
+# Automations with triggers. Same permission rules as schedules (approved = true for
+# actions that normally ask first).
+#
+# When an event happens (a kind, or module.kind; a trailing * matches anything after it):
+# [[on_event]]
+# name = "Free VRAM after a batch"
+# event = "comfyui.queue.finished"
+# module = "vram"
+# action = "vram.free_idle"
+# cooldown_min = 1
+#
+# When a module's status meets a condition for a while (==, !=, <, <=, >, >=):
+# [[when]]
+# name = "Stop an empty server"
+# status = "minecraft"
+# condition = "players_online == 0"
+# for_min = 30
+# module = "minecraft"
+# action = "server.stop"
+# approved = true
