@@ -98,6 +98,20 @@ wake_broadcast = "192.168.1.255"               # your LAN's broadcast address
 The PC being woken needs "Wake on Magic Packet" on in its network adapter's properties
 (Advanced and Power Management tabs) and in the BIOS, and Windows **fast startup turned off**.
 
+**ComfyUI.** Tell it where ComfyUI lives, in `data\settings\comfyui.toml`. For the portable build:
+
+```toml
+comfy_dir = "D:/ComfyUI_windows_portable"
+start_command = ["python_embeded\\python.exe", "-s", "ComfyUI\\main.py", "--windows-standalone-build"]
+```
+
+(Leave `start_command` empty if you start ComfyUI yourself; everything else still works.)
+To run workflows from Kernel, open each one in ComfyUI, use **Workflow > Export (API)**, and save
+it in `kernel-workflows\` inside `comfy_dir`. The prompt goes into a `{{prompt}}` placeholder if the
+workflow has one, otherwise into the text box wired to the sampler's positive input (same for
+`{{negative}}`). Downloads take Hugging Face links and Civitai *download* links; set
+`civitai_token` for Civitai files that need an account.
+
 **Roblox.** Works with no settings. Low-power AFK mode is on by default. `data\settings\roblox.toml`
 options:
 
