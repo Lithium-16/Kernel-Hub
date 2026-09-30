@@ -18,7 +18,7 @@ def status() -> dict:
 @mod.action("greet.say")
 def greet(ctx: ActionContext, name: str) -> dict:
     state["greetings"] += 1
-    return {"message": f"Hello, {name}!", "count": state["greetings"]}
+    return {"message": f"{mod.settings['greeting']}, {name}!", "count": state["greetings"]}
 
 
 @mod.action("counter.reset")

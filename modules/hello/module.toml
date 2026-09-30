@@ -5,6 +5,10 @@ version = "0.1.0"
 runtime = "python"
 entry = "main.py"
 
+[settings]
+# How greetings start.
+greeting = "Hello"
+
 [[actions]]
 id = "greet.say"
 label = "Say hello"

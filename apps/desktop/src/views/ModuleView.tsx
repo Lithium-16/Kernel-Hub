@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '../components/Icon.tsx';
+import { ModuleLog } from '../components/ModuleLog.tsx';
+import { ModuleSettings } from '../components/ModuleSettings.tsx';
 import { ParamForm } from '../components/ParamForm.tsx';
 import { TitleBar } from '../components/TitleBar.tsx';
 import { type Action, hasParams, needsConfirm, needsInput } from '../lib/actions.ts';
@@ -28,7 +30,12 @@ export function ModuleView({
   const running = module.state === 'running';
   const ids = new Set(module.actions.map((a) => a.id));
   const hasConsole = [...CONSOLE_ACTIONS].every((id) => ids.has(id));
-  const usable = module.actions.filter((a) => !(hasConsole && CONSOLE_ACTIONS.has(a.id)));
+  // The Node module's settings and log actions have their own panels below.
+  const usable = module.actions.filter(
+    (a) =>
+      !(hasConsole && CONSOLE_ACTIONS.has(a.id)) &&
+      !(module.id === 'node' && (a.id.startsWith('settings.') || a.id === 'logs.tail')),
+  );
   const toolbar = usable.filter((a) => !needsInput(a));
   const more = usable.filter(needsInput);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -37,6 +44,7 @@ export function ModuleView({
   const [armed, setArmed] = useState<string | null>(null);
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [last, setLast] = useState<LastRun | null>(null);
+  const [panel, setPanel] = useState<'settings' | 'log' | null>(null);
 
   // A different module gets a clean slate.
   useEffect(() => {
@@ -44,6 +52,7 @@ export function ModuleView({
     setArmed(null);
     setLast(null);
     setMenu(null);
+    setPanel(null);
   }, [module.id]);
 
   useEffect(() => {
@@ -126,6 +135,27 @@ export function ModuleView({
             </button>
           </>
         ) : null}
+        <span style={{ flex: 1 }} />
+        {module.id !== 'node' ? (
+          <button
+            type="button"
+            className={`btn${panel === 'settings' ? ' primary' : ''}`}
+            title="This module's settings on its node"
+            onClick={() => setPanel(panel === 'settings' ? null : 'settings')}
+          >
+            <Icon name="sliders-horizontal" />
+            Settings
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={`btn${panel === 'log' ? ' primary' : ''}`}
+          title="The end of this module's log"
+          onClick={() => setPanel(panel === 'log' ? null : 'log')}
+        >
+          <Icon name="scroll-text" />
+          Log
+        </button>
       </div>
       {menu ? (
         <div style={{ position: 'fixed', inset: 0, zIndex: 4 }} onMouseDown={() => setMenu(null)}>
@@ -165,6 +195,12 @@ export function ModuleView({
       ) : null}
 
       <div className="content">
+        {panel === 'settings' ? (
+          <ModuleSettings client={client} module={module.id} onClose={() => setPanel(null)} />
+        ) : null}
+        {panel === 'log' ? (
+          <ModuleLog client={client} module={module.id} onClose={() => setPanel(null)} />
+        ) : null}
         {!running ? (
           <div className="banner">
             <Icon name="triangle-alert" />

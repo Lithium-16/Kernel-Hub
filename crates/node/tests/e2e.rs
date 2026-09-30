@@ -470,6 +470,64 @@ async fn node_runs_hello_module_end_to_end() {
         .await;
     assert!(std::path::Path::new(r.result.unwrap()["saved"].as_str().unwrap()).is_file());
 
+    // Settings from the app: read, validated, saved, and the module restarts with them.
+    let r = c
+        .invoke_on(
+            "node",
+            ActorKind::User,
+            "settings.get",
+            json!({"module": "hello"}),
+        )
+        .await;
+    let fields = r.result.unwrap()["fields"].clone();
+    assert_eq!(fields[0]["key"], "greeting");
+    assert_eq!(fields[0]["note"], "How greetings start.");
+    let set = |values: &str| json!({"module": "hello", "values": values});
+    let r = c
+        .invoke_on(
+            "node",
+            ActorKind::Assistant,
+            "settings.set",
+            set(r#"{"greeting": "Hi"}"#),
+        )
+        .await;
+    assert_eq!(error_code(&r), Some(ErrorCode::NotPermitted), "button only");
+    let r = c
+        .invoke_on(
+            "node",
+            ActorKind::User,
+            "settings.set",
+            set(r#"{"greeting": 5}"#),
+        )
+        .await;
+    assert_eq!(error_code(&r), Some(ErrorCode::InvalidParams));
+    let r = c
+        .invoke_on(
+            "node",
+            ActorKind::User,
+            "settings.set",
+            set(r#"{"greeting": "Hi"}"#),
+        )
+        .await;
+    assert_eq!(r.result.unwrap()["restarted"], true);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        let r = c
+            .invoke(ActorKind::User, "greet.say", json!({"name": "Pluto"}))
+            .await;
+        if r.result
+            .as_ref()
+            .is_some_and(|v| v["message"] == "Hi, Pluto!")
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "never picked up the new setting: {r:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+
     // Schedules run as automations: confirm actions only when the schedule is approved.
     let scheduled = |approved| {
         let node = running.node.clone();

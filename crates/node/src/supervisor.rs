@@ -47,6 +47,7 @@ pub struct Slot {
     pub manifest: Manifest,
     inner: RwLock<SlotState>,
     restart: Notify,
+    reload: Notify,
 }
 
 impl Slot {
@@ -55,6 +56,7 @@ impl Slot {
             manifest,
             inner: RwLock::default(),
             restart: Notify::new(),
+            reload: Notify::new(),
         }
     }
 
@@ -170,11 +172,27 @@ impl Supervisor {
     pub fn restart(&self, id: &str) -> bool {
         self.slots.get(id).map(|s| s.restart.notify_one()).is_some()
     }
+
+    /// Restart a module now (after its settings changed), whatever state it's in.
+    pub fn reload(&self, id: &str) -> bool {
+        let Some(slot) = self.slots.get(id) else {
+            return false;
+        };
+        match slot.state() {
+            ModuleState::Failed => slot.restart.notify_one(),
+            ModuleState::Running => slot.reload.notify_one(),
+            // Starting or backing off: it'll pick up the new settings on its next start.
+            _ => {}
+        }
+        true
+    }
 }
 
 enum Exit {
     Shutdown,
     Crashed(String),
+    /// Asked to restart (new settings): straight back up, not counted as a crash.
+    Reload,
 }
 
 async fn run_slot(slot: Arc<Slot>, ctx: RunCtx, mut shutdown: watch::Receiver<bool>) {
@@ -196,6 +214,11 @@ async fn run_slot(slot: Arc<Slot>, ctx: RunCtx, mut shutdown: watch::Receiver<bo
                 slot.set_down(ModuleState::Stopped, None);
                 tracing::info!(module = %id, "module stopped");
                 return;
+            }
+            Exit::Reload => {
+                slot.set_down(ModuleState::Starting, None);
+                tracing::info!(module = %id, "restarting module with new settings");
+                continue;
             }
             Exit::Crashed(reason) => {
                 tracing::warn!(module = %id, %reason, "module exited");
@@ -351,6 +374,13 @@ async fn run_once(slot: &Slot, ctx: &RunCtx, shutdown: &mut watch::Receiver<bool
                     slot.set_status(status);
                 }
                 collect_events(&client, &m.id, &ctx.events, rpc_timeout).await;
+            }
+            _ = slot.reload.notified() => {
+                client.close();
+                if tokio::time::timeout(Duration::from_secs(5), child.wait()).await.is_err() {
+                    let _ = child.kill().await;
+                }
+                return Exit::Reload;
             }
             _ = shutdown.changed() => {
                 client.close();

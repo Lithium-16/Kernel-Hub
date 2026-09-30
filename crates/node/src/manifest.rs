@@ -42,6 +42,8 @@ struct RawManifest {
     entry: String,
     #[serde(default)]
     actions: Vec<RawAction>,
+    #[serde(default)]
+    settings: toml::Table,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,6 +90,8 @@ pub struct Manifest {
     pub runtime: Runtime,
     pub entry: String,
     pub actions: Vec<Action>,
+    /// `[settings]` defaults (overridden per machine in the data folder).
+    pub settings: serde_json::Map<String, serde_json::Value>,
     pub dir: PathBuf,
 }
 
@@ -173,6 +177,10 @@ fn validate(raw: RawManifest, dir: PathBuf) -> Result<Manifest, ManifestError> {
         runtime: raw.runtime,
         entry: raw.entry,
         actions,
+        settings: match serde_json::to_value(raw.settings) {
+            Ok(serde_json::Value::Object(m)) => m,
+            _ => serde_json::Map::new(),
+        },
         dir,
     })
 }

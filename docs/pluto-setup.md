@@ -107,8 +107,12 @@ Node page lists every automation with its last run and result; a failure is an e
 
 ## Module settings
 
-Per-machine settings go in `%LOCALAPPDATA%\Kernel\node\data\settings\<module>.toml` (they
-survive updates). The defaults are in each module's `module.toml`. Restart the node (Node >
+Easiest: open the module in the app and press **Settings**. It shows every setting with its
+note, saves to this PC, and restarts the module. Tokens are never shown, and settings that start a
+program (`start_command`) can only be changed on the PC itself.
+
+By hand: per-machine settings go in `%LOCALAPPDATA%\Kernel\node\data\settings\<module>.toml`
+(they survive updates). The defaults are in each module's `module.toml`. Restart the node (Node >
 Restart node) after changing them.
 
 **PC monitor, Wake-on-LAN.** On the PC that should *send* the wake-up (Pluto, to wake the main PC,

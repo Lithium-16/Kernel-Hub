@@ -3,6 +3,7 @@ import { matches } from '../src/components/Palette.tsx';
 import { type Action, coerce, defaults, needsConfirm } from '../src/lib/actions.ts';
 import { bytes, duration, label, stateTone, summary, value } from '../src/lib/format.ts';
 import { layoutStatus } from '../src/lib/layout.ts';
+import { edits, fromText, HIDDEN, type SettingField, toText } from '../src/lib/module-settings.ts';
 
 describe('format', () => {
   it('formats values by key convention', () => {
@@ -149,5 +150,48 @@ describe('palette search', () => {
     expect(matches('Minecraft: Back up world', 'back mine')).toBe(true);
     expect(matches('Minecraft: Back up world', 'restore')).toBe(false);
     expect(matches('Anything', '')).toBe(true);
+  });
+});
+
+describe('module settings form', () => {
+  const field = (over: Partial<SettingField>): SettingField => ({
+    key: 'poll_s',
+    type: 'float',
+    value: 2,
+    default: 2,
+    changed: false,
+    secret: false,
+    locked: false,
+    ...over,
+  });
+
+  it('sends only what was edited, typed', () => {
+    const fields = [
+      field({}),
+      field({ key: 'auto', type: 'bool', value: true, default: true }),
+      field({ key: 'apps', type: 'list', value: ['a'], default: ['a'] }),
+      field({ key: 'start_command', type: 'list', value: [], default: [], locked: true }),
+      field({ key: 'hf_token', type: 'string', value: HIDDEN, default: '', secret: true }),
+    ];
+    expect(edits(fields, { poll_s: '2', auto: true })).toEqual({ values: {} });
+    expect(
+      edits(fields, {
+        poll_s: '3.5',
+        auto: false,
+        apps: '["a", "b"]',
+        start_command: '["calc.exe"]',
+      }),
+    ).toEqual({ values: { poll_s: 3.5, auto: false, apps: ['a', 'b'] } });
+    expect(edits(fields, { hf_token: HIDDEN })).toEqual({ values: {} });
+    expect(edits(fields, { hf_token: 'hf_new' })).toEqual({ values: { hf_token: 'hf_new' } });
+  });
+
+  it('explains bad input', () => {
+    expect(fromText(field({ type: 'int', key: 'fps_cap' }), '1.5')).toEqual({
+      error: 'fps_cap must be a whole number',
+    });
+    expect(fromText(field({}), 'fast')).toEqual({ error: 'poll_s must be a number' });
+    expect(fromText(field({ type: 'list', key: 'apps' }), '{"a": 1}')).toHaveProperty('error');
+    expect(toText(field({ type: 'list', value: ['x'] }))).toBe('["x"]');
   });
 });

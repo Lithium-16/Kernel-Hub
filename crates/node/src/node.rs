@@ -230,6 +230,7 @@ impl Node {
                 Err(e) => fail(ErrorCode::ModuleFailed, e),
             },
             "logs.tail" => self.logs_tail(req),
+            "settings.get" | "settings.set" => self.module_settings(req),
             "diag.bundle" => {
                 let extra = [
                     ("modules.json", json!(self.catalog())),
@@ -252,6 +253,45 @@ impl Node {
                 Err(e) => fail(ErrorCode::ModuleFailed, e),
             },
             _ => fail(ErrorCode::Internal, "unhandled built-in action"),
+        }
+    }
+
+    fn module_settings(&self, req: &ActionInvoke) -> ActionResult {
+        let module = req
+            .params
+            .get("module")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let Some(slot) = self.supervisor.get(module) else {
+            return fail(
+                ErrorCode::InvalidParams,
+                format!("unknown module '{module}'"),
+            );
+        };
+        let file = self
+            .cfg
+            .module_settings_dir()
+            .join(format!("{module}.toml"));
+        if req.action == "settings.get" {
+            return match crate::settings::describe(&slot.manifest, &file) {
+                Ok(v) => ActionResult::success(v),
+                Err(e) => fail(ErrorCode::ModuleFailed, e),
+            };
+        }
+        let values = req
+            .params
+            .get("values")
+            .and_then(|v| v.as_str())
+            .unwrap_or("{}");
+        let Ok(serde_json::Value::Object(values)) = serde_json::from_str(values) else {
+            return fail(ErrorCode::InvalidParams, "values must be a JSON object");
+        };
+        match crate::settings::save(&slot.manifest, &file, &values) {
+            Ok(changed) => {
+                let restarted = !changed.is_empty() && self.supervisor.reload(module);
+                ActionResult::success(json!({ "changed": changed, "restarted": restarted }))
+            }
+            Err(e) => fail(ErrorCode::InvalidParams, e),
         }
     }
 

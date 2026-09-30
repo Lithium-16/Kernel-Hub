@@ -13,6 +13,7 @@ pub mod node;
 pub mod notify;
 pub mod schedule;
 pub mod server;
+pub mod settings;
 pub mod supervisor;
 pub mod update;
 

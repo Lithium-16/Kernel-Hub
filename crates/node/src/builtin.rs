@@ -60,6 +60,38 @@ pub fn actions() -> Vec<ActionSpec> {
                 AiTier::Safe,
             )
         },
+        ActionSpec {
+            params: json!({
+                "module": {"type": "string", "description": "Module id"},
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+            quiet: true,
+            ..spec(
+                "settings.get",
+                "Module settings",
+                "sliders-horizontal",
+                "A module's settings on this PC, with their defaults. Secrets are hidden.",
+                AiTier::Safe,
+            )
+        },
+        ActionSpec {
+            params: json!({
+                "module": {"type": "string", "description": "Module id"},
+                "values": {"type": "string", "description": "JSON object of setting: new value"},
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+            ..spec(
+                "settings.set",
+                "Change module settings",
+                "save",
+                "Saves settings for a module on this PC and restarts it.",
+                AiTier::Never,
+            )
+        },
         spec(
             "diag.bundle",
             "Save diagnostics",
