@@ -34,6 +34,9 @@ pub struct Config {
     pub update: UpdateConfig,
     #[serde(default)]
     pub notify: NotifyConfig,
+    /// Actions to run on a timer (`[[schedule]]` tables).
+    #[serde(default)]
+    pub schedule: Vec<crate::schedule::ScheduleConfig>,
     /// The file this config was loaded from; the update helper restarts kerneld with it.
     #[serde(skip)]
     pub path: Option<PathBuf>,
@@ -186,6 +189,10 @@ impl Config {
         let repo = &self.update.repo;
         if !repo.is_empty() && repo.split('/').filter(|p| !p.is_empty()).count() != 2 {
             bail!("update.repo must look like owner/repo");
+        }
+        for s in &self.schedule {
+            crate::schedule::parse(&s.at)
+                .map_err(|e| anyhow::anyhow!("schedule \"{}\": {e}", s.name))?;
         }
         if kernel_protocol::EventLevel::parse(&self.notify.min_level).is_none() {
             bail!("notify.min_level must be info, warn or error");

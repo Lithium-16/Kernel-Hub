@@ -401,6 +401,10 @@ State machine: `pending → approved | denied | expired | cancelled`.
 
 ### 6.3 Automation engine
 
+**Built so far (D22):** `[[schedule]]` tables in node.toml run one action at a time
+("daily 04:00", "sun 03:30", "every 30m"), in the node PC's local time, and skip missed runs.
+The Node module shows the next and last runs. The engine below replaces them later.
+
 **Definition format** (stored as JSON in `automations`, edited in the UI):
 
 ```jsonc
@@ -448,6 +452,10 @@ State machine: `pending → approved | denied | expired | cancelled`.
   respecting `retry-after`.
 
 ### 6.5 Notifications
+
+**Built (D22):** modules report events with `mod.emit(kind, message, level)`. The node stores
+them, pushes them to connected apps (the Events tab), and sends the ones `[notify]` picks
+(level, include, mute) to a Discord webhook.
 
 - Channels: desktop toast (through the desktop app, or through the node when the app is
   closed), the phone (web push via the PWA), and the activity feed.
@@ -992,3 +1000,4 @@ Resolved: Minecraft runs in WSL Ubuntu on Pluto under systemd (D16) · Pluto run
 | D19 | Nodes accept only Tailscale and localhost; the home network is opt-in (`allow_lan`), and the firewall rule is Tailscale-only | my choice. Tailscale encrypts the traffic (ws:// on the LAN isn't encrypted until TLS lands) and nothing else on the home Wi-Fi can reach Kernel |
 | D20 | Local first: Ollama on Pluto answers, Claude (Haiku 4.5 via the API) is the fallback; our own tool loop instead of the Agent SDK | my choice, to keep it nearly free. The Agent SDK is Claude-only, and a plain tool loop serves both backends, drops the bundled Node runtime and the Windows packaging risk |
 | D21 | A LAYA decision layer in front of the LLM: picks the action (fast path when confident and input-free), shortlists tools, routes hard requests to Claude, checks calls | a small local classifier is faster and cheaper than generation, and fewer tools means fewer bad calls from a small model. It never skips approvals |
+| D22 | Events and alerts first, through a Discord webhook; plain `[[schedule]]` tables in node.toml before the full automation engine (§6.3) | Discord is already on my phone, so alerts work before the PWA and web push exist. Schedules cover the common case (nightly backup, weekly restart) now. They run as automations, and `confirm` actions need `approved = true` in the schedule itself |

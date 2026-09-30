@@ -221,6 +221,7 @@ async fn node_runs_hello_module_end_to_end() {
             include: vec!["hello.test.*".into()],
             mute: vec![],
         },
+        schedule: vec![],
         path: None,
     };
     let running = kernel_node::start(cfg).await.expect("node starts");
@@ -387,6 +388,32 @@ async fn node_runs_hello_module_end_to_end() {
     let text = discord.wait_for(1).await.remove(0);
     assert!(text.contains("Test node · Hello"), "{text}");
     assert!(text.contains("@\u{200b}everyone"), "{text}");
+
+    // Schedules run as automations: confirm actions only when the schedule is approved.
+    let scheduled = |approved| {
+        let node = running.node.clone();
+        async move {
+            let req = ActionInvoke {
+                module: "hello".into(),
+                action: "counter.reset".into(),
+                params: Default::default(),
+                actor: Actor {
+                    kind: ActorKind::Automation,
+                    reference: Some("schedule: test".into()),
+                },
+                approval_id: None,
+            };
+            node.invoke_scheduled(req, approved).await
+        }
+    };
+    assert_eq!(
+        error_code(&scheduled(false).await),
+        Some(ErrorCode::NeedsApproval)
+    );
+    assert!(scheduled(true).await.ok);
+    assert!(running.node.has_action("hello", "counter.reset"));
+    assert!(running.node.has_action("node", "update.check"));
+    assert!(!running.node.has_action("hello", "nope.nope"));
 
     let node = running.node.clone();
     running.shutdown().await;

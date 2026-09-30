@@ -33,3 +33,21 @@ discord_webhook = ""
 min_level = "warn"          # info, warn or error
 include = []                # also send these, e.g. ["player.joined", "minecraft.*"]
 mute = []                   # never send these
+
+# Actions on a timer, in this PC's local time. Runs missed while the PC was off are skipped.
+# at: "daily 04:00", "sun 03:30", "mon,wed,fri 18:00", "weekdays 07:00", "every 30m", "every 6h".
+# Actions that need approval run only with approved = true; button-only actions never do.
+#
+# [[schedule]]
+# name = "Nightly backup"
+# at = "daily 04:00"
+# module = "minecraft"
+# action = "world.backup"
+#
+# [[schedule]]
+# name = "Weekly restart"
+# at = "mon 05:00"
+# module = "minecraft"
+# action = "server.stop"
+# params = { delay_min = 5 }
+# approved = true

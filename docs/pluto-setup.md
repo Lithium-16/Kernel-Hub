@@ -41,6 +41,46 @@ It asks for the token, then:
 Install the desktop app (the `kernel-desktop-windows` artifact from a CI run), open **Settings**,
 and enter the address and token the installer printed. The sidebar shows **Minecraft** and **Node**.
 
+## Discord alerts
+
+Kernel can post to a Discord channel when something happens: the Minecraft server crashes or
+stops on its own, a backup fails, Roblox disconnects or closes, the GPU runs hot, a disk fills
+up, a new build is out. In Discord: channel settings > **Integrations** > **Webhooks** >
+**New Webhook** > **Copy Webhook URL**. Then add to `%LOCALAPPDATA%\Kernel\node\node.toml`:
+
+```toml
+[notify]
+discord_webhook = "https://discord.com/api/webhooks/..."
+min_level = "warn"              # info, warn or error
+include = ["player.joined"]     # also send these, whatever their level ("minecraft.*" works too)
+mute = []                       # never send these
+```
+
+Restart the node. Every event, sent or not, is in the app under **Activity > Events**.
+
+## Scheduled actions
+
+Also in node.toml, one `[[schedule]]` per job, in Pluto's local time:
+
+```toml
+[[schedule]]
+name = "Nightly backup"
+at = "daily 04:00"              # "sun 03:30", "mon,wed,fri 18:00", "weekdays 07:00", "every 30m"
+module = "minecraft"
+action = "world.backup"
+
+[[schedule]]
+name = "Weekly restart"
+at = "mon 05:00"
+module = "minecraft"
+action = "server.stop"
+params = { delay_min = 5 }
+approved = true                 # needed for actions that normally ask first
+```
+
+Runs missed while Pluto was off are skipped. The **Node** page lists each schedule with its next
+and last run, and a failed run is an event (so it can reach Discord).
+
 ## Module settings
 
 Per-machine settings go in `%LOCALAPPDATA%\Kernel\node\data\settings\<module>.toml` (they

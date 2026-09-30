@@ -9,6 +9,7 @@ pub mod mcp;
 pub mod netfilter;
 pub mod node;
 pub mod notify;
+pub mod schedule;
 pub mod server;
 pub mod supervisor;
 pub mod update;
@@ -115,11 +116,13 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
     let addr = listener.local_addr()?;
     let (exit, _) = watch::channel(false);
     let updater = Updater::new(&cfg);
+    let cfg_schedules = cfg.schedule.clone();
     let node = Arc::new(Node {
         cfg,
         supervisor,
         activity,
         events,
+        scheduler: schedule::Scheduler::new(&cfg_schedules),
         updater,
         exit,
         started: Instant::now(),
@@ -129,6 +132,14 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
         tasks.push(tokio::spawn(check_for_updates(
             node.clone(),
             Duration::from_secs(interval * 3600),
+            shutdown_rx.clone(),
+        )));
+    }
+
+    for index in 0..node.scheduler.entries.len() {
+        tasks.push(tokio::spawn(schedule::run(
+            node.clone(),
+            index,
             shutdown_rx.clone(),
         )));
     }
