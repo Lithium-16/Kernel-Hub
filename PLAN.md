@@ -363,6 +363,17 @@ There's no module-supplied UI code in v1 (a sandboxed iframe block comes **later
   - you ask for it ("ask Claude …", or a button on the reply)
   - Pluto is unreachable or its GPU is busy past a timeout
   - Never silently: the reply is marked "Claude" with its cost, and the budget below applies.
+- **Decision layer (LAYA, D21) runs first.** [LAYA](https://laya.convaiinnovations.com/) is a
+  small local classifier (421M params, Apache 2.0, ~30 ms) that answers choice / score / yes-no
+  questions with probabilities, not text:
+  - **choice** over the catalog's actions picks the likely action. Confident and the action
+    takes no input → it runs directly (still through tiers and approvals), no LLM at all.
+  - Otherwise the LLM gets only the **top ~5 actions** as tools, not the whole catalog.
+  - **yes/no** "needs multi-step reasoning?" sends hard requests straight to Claude instead of
+    letting the local model fail twice first.
+  - **yes/no** "does this call match the request?" before a call runs; no → ask the user.
+  - LAYA only chooses; the LLM still fills in values (player names, messages). Thresholds are
+    tuned on the 30-request eval set, run with and without LAYA, before the fast path is on.
 - **tools:** built from the live catalog, `<module>__<action>`, description and JSON Schema
   from the manifest. No shell, file or web tools in v1. Only module actions.
 - **permissions:** each tool call goes through the node's tier check plus `confirm_when`.
@@ -884,7 +895,8 @@ buttons, with no crashes that lose state, and Sleep on Pluto → Wake from the m
 - [ ] Assistant screen as designed: chat, tool-call rows, the approval card, and the live and activity panels
 - [ ] Palette "Ask the assistant" mode
 - [ ] Settings → Assistant and Permissions tabs
-- [ ] 30-request assistant eval set passing ≥ 90% on the right tool and arguments
+- [ ] 30-request assistant eval set passing ≥ 90% on the right tool and arguments, measured local-only, local + LAYA, and Claude
+- [ ] LAYA decision layer: fast path, tool shortlist, Claude routing and call check, with thresholds from the eval set
 
 **Accept when:** "start the server and tell me when it's up" and "stop it in an hour and
 back up after" work end to end, with approval, the activity log shows who did what, and
@@ -979,3 +991,4 @@ Resolved: Minecraft runs in WSL Ubuntu on Pluto under systemd (D16) · Pluto run
 | D18 | Roblox "low-power AFK mode" instead of a custom/headless client: allowlisted Fast Flags, Roblox's own frame cap, and Windows window/priority/EcoQoS controls | a truly headless client means patching or injecting into Roblox, which its anti-cheat (Hyperion) bans for and its terms forbid; Bloxstrap/Fishstrap already cover bootstrapping. Since 2025-09-29 only allowlisted flags work anyway |
 | D19 | Nodes accept only Tailscale and localhost; the home network is opt-in (`allow_lan`), and the firewall rule is Tailscale-only | my choice. Tailscale encrypts the traffic (ws:// on the LAN isn't encrypted until TLS lands) and nothing else on the home Wi-Fi can reach Kernel |
 | D20 | Local first: Ollama on Pluto answers, Claude (Haiku 4.5 via the API) is the fallback; our own tool loop instead of the Agent SDK | my choice, to keep it nearly free. The Agent SDK is Claude-only, and a plain tool loop serves both backends, drops the bundled Node runtime and the Windows packaging risk |
+| D21 | A LAYA decision layer in front of the LLM: picks the action (fast path when confident and input-free), shortlists tools, routes hard requests to Claude, checks calls | a small local classifier is faster and cheaper than generation, and fewer tools means fewer bad calls from a small model. It never skips approvals |
