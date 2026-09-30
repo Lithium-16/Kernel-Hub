@@ -1,7 +1,8 @@
 # Example kerneld config. Copy to a private location and change the token.
 node_id = "pluto"
 node_name = "Pluto"
-listen = "0.0.0.0:47800"          # the node still only accepts LAN / Tailscale / localhost peers
+listen = "0.0.0.0:47800"          # the node still only accepts Tailscale and localhost
+allow_lan = false                 # true also allows the home network
 token = "change-me-to-a-long-random-string"
 modules_dir = "D:/Kernel/modules"
 data_dir = "C:/Users/you/AppData/Local/Kernel/node"

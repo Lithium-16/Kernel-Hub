@@ -12,6 +12,9 @@ pub struct Config {
     pub node_name: String,
     #[serde(default = "default_listen")]
     pub listen: SocketAddr,
+    /// Also accept clients on the home network. Off: only this machine and Tailscale.
+    #[serde(default)]
+    pub allow_lan: bool,
     /// Shared secret clients send in `hello`. Replaced by pairing tokens later in phase 0.
     pub token: String,
     pub modules_dir: PathBuf,

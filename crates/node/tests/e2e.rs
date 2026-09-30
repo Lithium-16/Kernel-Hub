@@ -163,6 +163,7 @@ async fn node_runs_hello_module_end_to_end() {
             backoff_max_ms: 1_000,
             ..SupervisorConfig::default()
         },
+        allow_lan: false,
         update: Default::default(),
         path: None,
     };

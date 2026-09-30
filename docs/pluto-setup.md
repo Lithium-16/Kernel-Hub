@@ -33,7 +33,7 @@ It asks for the token, then:
 4. writes `%LOCALAPPDATA%\Kernel\node\node.toml` with a new **node token**
 5. registers the **Kernel node** scheduled task: starts at logon, and restarts kerneld within
    5 minutes if it ever stops
-6. opens port 47800 in Windows Firewall for your LAN and Tailscale only
+6. opens port 47800 in Windows Firewall for Tailscale only (not your home network)
 7. starts the node and prints the address and token
 
 ## Connect the app
@@ -114,7 +114,8 @@ backup anyway.
 ## Troubleshooting
 
 - **App says "Can't reach the node":** is the task running (`Get-ScheduledTask 'Kernel node'`)?
-  Is the firewall rule there? Try the Tailscale address.
+  Is the firewall rule there? Are both PCs signed in to Tailscale? Use Pluto's Tailscale address
+  (`100.x.x.x`): the node refuses home-network connections unless `allow_lan = true`.
 - **Update check fails with 404:** the token can't read the repo; make a new one as above and
   put it in `[update] token` in `node.toml`.
 - **Reinstall or repair:** run `install-node.ps1` again. It keeps `node.toml`.
