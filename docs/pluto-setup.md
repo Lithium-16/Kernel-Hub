@@ -58,12 +58,33 @@ wake_broadcast = "192.168.1.255"               # your LAN's broadcast address
 The PC being woken needs "Wake on Magic Packet" on in its network adapter's properties
 (Advanced and Power Management tabs) and in the BIOS, and Windows **fast startup turned off**.
 
-**Roblox.** Works with no settings. `data\settings\roblox.toml` options:
+**Roblox.** Works with no settings. Low-power AFK mode is on by default. `data\settings\roblox.toml`
+options:
 
 ```toml
 place_id = 606849621     # place to rejoin; 0 = the last place seen in the logs
 auto_rejoin = true       # rejoin by itself after a disconnect (idle kick), at most every 10 min
+
+low_power = true         # the whole low-power mode below
+fps_cap = 30             # Roblox's own frame cap; lower values are tried, Roblox decides
+hide_window = true       # hide the window once in game (Roblox > Show Roblox brings it back)
+priority = "below_normal"  # normal, below_normal or idle
+efficiency_mode = true   # Windows 11 Efficiency mode
+cpu_cores = 0            # limit Roblox to this many cores; 0 = no limit
 ```
+
+What low-power mode does, and doesn't:
+
+- **Graphics:** lowest textures, quality level 1, no MSAA, gray sky, no grass, lighting voxelizer
+  paused. Only flags on [Roblox's allowlist](https://devforum.roblox.com/t/allowlist-for-local-client-configuration-via-fast-flags/3966569),
+  written into Roblox's `ClientAppSettings.json` next to any of your own. They apply **the next
+  time Roblox starts**, and are re-added after Roblox updates itself.
+- **Frame cap:** Roblox's own `FramerateCap` setting, written while Roblox is closed.
+- **Once in game:** the window is hidden, priority lowered, Efficiency mode on. The Roblox
+  status shows `tuning: applied`, or what Windows refused.
+- **Not** a headless client: nothing is patched or injected into Roblox (that's what its
+  anti-cheat bans for). Compare Pluto's GPU in the PC monitor with it on and off to see the savings.
+- Joining from the browser is fine. For **Rejoin** to work, log in inside the Roblox app once.
 
 It only watches the client and relaunches it: it never sends input to the game.
 

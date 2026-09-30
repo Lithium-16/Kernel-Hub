@@ -29,10 +29,20 @@ def at(stamp: str) -> float:
 
 
 class FakeProc:
+    next_pid = 4000
+
     def __init__(self, started: float, rss_mb: int = 900, dies_on_terminate: bool = True):
         self.started, self.rss = started, rss_mb * 1024 * 1024
         self.running, self.dies = True, dies_on_terminate
         self.calls = []
+        FakeProc.next_pid += 1
+        self.pid = FakeProc.next_pid
+
+    def nice(self, value):
+        self.calls.append(("nice", value))
+
+    def cpu_affinity(self, cores):
+        self.calls.append(("affinity", cores))
 
     def memory_info(self):
         return type("M", (), {"rss": self.rss})()
@@ -53,8 +63,33 @@ class FakeProc:
         self.running = False
 
 
+class FakeWindows:
+    def __init__(self, efficiency_ok=True):
+        self.calls = []
+        self.efficiency_ok = efficiency_ok
+
+    def windows(self, pid):
+        return [pid * 10]
+
+    def hide(self, hwnd):
+        self.calls.append(("hide", hwnd))
+
+    def show(self, hwnd):
+        self.calls.append(("show", hwnd))
+
+    def efficiency(self, pid, on):
+        self.calls.append(("efficiency", pid, on))
+        return self.efficiency_ok
+
+
 def settings(tmp_path, **over):
     base = {
+        "low_power": False,
+        "fps_cap": 30,
+        "hide_window": True,
+        "priority": "below_normal",
+        "efficiency_mode": True,
+        "cpu_cores": 0,
         "place_id": 0,
         "auto_rejoin": False,
         "rejoin_cooldown_min": 10,
@@ -117,7 +152,7 @@ async def test_status_while_afk(tmp_path):
     write_log(tmp_path, "a_Player_1.log", "join", "joined")
     now = at("2026-09-25T02:00:05.000Z")
     proc = FakeProc(started=now - 7200)
-    w = Watcher(settings(tmp_path), processes=lambda: [proc], launch=lambda uri: None, clock=lambda: now)
+    w = Watcher(roots=[], settings=settings(tmp_path), processes=lambda: [proc], launch=lambda uri: None, clock=lambda: now)
     s = await w.refresh()
     assert s["state"] == "in_game"
     assert s["session_s"] == 3600
@@ -129,14 +164,14 @@ async def test_status_while_afk(tmp_path):
 
 async def test_closed_when_the_process_is_gone(tmp_path):
     write_log(tmp_path, "a_Player_1.log", "join", "joined")
-    w = Watcher(settings(tmp_path), processes=lambda: [], launch=lambda uri: None)
+    w = Watcher(roots=[], settings=settings(tmp_path), processes=lambda: [], launch=lambda uri: None)
     s = await w.refresh()
     assert s["state"] == "closed" and "session_s" not in s
 
 
 async def test_rejoin_uses_the_last_place(tmp_path):
     launched = []
-    w = Watcher(settings(tmp_path), processes=lambda: [], launch=launched.append)
+    w = Watcher(roots=[], settings=settings(tmp_path), processes=lambda: [], launch=launched.append)
     with pytest.raises(ActionError, match="no place to rejoin"):
         w.rejoin()
     write_log(tmp_path, "a_Player_1.log", "join")
@@ -147,14 +182,14 @@ async def test_rejoin_uses_the_last_place(tmp_path):
 
 async def test_place_id_setting_wins(tmp_path):
     launched = []
-    w = Watcher(settings(tmp_path, place_id=920587237), processes=lambda: [], launch=launched.append)
+    w = Watcher(roots=[], settings=settings(tmp_path, place_id=920587237), processes=lambda: [], launch=launched.append)
     w.rejoin()
     assert launched == ["roblox://experiences/start?placeId=920587237"]
 
 
 async def test_close_forces_a_hung_client(tmp_path):
     proc = FakeProc(started=0, dies_on_terminate=False)
-    w = Watcher(settings(tmp_path), processes=lambda: [proc], launch=lambda uri: None)
+    w = Watcher(roots=[], settings=settings(tmp_path), processes=lambda: [proc], launch=lambda uri: None)
     assert await w.close(timeout=0.3) == {"closed": 1}
     assert proc.calls == ["terminate", "kill"]
 
@@ -164,7 +199,8 @@ async def test_auto_rejoin_after_a_disconnect_with_cooldown(tmp_path):
     launched = []
     clock = [at("2026-09-25T01:21:00.000Z")]
     w = Watcher(
-        settings(tmp_path, auto_rejoin=True),
+        roots=[],
+        settings=settings(tmp_path, auto_rejoin=True),
         processes=lambda: procs,
         launch=launched.append,
         clock=lambda: clock[0],
@@ -197,5 +233,8 @@ def test_manifest_and_handlers(monkeypatch):
     assert {a.id: a.ai for a in main.mod.manifest.actions} == {
         "client.rejoin": "confirm",
         "client.relaunch": "confirm",
+        "window.show": "safe",
+        "window.hide": "safe",
         "client.close": "confirm",
     }
+    assert main.mod.settings["low_power"] is True and main.mod.settings["fps_cap"] == 30
