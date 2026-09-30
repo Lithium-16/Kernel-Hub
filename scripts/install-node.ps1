@@ -25,7 +25,7 @@ param(
   [string]$Root = (Join-Path $env:LOCALAPPDATA 'Kernel\node'),
   [int]$Port = 47800,
   # Modules to run. hello is only for tests.
-  [string[]]$Modules = @('minecraft'),
+  [string[]]$Modules = @('minecraft', 'pc-monitor', 'roblox'),
   [switch]$NoFirewall
 )
 
@@ -145,9 +145,15 @@ if (-not $uv) {
 $venv = Join-Path $Root 'python'
 $python = Join-Path $venv 'Scripts\python.exe'
 if (-not (Test-Path $python)) { & $uv venv $venv --python 3.12; if ($LASTEXITCODE) { throw 'uv venv failed' } }
+# The SDK, plus each module's own packages (the same set the self-updater installs).
 $wheel = Get-ChildItem (Join-Path $app 'sdk') -Filter *.whl | Select-Object -First 1
-& $uv pip install --python $python --reinstall-package kernel-sdk $wheel.FullName
-if ($LASTEXITCODE) { throw 'Installing the Python SDK failed' }
+$pipArgs = @('pip', 'install', '--python', $python, '--reinstall-package', 'kernel-sdk', $wheel.FullName)
+Get-ChildItem (Join-Path $app 'modules') -Directory | Sort-Object Name | ForEach-Object {
+  $req = Join-Path $_.FullName 'requirements.txt'
+  if (Test-Path $req) { $pipArgs += @('-r', $req) }
+}
+& $uv @pipArgs
+if ($LASTEXITCODE) { throw 'Installing the Python packages failed' }
 
 # ---------------------------------------------------------------- 5. config
 Step 'Node config'

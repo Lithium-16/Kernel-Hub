@@ -22,6 +22,8 @@ Pluto: **[docs/pluto-setup.md](docs/pluto-setup.md)**. Pairing, the tray and the
 | `sdk/python` | `kernel_sdk`, for writing modules in Python (MCP over stdio) |
 | `modules/hello` | example module used by the tests |
 | `modules/minecraft` | the Minecraft server on Pluto (WSL): start/stop, console, players, whitelist, backups |
+| `modules/pc-monitor` | CPU, memory, disks, GPU, network; sleep/restart/shut down; Wake-on-LAN |
+| `modules/roblox` | watches the Roblox AFK client: in game or disconnected, session time; rejoin/relaunch/close |
 | `apps/desktop` | the desktop app: Tauri 2 shell + React. Screens are built from each module's actions and status |
 
 ## Development

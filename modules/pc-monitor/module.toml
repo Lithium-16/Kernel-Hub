@@ -1,0 +1,55 @@
+id = "pc-monitor"
+name = "PC monitor"
+icon = "activity"
+version = "0.1.0"
+runtime = "python"
+entry = "main.py"
+
+# Override per machine in the node's data\settings\pc-monitor.toml.
+[settings]
+# PCs this one can wake, as "name=MAC", e.g. ["pluto=AA:BB:CC:DD:EE:FF"].
+wake_targets = []
+# Where magic packets go. Your subnet's broadcast address (e.g. "192.168.1.255") is the most reliable.
+wake_broadcast = "255.255.255.255"
+# How often to sample CPU, network and GPU.
+sample_s = 2.0
+# Seconds of warning before a restart or shutdown (Cancel stops it).
+power_delay_s = 60
+# Drives or mount points to show. Empty shows every fixed disk.
+disks = []
+
+[[actions]]
+id = "power.sleep"
+label = "Sleep"
+icon = "moon"
+description = "Puts this PC to sleep in a few seconds."
+ai = "confirm"
+
+[[actions]]
+id = "power.restart"
+label = "Restart"
+icon = "rotate-cw"
+description = "Restarts this PC after a warning. Cancel stops it."
+ai = "confirm"
+
+[[actions]]
+id = "power.shutdown"
+label = "Shut down"
+icon = "power"
+description = "Shuts this PC down after a warning. Cancel stops it."
+ai = "confirm"
+
+[[actions]]
+id = "power.cancel"
+label = "Cancel restart"
+icon = "circle-x"
+description = "Stops a pending restart or shutdown."
+ai = "safe"
+
+[[actions]]
+id = "power.wake"
+label = "Wake a PC"
+icon = "sunrise"
+description = "Sends a Wake-on-LAN packet to another PC."
+ai = "safe"
+params.target = { type = "string", description = "A name from wake_targets, or a MAC address" }

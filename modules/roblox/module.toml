@@ -1,0 +1,46 @@
+id = "roblox"
+name = "Roblox"
+icon = "gamepad-2"
+version = "0.1.0"
+runtime = "python"
+entry = "main.py"
+
+# Watches the Roblox client left AFK on this PC, and can close, rejoin or relaunch it.
+# It never sends input to the game.
+# Override per machine in the node's data\settings\roblox.toml.
+[settings]
+# Place to rejoin. 0 means the last place seen in the logs.
+place_id = 0
+# Rejoin automatically after a disconnect (at most once every rejoin_cooldown_min).
+auto_rejoin = false
+rejoin_cooldown_min = 10
+# Empty means %LOCALAPPDATA%\Roblox\logs.
+logs_dir = ""
+process = "RobloxPlayerBeta.exe"
+poll_s = 3.0
+# Log markers, from Bloxstrap's log reader. If Roblox changes its log format, fix them here.
+joining = ["[FLog::Output] ! Joining game"]
+joined = ["[FLog::Network] Replicator created:"]
+disconnected = ["[FLog::Network] Time to disconnect replication data:"]
+left = ["[FLog::SingleSurfaceApp] leaveUGCGameInternal"]
+
+[[actions]]
+id = "client.rejoin"
+label = "Rejoin"
+icon = "log-in"
+description = "Opens the place again (place_id, or the last place seen)."
+ai = "confirm"
+
+[[actions]]
+id = "client.relaunch"
+label = "Relaunch"
+icon = "rotate-cw"
+description = "Closes the client and rejoins the place."
+ai = "confirm"
+
+[[actions]]
+id = "client.close"
+label = "Close Roblox"
+icon = "square"
+description = "Closes the Roblox client."
+ai = "confirm"

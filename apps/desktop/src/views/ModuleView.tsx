@@ -182,7 +182,7 @@ export function ModuleView({
           <div className="tiles">
             {tiles.map((t) => (
               <div key={t.key} className="tile">
-                <span className="k">{label(t.key.replace(/_online$/, ''))}</span>
+                <span className="k">{label(t.name)}</span>
                 <span className="v">
                   {t.key === 'state' ? <span className={`sq ${stateTone(t.value)}`} /> : null}
                   {value(t.key, t.value)}

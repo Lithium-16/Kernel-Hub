@@ -18,6 +18,12 @@ describe('format', () => {
     expect(bytes(0)).toBe('0 B');
     expect(label('memory_mb')).toBe('Memory');
     expect(label('last_backup')).toBe('Last backup');
+    expect(label('cpu_pct')).toBe('CPU');
+    expect(label('vram_mb')).toBe('VRAM');
+    expect(label('gpu_temp_c')).toBe('GPU temp');
+    expect(value('gpu_temp_c', 64.4)).toBe('64 °C');
+    expect(value('net_down_bps', 1536)).toBe('1.5 KB/s');
+    expect(value('used_pct', 71.2)).toBe('71%');
   });
 
   it('maps states to tones', () => {
@@ -25,6 +31,9 @@ describe('format', () => {
     expect(stateTone('starting')).toBe('warn');
     expect(stateTone('crashed')).toBe('bad');
     expect(stateTone('stopped')).toBe('mute');
+    expect(stateTone('in_game')).toBe('ok');
+    expect(stateTone('disconnected')).toBe('bad');
+    expect(value('state', 'in_game')).toBe('In game');
   });
 
   it('summarizes results', () => {
@@ -60,6 +69,41 @@ describe('layoutStatus', () => {
       ['backups', 'table'],
     ]);
     expect(details.map(([k]) => k)).toEqual(['version', 'motd']);
+  });
+});
+
+describe('PC monitor status', () => {
+  it('pairs used with total, and keeps disks as a table', () => {
+    const { tiles, sections, details } = layoutStatus({
+      cpu_pct: 12.5,
+      cores: 8,
+      memory_used_mb: 10240,
+      memory_total_mb: 65536,
+      gpu: 'NVIDIA GeForce GTX 1080 Ti',
+      gpu_pct: 37,
+      gpu_temp_c: 64,
+      vram_used_mb: 3072,
+      vram_total_mb: 11264,
+      net_down_bps: null,
+      uptime_s: 3600,
+      disks: [{ disk: 'C:\\', used_pct: 71.2, free_bytes: 1, total_bytes: 2 }],
+    });
+    const byKey = Object.fromEntries(tiles.map((t) => [t.key, t]));
+    expect(Object.keys(byKey)).toEqual([
+      'cpu_pct',
+      'cores',
+      'memory_used_mb',
+      'gpu_pct',
+      'gpu_temp_c',
+      'vram_used_mb',
+      'net_down_bps',
+      'uptime_s',
+    ]);
+    expect(label(byKey.memory_used_mb?.name ?? '')).toBe('Memory');
+    expect(byKey.memory_used_mb?.max).toBe(65536);
+    expect(label(byKey.vram_used_mb?.name ?? '')).toBe('VRAM');
+    expect(sections.map((s) => [s.key, s.kind])).toEqual([['disks', 'table']]);
+    expect(details.map(([k]) => k)).toEqual(['gpu']);
   });
 });
 

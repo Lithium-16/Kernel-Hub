@@ -249,7 +249,7 @@ mod tests {
             }
         }
         ids.sort();
-        assert_eq!(ids, ["hello", "minecraft"]);
+        assert_eq!(ids, ["hello", "minecraft", "pc-monitor", "roblox"]);
     }
 
     #[test]

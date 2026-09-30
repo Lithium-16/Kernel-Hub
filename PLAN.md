@@ -271,6 +271,9 @@ The UI maps each code to one line of copy plus a suggested next step.
 | `timeout_s` | default 60 |
 | `quiet` | `true` keeps a read-only, frequently polled action (like `console.tail`) out of the activity log. Only allowed on `safe` actions, so anything that needs a confirm is always logged |
 
+A module can ship a `requirements.txt`. The installer and the self-updater install every
+module's requirements into the node's Python environment, together with the SDK wheel.
+
 Expressions use a tiny, side-effect-free language (`cel-interpreter` crate: comparisons,
 `&&`, `||`, and field access on status only).
 
@@ -857,8 +860,14 @@ command-line harness.
 - [ ] Module manifest parser and validator, UI blocks `toolbar`, `tiles`, `metrics`, `console`, `table`, `list`, `note`
 - [~] **Minecraft** module (§10.1): actions, status, WSL keepalive and verified backups done and tested against fakes. **Still to do:** a run against the real server (`probe.sh` first), events, `confirm_when`
 - [x] ~~**VM power** module~~ dropped: the server is in WSL on Pluto (D16)
-- [ ] **PC monitor** module on all three nodes, including WoL and power actions with confirms
-- [ ] **Roblox** module on Pluto (§10.5): status, crash/disconnect detection, relaunch
+- [~] **PC monitor** module (`modules/pc-monitor`): CPU, memory, disks, GPU via NVML, network,
+  uptime; Sleep / Restart / Shut down (confirm, 60 s warning, Cancel) and Wake-on-LAN to named
+  targets. **Still to do:** CPU temperature (LibreHardwareMonitor), threshold events, run it on the
+  real PCs
+- [~] **Roblox** module (`modules/roblox`, §10.5): process + log watching (state
+  closed/menu/joining/in_game/disconnected, session time, memory, disconnect count), Rejoin /
+  Relaunch / Close, optional auto-rejoin with a cooldown. Log markers are settings, taken from
+  Bloxstrap's log reader. **Still to do:** a run on Pluto, events
 - [ ] Activity log screen, and a basic `approvals` flow for human `confirm_when`
 - [ ] Degraded mode when the home node is offline
 - [ ] Onboarding steps 1, 2, 4, 5

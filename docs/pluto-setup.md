@@ -41,6 +41,32 @@ It asks for the token, then:
 Install the desktop app (the `kernel-desktop-windows` artifact from a CI run), open **Settings**,
 and enter the address and token the installer printed. The sidebar shows **Minecraft** and **Node**.
 
+## Module settings
+
+Per-machine settings go in `%LOCALAPPDATA%\Kernel\node\data\settings\<module>.toml` (they
+survive updates). The defaults are in each module's `module.toml`. Restart the node (Node >
+Restart node) after changing them.
+
+**PC monitor, Wake-on-LAN.** On the PC that should *send* the wake-up (Pluto, to wake the main PC,
+or the other way round), `data\settings\pc-monitor.toml`:
+
+```toml
+wake_targets = ["main-pc=AA:BB:CC:DD:EE:FF"]   # the sleeping PC's MAC: `getmac /v` on that PC
+wake_broadcast = "192.168.1.255"               # your LAN's broadcast address
+```
+
+The PC being woken needs "Wake on Magic Packet" on in its network adapter's properties
+(Advanced and Power Management tabs) and in the BIOS, and Windows **fast startup turned off**.
+
+**Roblox.** Works with no settings. `data\settings\roblox.toml` options:
+
+```toml
+place_id = 606849621     # place to rejoin; 0 = the last place seen in the logs
+auto_rejoin = true       # rejoin by itself after a disconnect (idle kick), at most every 10 min
+```
+
+It only watches the client and relaunches it: it never sends input to the game.
+
 ## Updates
 
 **Node > Check for updates**, then **Install update**. The node downloads the new build, verifies
