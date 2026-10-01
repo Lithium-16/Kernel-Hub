@@ -41,6 +41,10 @@ It asks for the token, then:
 Install the desktop app (the `kernel-desktop-windows` artifact from a CI run), open **Settings**,
 and enter the address and token the installer printed. The sidebar shows **Minecraft** and **Node**.
 
+The app updates itself: **Settings > App updates > Check for updates** (it also looks on start
+and shows "Update available" in the sidebar). It downloads the installer from the newest
+release, checks its SHA-256, installs quietly and reopens. The first install is still by hand.
+
 ## Discord alerts
 
 Kernel can post to a Discord channel when something happens: the Minecraft server crashes or

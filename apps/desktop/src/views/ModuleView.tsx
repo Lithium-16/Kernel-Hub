@@ -1,3 +1,4 @@
+import type React from 'react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '../components/Icon.tsx';
 import { ModuleLog } from '../components/ModuleLog.tsx';
@@ -5,8 +6,9 @@ import { ModuleSettings } from '../components/ModuleSettings.tsx';
 import { ParamForm } from '../components/ParamForm.tsx';
 import { TitleBar } from '../components/TitleBar.tsx';
 import { type Action, hasParams, needsConfirm, needsInput } from '../lib/actions.ts';
-import { label, stateTone, summary, value } from '../lib/format.ts';
+import { label, stateTone, summary, value, valueTone } from '../lib/format.ts';
 import { layoutStatus, type Section } from '../lib/layout.ts';
+import { moduleTint } from '../lib/look.ts';
 import type { ActionResult, Module, NodeClient } from '../lib/node.ts';
 
 /** Modules with both of these get a live console instead of two buttons. */
@@ -91,7 +93,7 @@ export function ModuleView({
   const stateText = value('state', status?.state ?? module.state);
 
   return (
-    <div className="main">
+    <div className="main tinted" style={{ '--tint': moduleTint(module.id) } as React.CSSProperties}>
       <TitleBar title={module.name} meta={`on ${nodeName} · module ${module.version}`} />
       <div className="toolbar">
         {toolbar.map((a) => {
@@ -219,7 +221,7 @@ export function ModuleView({
             {tiles.map((t) => (
               <div key={t.key} className="tile">
                 <span className="k">{label(t.name)}</span>
-                <span className="v">
+                <span className={`v ${toneClass(t.key, t.value, t.max)}`}>
                   {t.key === 'state' ? <span className={`sq ${stateTone(t.value)}`} /> : null}
                   {value(t.key, t.value)}
                   {t.max !== undefined ? <small>/ {value(t.key, t.max)}</small> : null}
@@ -521,4 +523,9 @@ function Console({
       </label>
     </section>
   );
+}
+
+function toneClass(key: string, v: unknown, max: unknown): string {
+  const tone = valueTone(key, v, max);
+  return tone ? `c-${tone}` : '';
 }

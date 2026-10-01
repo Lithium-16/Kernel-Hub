@@ -4,6 +4,8 @@
 // No console window behind the app in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod update;
+
 use tauri::{AppHandle, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -18,6 +20,37 @@ fn toggle_palette(app: &AppHandle) {
         let _ = palette.show();
         let _ = palette.set_focus();
     }
+}
+
+/// This app's build number (0 for builds made on a PC).
+#[tauri::command]
+fn app_build() -> u64 {
+    update::build()
+}
+
+/// A newer build of the desktop app on GitHub, if there is one.
+#[tauri::command]
+async fn update_check() -> Result<Option<update::Available>, String> {
+    if update::build() == 0 {
+        return Err("this is a development build, so it doesn't update itself".into());
+    }
+    update::check().await
+}
+
+/// Download, verify and install the newest build, then restart into it.
+#[tauri::command]
+async fn update_install(app: AppHandle) -> Result<u64, String> {
+    let Some(available) = update::check().await? else {
+        return Err("already up to date".into());
+    };
+    let installer = update::download(&available).await?;
+    update::run_installer(&installer)?;
+    // Exit in a moment, so the reply reaches the window first; the installer waits for it.
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        app.exit(0);
+    });
+    Ok(available.build)
 }
 
 fn show_main(app: &AppHandle) {
@@ -63,6 +96,11 @@ fn main() {
             ("main", WindowEvent::CloseRequested { .. }) => window.app_handle().exit(0),
             _ => {}
         })
+        .invoke_handler(tauri::generate_handler![
+            app_build,
+            update_check,
+            update_install
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Kernel");
 }

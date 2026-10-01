@@ -56,6 +56,9 @@ jobs:
   desktop:
     name: Desktop app (windows-latest)
     runs-on: windows-latest
+    env:
+      # Baked into the app; it compares it with releases to find updates for itself.
+      KERNEL_BUILD: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -73,10 +76,20 @@ jobs:
       - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Build the installer
         run: pnpm --filter @kernel/desktop tauri build
+      - name: Name the installer and hash it
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p desktop-out
+          cp apps/desktop/src-tauri/target/release/bundle/nsis/*.exe desktop-out/kernel-desktop-setup.exe
+          cd desktop-out && sha256sum kernel-desktop-setup.exe > kernel-desktop-setup.exe.sha256
+          cat kernel-desktop-setup.exe.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: kernel-desktop-windows
-          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            desktop-out/kernel-desktop-setup.exe
+            desktop-out/kernel-desktop-setup.exe.sha256
           if-no-files-found: error
 
   node-bundle:
@@ -122,7 +135,7 @@ jobs:
     name: Publish node build
     # Every green push to main becomes a release that installed nodes can update to.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [rust, typescript, python, node-bundle]
+    needs: [rust, typescript, python, node-bundle, desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -130,15 +143,19 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: kernel-node-windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: kernel-desktop-windows
       - name: Create release node-build-${{ github.run_number }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "node-build-${{ github.run_number }}" \
             kernel-node-windows-x64.zip kernel-node-windows-x64.zip.sha256 \
+            kernel-desktop-setup.exe kernel-desktop-setup.exe.sha256 \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "Node build ${{ github.run_number }}" \
-            --notes "kerneld from $GITHUB_SHA. Installed nodes find it with Node > Check for updates."
+            --notes "Kernel from $GITHUB_SHA. Installed nodes find it with Node > Check for updates, the desktop app with Settings > App updates."
 
   python:
     name: Python SDK and modules (${{ matrix.os }})

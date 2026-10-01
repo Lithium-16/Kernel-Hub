@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { AppUpdates } from '../components/AppUpdates.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { TitleBar } from '../components/TitleBar.tsx';
 import { stateTone } from '../lib/format.ts';
+import { ACCENTS, type Look, loadLook, saveLook, TEXT_SIZES, THEMES } from '../lib/look.ts';
 import type { Snapshot } from '../lib/node.ts';
 import {
   loadNotifyLevel,
@@ -30,6 +32,11 @@ export function SettingsView({ settings, snapshot, onSave }: Props) {
   const [token, setToken] = useState(settings.token);
   const [show, setShow] = useState(false);
   const [level, setLevel] = useState<NotifyLevel>(loadNotifyLevel);
+  const [look, setLookState] = useState<Look>(loadLook);
+  const setLook = (l: Look) => {
+    setLookState(l);
+    saveLook(l);
+  };
   const urlOk = validUrl(url);
   const changed = url !== settings.url || token !== settings.token;
 
@@ -101,6 +108,74 @@ export function SettingsView({ settings, snapshot, onSave }: Props) {
             </button>
           </div>
         </form>
+        <div className="form" style={{ marginTop: 24 }}>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>Appearance</div>
+          <div className="field">
+            <span>Theme</span>
+            <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {THEMES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`btn${look.theme === t.id ? ' primary' : ''}`}
+                  title={t.hint}
+                  onClick={() => setLook({ ...look, theme: t.id })}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </span>
+            <span className="hint">{THEMES.find((t) => t.id === look.theme)?.hint}</span>
+          </div>
+          <div className="field">
+            <span>Text size</span>
+            <span style={{ display: 'flex', gap: 6 }}>
+              {TEXT_SIZES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`btn${look.textSize === t.id ? ' primary' : ''}`}
+                  onClick={() => setLook({ ...look, textSize: t.id })}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </span>
+          </div>
+          <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={look.moduleColors}
+              onChange={(e) => setLook({ ...look, moduleColors: e.target.checked })}
+              style={{ width: 16, height: 16 }}
+            />
+            <span>Module colors</span>
+            <span className="hint">each module's icon and page in its own color</span>
+          </label>
+          <div className="field">
+            <span>Accent color</span>
+            <span style={{ display: 'flex', gap: 8 }}>
+              {ACCENTS.map((a) => (
+                <button
+                  key={a.color}
+                  type="button"
+                  aria-label={a.name}
+                  title={a.name}
+                  onClick={() => setLook({ ...look, accent: a.color })}
+                  style={{
+                    width: 26,
+                    height: 26,
+                    background: a.color,
+                    border:
+                      look.accent === a.color ? '2px solid var(--text-1)' : '2px solid transparent',
+                    cursor: 'pointer',
+                  }}
+                />
+              ))}
+            </span>
+          </div>
+        </div>
+        <AppUpdates />
         <div className="form" style={{ marginTop: 24 }}>
           <div style={{ fontWeight: 600, fontSize: 14 }}>Notifications</div>
           <label className="field">
