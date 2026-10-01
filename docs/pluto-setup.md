@@ -6,7 +6,7 @@ About 10 minutes, once. After that, updates are a button in the app.
 
 - A merge to `main` since the node bundle existed, so CI has published a `node-build-N` release
   (check the repo's **Releases** page).
-- A **read-only GitHub token**, because the repo is private:
+- A **read-only GitHub token**, only while the repo is private (public: press Enter when asked):
   <https://github.com/settings/personal-access-tokens/new>
   - Repository access: **only** `B0RE16/laughing-waffle`
   - Permissions: **Contents: Read-only**. Nothing else.

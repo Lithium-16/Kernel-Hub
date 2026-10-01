@@ -74,16 +74,17 @@ if ($Zip) {
   Note "Using $bundle"
 } else {
   if (-not $GitHubToken) {
-    Note "The repo is private, so the node needs a read-only GitHub token to download builds."
+    Note "If the repo is private, the node needs a read-only GitHub token to download builds."
     Note "Create one at https://github.com/settings/personal-access-tokens/new :"
     Note "  Repository access: only $Repo.  Permissions: Contents = Read-only.  Nothing else."
-    $GitHubToken = Read-Secret 'Paste the token'
+    Note "If the repo is public, just press Enter."
+    $GitHubToken = Read-Secret 'Paste the token (or Enter for none)'
   }
   $headers = @{
-    Authorization          = "Bearer $GitHubToken"
     'X-GitHub-Api-Version' = '2022-11-28'
     'User-Agent'           = 'kernel-installer'
   }
+  if ($GitHubToken) { $headers.Authorization = "Bearer $GitHubToken" }
   $releases = Invoke-RestMethod -Headers ($headers + @{ Accept = 'application/vnd.github+json' }) `
     -Uri "https://api.github.com/repos/$Repo/releases?per_page=30"
   $best = $null; $bestBuild = -1
