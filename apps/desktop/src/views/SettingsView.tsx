@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AppUpdates } from '../components/AppUpdates.tsx';
 import { Icon } from '../components/Icon.tsx';
 import { TitleBar } from '../components/TitleBar.tsx';
 import { stateTone } from '../lib/format.ts';
@@ -174,6 +175,7 @@ export function SettingsView({ settings, snapshot, onSave }: Props) {
             </span>
           </div>
         </div>
+        <AppUpdates />
         <div className="form" style={{ marginTop: 24 }}>
           <div style={{ fontWeight: 600, fontSize: 14 }}>Notifications</div>
           <label className="field">

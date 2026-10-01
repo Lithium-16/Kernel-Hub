@@ -24,9 +24,11 @@ interface Props {
   view: View;
   onView: (v: View) => void;
   onPalette: () => void;
+  /** A newer build of this app, found on startup. */
+  updateBuild?: number | null;
 }
 
-export function Sidebar({ snapshot, view, onView, onPalette }: Props) {
+export function Sidebar({ snapshot, view, onView, onPalette, updateBuild }: Props) {
   const on = (v: View) =>
     v.kind === view.kind && (v.kind !== 'module' || (view.kind === 'module' && view.id === v.id));
   const nodeTone = stateTone(snapshot.conn);
@@ -90,6 +92,18 @@ export function Sidebar({ snapshot, view, onView, onPalette }: Props) {
       </button>
 
       <span style={{ flex: 1 }} />
+      {updateBuild ? (
+        <button
+          type="button"
+          className="row"
+          title="Install it from Settings > App updates"
+          onClick={() => onView({ kind: 'settings' })}
+        >
+          <Icon name="download" className="i accent" />
+          <span className="grow">Update available</span>
+          <span className="r">build {updateBuild}</span>
+        </button>
+      ) : null}
       <button
         type="button"
         className={`row ${on({ kind: 'settings' }) ? 'on' : ''}`}

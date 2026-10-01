@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { Palette } from './components/Palette.tsx';
 import { Sidebar, type View } from './components/Sidebar.tsx';
 import { TitleBar } from './components/TitleBar.tsx';
+import { checkForUpdate } from './lib/app-update.ts';
 import { NodeClient } from './lib/node.ts';
 import { loadNotifyLevel, shouldNotify, show, title } from './lib/notify.ts';
 import { loadSettings, type NodeSettings, saveSettings } from './lib/settings.ts';
+import { inTauri } from './lib/window.ts';
 import { ActivityView } from './views/ActivityView.tsx';
 import { ModuleView } from './views/ModuleView.tsx';
 import { SettingsView } from './views/SettingsView.tsx';
@@ -29,6 +31,21 @@ export function App() {
     client.start();
     return () => client.stop();
   }, [client, settings.token]);
+
+  // Look for a newer build of this app at start and every six hours; quietly, since GitHub
+  // may not be reachable from every network.
+  const [updateBuild, setUpdateBuild] = useState<number | null>(null);
+  useEffect(() => {
+    if (!inTauri) return;
+    const look = () =>
+      void checkForUpdate().then(
+        (a) => setUpdateBuild(a?.build ?? null),
+        () => {},
+      );
+    look();
+    const t = setInterval(look, 6 * 3600 * 1000);
+    return () => clearInterval(t);
+  }, []);
 
   // Windows notifications for events at or above the chosen level.
   const modulesRef = useRef(snap.modules);
@@ -95,7 +112,13 @@ export function App() {
 
   return (
     <div className="app">
-      <Sidebar snapshot={snap} view={view} onView={setView} onPalette={() => setPalette(true)} />
+      <Sidebar
+        snapshot={snap}
+        view={view}
+        onView={setView}
+        onPalette={() => setPalette(true)}
+        updateBuild={updateBuild}
+      />
       {main}
       {palette ? (
         <div className="palette-backdrop" onMouseDown={() => setPalette(false)}>

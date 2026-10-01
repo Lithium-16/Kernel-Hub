@@ -21,7 +21,7 @@
         "minHeight": 560,
         "center": true,
         "decorations": false,
-        "backgroundColor": "#0B0B0C"
+        "backgroundColor": "#141417"
       },
       {
         "label": "palette",
@@ -35,7 +35,7 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "resizable": false,
-        "backgroundColor": "#111113"
+        "backgroundColor": "#18181B"
       }
     ],
     "security": {
