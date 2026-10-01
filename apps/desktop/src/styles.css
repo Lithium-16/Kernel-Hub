@@ -5,25 +5,54 @@
 @import "@fontsource/geist-mono/400.css";
 
 :root {
+  /* Dim (default): soft gray text on charcoal, easy on the eyes. */
   --accent: #2563eb;
+  --bg: #141417;
+  --side: #18181b;
+  --raise: #1f1f23;
+  --hover: rgba(255, 255, 255, 0.04);
+  --sel: rgba(255, 255, 255, 0.07);
+  --line: rgba(255, 255, 255, 0.07);
+  --line-2: rgba(255, 255, 255, 0.11);
+  --text-1: #cfcfd5;
+  --text-2: #9b9ba4;
+  --text-3: #74747d;
+  --accent-fg: color-mix(in srgb, var(--accent) 60%, #ffffff);
+  --accent-tint: color-mix(in srgb, var(--accent) 16%, transparent);
+  --ok: #5cc4a0;
+  --bad: #e08c6c;
+  --warn: #dcb35c;
+  --font-sans: "Geist Sans", "Geist", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+
+/* Dark: the original black, with brighter text. */
+:root[data-theme="dark"] {
   --bg: #0b0b0c;
   --side: #0f0f11;
   --raise: #161618;
   --hover: rgba(255, 255, 255, 0.045);
   --sel: rgba(255, 255, 255, 0.085);
-  --line: rgba(255, 255, 255, 0.07);
   --line-2: rgba(255, 255, 255, 0.12);
   --text-1: #ededef;
   --text-2: #a0a0a8;
   --text-3: #7e7e86;
   --accent-fg: color-mix(in srgb, var(--accent) 55%, #ffffff);
-  --accent-tint: color-mix(in srgb, var(--accent) 16%, transparent);
-  --ok: #4fbf9a;
-  --bad: #e58a67;
-  --warn: #e5b454;
-  --font-sans: "Geist Sans", "Geist", system-ui, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, monospace;
-  color-scheme: dark;
+}
+
+/* Warm: amber-tinted grays for late at night. */
+:root[data-theme="warm"] {
+  --bg: #161411;
+  --side: #1a1714;
+  --raise: #221e1a;
+  --hover: rgba(255, 236, 210, 0.04);
+  --sel: rgba(255, 236, 210, 0.07);
+  --line: rgba(255, 236, 210, 0.07);
+  --line-2: rgba(255, 236, 210, 0.11);
+  --text-1: #d6cbbd;
+  --text-2: #a39886;
+  --text-3: #7c7264;
 }
 
 * {
@@ -130,7 +159,7 @@ textarea {
 }
 
 .search:hover {
-  background: #1b1b1e;
+  background: color-mix(in srgb, var(--raise) 88%, #ffffff);
 }
 
 .sect {
@@ -184,9 +213,12 @@ textarea {
   color: var(--text-3);
 }
 
-.row:hover .i,
-.row.on .i {
+.row:hover .i {
   color: var(--text-1);
+}
+
+.row.on .i {
+  color: var(--accent-fg);
 }
 
 .i.accent {
@@ -370,7 +402,7 @@ textarea {
 
 .tile .v {
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.02em;
   display: flex;
   align-items: center;
@@ -412,7 +444,7 @@ textarea {
   z-index: 5;
   min-width: 220px;
   padding: 4px;
-  background: #111113;
+  background: var(--side);
   border: 1px solid var(--line-2);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
 }
@@ -693,7 +725,7 @@ textarea {
   max-height: 440px;
   display: flex;
   flex-direction: column;
-  background: #111113;
+  background: var(--side);
   border: 1px solid var(--line-2);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
 }

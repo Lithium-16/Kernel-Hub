@@ -5,7 +5,7 @@ import { ModuleSettings } from '../components/ModuleSettings.tsx';
 import { ParamForm } from '../components/ParamForm.tsx';
 import { TitleBar } from '../components/TitleBar.tsx';
 import { type Action, hasParams, needsConfirm, needsInput } from '../lib/actions.ts';
-import { label, stateTone, summary, value } from '../lib/format.ts';
+import { label, stateTone, summary, value, valueTone } from '../lib/format.ts';
 import { layoutStatus, type Section } from '../lib/layout.ts';
 import type { ActionResult, Module, NodeClient } from '../lib/node.ts';
 
@@ -219,7 +219,7 @@ export function ModuleView({
             {tiles.map((t) => (
               <div key={t.key} className="tile">
                 <span className="k">{label(t.name)}</span>
-                <span className="v">
+                <span className={`v ${toneClass(t.key, t.value, t.max)}`}>
                   {t.key === 'state' ? <span className={`sq ${stateTone(t.value)}`} /> : null}
                   {value(t.key, t.value)}
                   {t.max !== undefined ? <small>/ {value(t.key, t.max)}</small> : null}
@@ -521,4 +521,9 @@ function Console({
       </label>
     </section>
   );
+}
+
+function toneClass(key: string, v: unknown, max: unknown): string {
+  const tone = valueTone(key, v, max);
+  return tone ? `c-${tone}` : '';
 }

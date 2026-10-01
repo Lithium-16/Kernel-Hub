@@ -115,3 +115,19 @@ export function summary(result: unknown): string {
   }
   return parts.join(' · ') || 'done';
 }
+
+/**
+ * A color for a status number that is getting high: percentages and temperatures, and
+ * "used / total" pairs. Undefined when there's nothing to say (most values stay plain).
+ */
+export function valueTone(key: string, v: unknown, max?: unknown): 'warn' | 'bad' | undefined {
+  if (typeof v !== 'number') return undefined;
+  let pct: number | null = null;
+  if (key.endsWith('_pct')) pct = v;
+  else if (typeof max === 'number' && max > 0 && /_used(_[a-z]+)?$/.test(key))
+    pct = (100 * v) / max;
+  if (pct !== null) return pct >= 95 ? 'bad' : pct >= 85 ? 'warn' : undefined;
+  if (key.endsWith('_temp_c') || key === 'temp_c')
+    return v >= 85 ? 'bad' : v >= 75 ? 'warn' : undefined;
+  return undefined;
+}

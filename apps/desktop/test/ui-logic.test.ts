@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { matches } from '../src/components/Palette.tsx';
 import { type Action, coerce, defaults, needsConfirm } from '../src/lib/actions.ts';
-import { bytes, duration, label, stateTone, summary, value } from '../src/lib/format.ts';
+import { bytes, duration, label, stateTone, summary, value, valueTone } from '../src/lib/format.ts';
 import { layoutStatus } from '../src/lib/layout.ts';
 import { edits, fromText, HIDDEN, type SettingField, toText } from '../src/lib/module-settings.ts';
 import { shouldNotify } from '../src/lib/notify.ts';
@@ -204,5 +204,20 @@ describe('notifications', () => {
     expect(shouldNotify('warn', { level: 'info' })).toBe(false);
     expect(shouldNotify('info', { level: 'info' })).toBe(true);
     expect(shouldNotify('off', { level: 'error' })).toBe(false);
+  });
+});
+
+describe('number colors', () => {
+  it('warns about high percentages, temperatures and nearly full pairs', () => {
+    expect(valueTone('cpu_pct', 40)).toBeUndefined();
+    expect(valueTone('cpu_pct', 88)).toBe('warn');
+    expect(valueTone('gpu_pct', 99)).toBe('bad');
+    expect(valueTone('gpu_temp_c', 64)).toBeUndefined();
+    expect(valueTone('gpu_temp_c', 80)).toBe('warn');
+    expect(valueTone('gpu_temp_c', 90)).toBe('bad');
+    expect(valueTone('vram_used_mb', 10800, 11264)).toBe('bad');
+    expect(valueTone('memory_used_mb', 30000, 65536)).toBeUndefined();
+    expect(valueTone('players_online', 20, 20)).toBeUndefined();
+    expect(valueTone('uptime_s', 99999)).toBeUndefined();
   });
 });

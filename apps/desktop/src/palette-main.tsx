@@ -1,10 +1,14 @@
 import { StrictMode, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Palette } from './components/Palette.tsx';
+import { applyLook, followLook, loadLook } from './lib/look.ts';
 import { NodeClient } from './lib/node.ts';
 import { loadSettings } from './lib/settings.ts';
 import { win } from './lib/window.ts';
 import './styles.css';
+
+applyLook(loadLook());
+followLook();
 
 /** The Alt+Space window: its own connection, reset every time it is shown. */
 function PaletteWindow() {
