@@ -810,3 +810,12 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Module colors (Settings > Appearance): each module's icon, and a line under its title. */
+:root[data-tint="on"] .i.mod {
+  color: var(--tint);
+}
+
+:root[data-tint="on"] .tinted .titlebar {
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--tint) 70%, transparent);
+}

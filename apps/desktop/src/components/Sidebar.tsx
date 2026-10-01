@@ -1,4 +1,6 @@
+import type React from 'react';
 import { stateTone, value } from '../lib/format.ts';
+import { moduleTint } from '../lib/look.ts';
 import type { Module, Snapshot } from '../lib/node.ts';
 import { Icon } from './Icon.tsx';
 import { Logo } from './Logo.tsx';
@@ -61,8 +63,9 @@ export function Sidebar({ snapshot, view, onView, onPalette }: Props) {
             type="button"
             className={`row ${on(v) ? 'on' : ''}`}
             onClick={() => onView(v)}
+            style={{ '--tint': moduleTint(m.id) } as React.CSSProperties}
           >
-            <Icon name={m.icon} />
+            <Icon name={m.icon} className="i mod" />
             <span className="grow">{m.name}</span>
             <span className="r">
               <span className={`sq ${meta.tone}`} />

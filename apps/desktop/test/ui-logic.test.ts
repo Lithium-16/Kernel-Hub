@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { matches } from '../src/components/Palette.tsx';
 import { type Action, coerce, defaults, needsConfirm } from '../src/lib/actions.ts';
 import { bytes, duration, label, stateTone, summary, value, valueTone } from '../src/lib/format.ts';
 import { layoutStatus } from '../src/lib/layout.ts';
+import { DEFAULT_LOOK, loadLook, moduleTint } from '../src/lib/look.ts';
 import { edits, fromText, HIDDEN, type SettingField, toText } from '../src/lib/module-settings.ts';
 import { shouldNotify } from '../src/lib/notify.ts';
 
@@ -219,5 +220,29 @@ describe('number colors', () => {
     expect(valueTone('memory_used_mb', 30000, 65536)).toBeUndefined();
     expect(valueTone('players_online', 20, 20)).toBeUndefined();
     expect(valueTone('uptime_s', 99999)).toBeUndefined();
+  });
+});
+
+describe('look', () => {
+  it('gives every module a stable color', () => {
+    expect(moduleTint('minecraft')).toBe('#5fbf6a');
+    expect(moduleTint('my-new-module')).toBe(moduleTint('my-new-module'));
+    expect(moduleTint('my-new-module')).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it('falls back to defaults for anything unknown', () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => store.set(k, v),
+    });
+    localStorage.setItem(
+      'kernel.look',
+      JSON.stringify({ theme: 'neon', textSize: 'huge', accent: 'red' }),
+    );
+    expect(loadLook()).toEqual(DEFAULT_LOOK);
+    localStorage.setItem('kernel.look', JSON.stringify({ theme: 'dark', moduleColors: false }));
+    expect(loadLook()).toMatchObject({ theme: 'dark', moduleColors: false, textSize: 'normal' });
+    vi.unstubAllGlobals();
   });
 });

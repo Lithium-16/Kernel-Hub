@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Icon } from '../components/Icon.tsx';
 import { TitleBar } from '../components/TitleBar.tsx';
 import { stateTone } from '../lib/format.ts';
-import { ACCENTS, type Look, loadLook, saveLook, THEMES } from '../lib/look.ts';
+import { ACCENTS, type Look, loadLook, saveLook, TEXT_SIZES, THEMES } from '../lib/look.ts';
 import type { Snapshot } from '../lib/node.ts';
 import {
   loadNotifyLevel,
@@ -126,6 +126,31 @@ export function SettingsView({ settings, snapshot, onSave }: Props) {
             </span>
             <span className="hint">{THEMES.find((t) => t.id === look.theme)?.hint}</span>
           </div>
+          <div className="field">
+            <span>Text size</span>
+            <span style={{ display: 'flex', gap: 6 }}>
+              {TEXT_SIZES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  className={`btn${look.textSize === t.id ? ' primary' : ''}`}
+                  onClick={() => setLook({ ...look, textSize: t.id })}
+                >
+                  {t.name}
+                </button>
+              ))}
+            </span>
+          </div>
+          <label className="field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={look.moduleColors}
+              onChange={(e) => setLook({ ...look, moduleColors: e.target.checked })}
+              style={{ width: 16, height: 16 }}
+            />
+            <span>Module colors</span>
+            <span className="hint">each module's icon and page in its own color</span>
+          </label>
           <div className="field">
             <span>Accent color</span>
             <span style={{ display: 'flex', gap: 8 }}>

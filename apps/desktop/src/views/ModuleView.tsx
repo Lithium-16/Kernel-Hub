@@ -1,3 +1,4 @@
+import type React from 'react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '../components/Icon.tsx';
 import { ModuleLog } from '../components/ModuleLog.tsx';
@@ -7,6 +8,7 @@ import { TitleBar } from '../components/TitleBar.tsx';
 import { type Action, hasParams, needsConfirm, needsInput } from '../lib/actions.ts';
 import { label, stateTone, summary, value, valueTone } from '../lib/format.ts';
 import { layoutStatus, type Section } from '../lib/layout.ts';
+import { moduleTint } from '../lib/look.ts';
 import type { ActionResult, Module, NodeClient } from '../lib/node.ts';
 
 /** Modules with both of these get a live console instead of two buttons. */
@@ -91,7 +93,7 @@ export function ModuleView({
   const stateText = value('state', status?.state ?? module.state);
 
   return (
-    <div className="main">
+    <div className="main tinted" style={{ '--tint': moduleTint(module.id) } as React.CSSProperties}>
       <TitleBar title={module.name} meta={`on ${nodeName} · module ${module.version}`} />
       <div className="toolbar">
         {toolbar.map((a) => {
