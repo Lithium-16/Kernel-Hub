@@ -4,7 +4,7 @@ from kernel_sdk import ActionContext, Module
 from mc import Server, check_player, one_line
 
 mod = Module()
-server = Server(mod.settings, log=mod.log)
+server = Server(mod.settings, log=mod.log, emit=mod.emit)
 mod.background(server.poll)
 mod.background(server.keepalive)
 

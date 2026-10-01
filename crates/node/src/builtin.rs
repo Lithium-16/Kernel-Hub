@@ -2,6 +2,7 @@
 //! other module so the desktop app and the palette get buttons for it.
 
 use kernel_protocol::{ActionSpec, AiTier};
+use serde_json::json;
 
 pub const ID: &str = "node";
 pub const NAME: &str = "Node";
@@ -41,6 +42,69 @@ pub fn actions() -> Vec<ActionSpec> {
             "rotate-cw",
             "Restarts kerneld and every module it runs.",
             AiTier::Confirm,
+        ),
+        ActionSpec {
+            params: json!({
+                "module": {"type": "string", "description": "Module id, or node for kerneld itself", "default": "node"},
+                "lines": {"type": "int", "default": 100, "min": 1, "max": 1000},
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+            quiet: true,
+            ..spec(
+                "logs.tail",
+                "Show log",
+                "scroll-text",
+                "The last lines of a module's log (or the node's own).",
+                AiTier::Safe,
+            )
+        },
+        ActionSpec {
+            params: json!({
+                "module": {"type": "string", "description": "Module id"},
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+            quiet: true,
+            ..spec(
+                "settings.get",
+                "Module settings",
+                "sliders-horizontal",
+                "A module's settings on this PC, with their defaults. Secrets are hidden.",
+                AiTier::Safe,
+            )
+        },
+        ActionSpec {
+            params: json!({
+                "module": {"type": "string", "description": "Module id"},
+                "values": {"type": "string", "description": "JSON object of setting: new value"},
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+            ..spec(
+                "settings.set",
+                "Change module settings",
+                "save",
+                "Saves settings for a module on this PC and restarts it.",
+                AiTier::Never,
+            )
+        },
+        spec(
+            "diag.bundle",
+            "Save diagnostics",
+            "package",
+            "Saves a zip with recent logs, the config (secrets hidden), module states and recent events.",
+            AiTier::Safe,
+        ),
+        spec(
+            "backup.now",
+            "Back up Kernel's data",
+            "database-backup",
+            "Copies the activity and event log to the backups folder (also done every night; a week is kept).",
+            AiTier::Safe,
         ),
     ]
 }

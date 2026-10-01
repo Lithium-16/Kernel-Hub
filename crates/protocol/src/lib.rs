@@ -269,6 +269,63 @@ pub struct Activity {
     pub entries: Vec<ActivityEntry>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventLevel {
+    Info,
+    Warn,
+    Error,
+}
+
+impl EventLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "info" => Some(Self::Info),
+            "warn" => Some(Self::Warn),
+            "error" => Some(Self::Error),
+            _ => None,
+        }
+    }
+}
+
+/// Something that happened on a node without anyone asking: a server crashed, a player
+/// joined, an update is out. Modules report them; the node keeps them and sends alerts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeEvent {
+    pub id: String,
+    pub ts: String,
+    pub node_id: String,
+    pub module: String,
+    /// Short dotted name, like `server.crashed` or `player.joined`.
+    pub kind: String,
+    pub level: EventLevel,
+    /// One line for people.
+    pub message: String,
+    #[serde(default)]
+    pub data: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct EventsQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Events {
+    pub events: Vec<NodeEvent>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "body")]
 pub enum Payload {
@@ -288,6 +345,13 @@ pub enum Payload {
     ActivityQuery(ActivityQuery),
     #[serde(rename = "activity")]
     Activity(Activity),
+    #[serde(rename = "events.query")]
+    EventsQuery(EventsQuery),
+    #[serde(rename = "events")]
+    Events(Events),
+    /// Pushed to every connected client as it happens (no `re`).
+    #[serde(rename = "event")]
+    Event(NodeEvent),
     #[serde(rename = "error")]
     Error(ErrorInfo),
 }

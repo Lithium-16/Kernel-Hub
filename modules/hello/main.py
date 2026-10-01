@@ -18,7 +18,7 @@ def status() -> dict:
 @mod.action("greet.say")
 def greet(ctx: ActionContext, name: str) -> dict:
     state["greetings"] += 1
-    return {"message": f"Hello, {name}!", "count": state["greetings"]}
+    return {"message": f"{mod.settings['greeting']}, {name}!", "count": state["greetings"]}
 
 
 @mod.action("counter.reset")
@@ -36,6 +36,12 @@ def count(ctx: ActionContext) -> dict:
 async def wait(ctx: ActionContext, seconds: float) -> dict:
     await asyncio.sleep(seconds)
     return {"waited": seconds}
+
+
+@mod.action("event.emit")
+def emit(ctx: ActionContext, message: str, level: str) -> dict:
+    mod.emit("test.event", message, level=level, source="hello")
+    return {"emitted": message}
 
 
 @mod.action("debug.crash")

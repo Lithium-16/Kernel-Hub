@@ -1,0 +1,1 @@
+{"v":1,"id":"01J9ZK7Q0000000000000000C2","re":"01J9ZK7Q0000000000000000C1","ts":"2026-09-24T20:12:00Z","type":"events","body":{"events":[{"id":"01J9ZK7Q0000000000000000C3","ts":"2026-09-24T20:11:40Z","node_id":"pluto","module":"minecraft","kind":"player.joined","level":"info","message":"Steve joined","data":{"player":"Steve"}}]}}

@@ -16,7 +16,14 @@ def base(**over):
 def test_loads_hello_module():
     m = load_manifest(HELLO)
     assert m.id == "hello"
-    assert [a.id for a in m.actions] == ["greet.say", "counter.reset", "slow.wait", "greet.count", "debug.crash"]
+    assert [a.id for a in m.actions] == [
+        "greet.say",
+        "counter.reset",
+        "slow.wait",
+        "greet.count",
+        "debug.crash",
+        "event.emit",
+    ]
     assert m.action("greet.count").quiet and not m.action("greet.say").quiet
     greet = m.action("greet.say")
     assert greet.tool_name == "greet__say"

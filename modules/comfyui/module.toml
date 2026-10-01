@@ -1,0 +1,112 @@
+id = "comfyui"
+name = "ComfyUI"
+icon = "image"
+version = "0.1.0"
+runtime = "python"
+entry = "main.py"
+
+# Talks to ComfyUI's own HTTP API: queue, workflows, models and downloads.
+# Override per machine in the node's data\settings\comfyui.toml.
+[settings]
+# ComfyUI's address. Use the VRAM module's proxy (http://127.0.0.1:8189) so jobs from Kernel
+# take turns with LLMs.
+url = "http://127.0.0.1:8188"
+# The ComfyUI folder (the one with main.py), or the portable build's root folder.
+comfy_dir = ""
+# How to start ComfyUI, run from comfy_dir. Empty turns Start off. For the portable build:
+#   ["python_embeded\\python.exe", "-s", "ComfyUI\\main.py", "--windows-standalone-build"]
+start_command = []
+# Model folders (checkpoints, loras, vae, ...). Empty: models\ inside comfy_dir.
+models_dir = ""
+# Workflows saved with ComfyUI's "Export (API)". Empty: kernel-workflows\ inside comfy_dir.
+workflows_dir = ""
+# For downloads that need an account.
+civitai_token = ""
+hf_token = ""
+poll_s = 2.0
+
+[[actions]]
+id = "workflow.run"
+label = "Run workflow"
+icon = "play"
+description = "Queues a saved workflow. The prompt fills {{prompt}} placeholders, or the sampler's positive text box. seed -1 is random; count queues several with different seeds."
+ai = "safe"
+params.workflow = { type = "string", description = "Name of a workflow file in workflows_dir" }
+params.prompt = { type = "string", description = "Positive prompt (empty keeps the workflow's)", default = "" }
+params.negative = { type = "string", description = "Negative prompt (empty keeps the workflow's)", default = "" }
+params.seed = { type = "int", description = "Seed, -1 for random", default = -1, min = -1 }
+timeout_s = 660
+params.count = { type = "int", description = "How many to queue", default = 1, min = 1, max = 32 }
+
+[[actions]]
+id = "job.interrupt"
+label = "Stop current job"
+icon = "square"
+description = "Stops the image being generated now. The rest of the queue carries on."
+ai = "confirm"
+
+[[actions]]
+id = "queue.clear"
+label = "Clear queue"
+icon = "list-x"
+description = "Removes every job waiting in the queue (not the one running)."
+ai = "confirm"
+
+[[actions]]
+id = "memory.free"
+label = "Free VRAM"
+icon = "memory-stick"
+description = "Unloads models from the GPU until the next job needs them."
+ai = "safe"
+
+[[actions]]
+id = "workflows.list"
+label = "List workflows"
+icon = "list"
+description = "Workflows that can be run."
+ai = "safe"
+quiet = true
+
+[[actions]]
+id = "models.list"
+label = "List models"
+icon = "boxes"
+description = "Model files in one folder (checkpoints, loras, vae, ...)."
+ai = "safe"
+quiet = true
+params.folder = { type = "string", description = "Model folder", default = "checkpoints" }
+
+[[actions]]
+id = "models.download"
+label = "Download model"
+icon = "download"
+description = "Downloads a model from a Hugging Face or Civitai download link into a model folder. Runs in the background."
+ai = "confirm"
+params.url = { type = "string", description = "https link to the file" }
+params.folder = { type = "string", description = "Model folder, like checkpoints or loras", default = "loras" }
+params.filename = { type = "string", description = "Name to save as (empty: from the link)", default = "" }
+
+[[actions]]
+id = "history.recent"
+label = "Recent jobs"
+icon = "history"
+description = "The last finished jobs, with their images."
+ai = "safe"
+quiet = true
+params.limit = { type = "int", default = 10, min = 1, max = 50 }
+
+[[actions]]
+id = "server.start"
+label = "Start ComfyUI"
+icon = "power"
+description = "Starts ComfyUI in the background with start_command."
+ai = "safe"
+timeout_s = 150
+
+[[actions]]
+id = "server.stop"
+label = "Stop ComfyUI"
+icon = "power-off"
+description = "Stops ComfyUI (whatever it was doing)."
+ai = "confirm"
+timeout_s = 30

@@ -1,0 +1,74 @@
+id = "vram"
+name = "VRAM"
+icon = "gauge"
+version = "0.1.0"
+runtime = "python"
+entry = "main.py"
+
+# Shares the GPU between the apps that want it: shows who uses how much VRAM, and makes room
+# by priority. Override per machine in the node's data\settings\vram.toml.
+[settings]
+# Make room on its own (see exclusive and min_free_mb). Off: only the buttons do anything.
+auto = true
+# Keep at least this much VRAM free: below it for after_s, the lowest-priority idle app is
+# unloaded (one at a time). 0 turns it off.
+min_free_mb = 1024
+after_s = 15
+poll_s = 3.0
+# Taking turns (see apps' proxy_port). LLM requests wait while ComfyUI is working, so images
+# queued around them run back to back; but never longer than llm_max_wait_s. Image jobs wait
+# for a running LLM request, at most image_max_wait_s.
+llm_max_wait_s = 90
+image_max_wait_s = 600
+# Before the LLM's turn, an idle ComfyUI is unloaded if less than this is free.
+llm_reserve_mb = 6144
+# Where the proxies listen. 127.0.0.1: only apps on this PC.
+proxy_host = "127.0.0.1"
+# Queue a ComfyUI job again (once) when it fails for lack of VRAM, after making room.
+retry_out_of_memory = true
+# The apps sharing the GPU. Higher priority keeps its VRAM; lower gets unloaded first.
+#   kind = "ollama"   unloads models through Ollama's API (url)
+#   kind = "llm"      another LLM server (LM Studio, KoboldCpp, llama.cpp) at url; measured
+#                     by process, closed to make room only if stop_when_needed
+#   kind = "comfyui"  frees VRAM through ComfyUI's API (url), only when its queue is empty
+#   kind = "process"  measured by process name; closed to make room only if stop_when_needed
+#   kind = "watch"    only measured, never touched
+# exclusive = true: while this app is busy, every lower-priority app is unloaded (video gen).
+# proxy_port: point your apps here instead of at the app itself, and their work takes turns
+# (Ollama at 127.0.0.1:11435, the ComfyUI page at 127.0.0.1:8189). 0: no proxy.
+apps = [
+  { name = "Roblox", kind = "watch", process = "RobloxPlayerBeta.exe", priority = 100 },
+  { name = "ComfyUI", kind = "comfyui", url = "http://127.0.0.1:8188", priority = 50, exclusive = true, proxy_port = 8189 },
+  { name = "Ollama", kind = "ollama", url = "http://127.0.0.1:11434", priority = 30, proxy_port = 11435 },
+]
+
+[[actions]]
+id = "vram.free_idle"
+label = "Free idle VRAM"
+icon = "memory-stick"
+description = "Unloads every app that isn't busy (Ollama models, ComfyUI's cache). Never closes apps."
+ai = "safe"
+
+[[actions]]
+id = "vram.focus"
+label = "Give the GPU to…"
+icon = "crosshair"
+description = "Makes room for one app: unloads every other app (and closes the ones marked stop_when_needed). Busy ComfyUI jobs are left alone."
+ai = "confirm"
+params.app = { type = "string", description = "App name from the list" }
+
+[[actions]]
+id = "app.free"
+label = "Unload an app"
+icon = "circle-minus"
+description = "Unloads one app's VRAM now (closes it if it's a process marked stop_when_needed)."
+ai = "confirm"
+params.app = { type = "string", description = "App name from the list" }
+
+[[actions]]
+id = "auto.set"
+label = "Automatic mode"
+icon = "wand"
+description = "Turns automatic room-making on or off until the module restarts."
+ai = "safe"
+params.on = { type = "bool" }

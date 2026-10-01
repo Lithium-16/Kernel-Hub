@@ -13,7 +13,9 @@ use tokio::sync::watch;
 use crate::activity::ActivityStore;
 use crate::builtin;
 use crate::config::Config;
+use crate::events::EventHub;
 use crate::mcp::McpError;
+use crate::schedule::Scheduler;
 use crate::supervisor::Supervisor;
 use crate::update::{self, Updater};
 
@@ -24,6 +26,9 @@ pub struct Node {
     pub cfg: Config,
     pub supervisor: Arc<Supervisor>,
     pub activity: ActivityStore,
+    pub events: Arc<EventHub>,
+    pub scheduler: Scheduler,
+    pub automations: crate::automations::Automations,
     pub updater: Updater,
     /// Set to true to ask the process to exit (after handing off to the update helper).
     pub exit: watch::Sender<bool>,
@@ -35,12 +40,14 @@ fn fail(code: ErrorCode, message: impl Into<String>) -> ActionResult {
 }
 
 /// The assistant and automations get `safe` actions only, until approvals arrive in phase 2.
-fn permission(actor: &Actor, spec: &ActionSpec) -> Option<ActionResult> {
+/// `preapproved` is a schedule the user marked `approved`: it may also run `confirm` actions.
+fn permission(actor: &Actor, spec: &ActionSpec, preapproved: bool) -> Option<ActionResult> {
     if actor.kind.is_human() {
         return None;
     }
     match spec.ai {
         AiTier::Safe => None,
+        AiTier::Confirm if preapproved => None,
         AiTier::Never => Some(fail(
             ErrorCode::NotPermitted,
             format!("'{}' can only be run with a button", spec.id),
@@ -66,6 +73,12 @@ impl Node {
         let mut modules = self.supervisor.catalog();
         let mut status = self.updater.status();
         status.insert("uptime_s".into(), json!(self.started.elapsed().as_secs()));
+        if !self.scheduler.entries.is_empty() {
+            status.insert("schedules".into(), self.scheduler.status());
+        }
+        if !self.automations.is_empty() {
+            status.insert("automations".into(), self.automations.status());
+        }
         modules.push(ModuleInfo {
             id: builtin::ID.into(),
             name: builtin::NAME.into(),
@@ -111,11 +124,34 @@ impl Node {
     /// Run an action on behalf of `req.actor`. Every call, allowed or not, is logged
     /// (except quiet ones).
     pub async fn invoke(self: &Arc<Self>, req: ActionInvoke) -> ActionResult {
+        self.invoke_with(req, false).await
+    }
+
+    /// A scheduled run; `approved` comes from the schedule's own config.
+    pub async fn invoke_scheduled(
+        self: &Arc<Self>,
+        req: ActionInvoke,
+        approved: bool,
+    ) -> ActionResult {
+        self.invoke_with(req, approved).await
+    }
+
+    /// Whether `module` has `action` (built-in or from a module's manifest).
+    pub fn has_action(&self, module: &str, action: &str) -> bool {
+        if module == builtin::ID {
+            return builtin::actions().iter().any(|a| a.id == action);
+        }
+        self.supervisor
+            .get(module)
+            .is_some_and(|slot| slot.manifest.action(action).is_some())
+    }
+
+    async fn invoke_with(self: &Arc<Self>, req: ActionInvoke, preapproved: bool) -> ActionResult {
         let started = Instant::now();
         let result = if req.module == builtin::ID {
-            self.run_builtin(&req).await
+            self.run_builtin(&req, preapproved).await
         } else {
-            self.run(&req).await
+            self.run(&req, preapproved).await
         };
         if !self.is_quiet(&req) {
             self.record(&req, &result, started);
@@ -165,14 +201,14 @@ impl Node {
         }
     }
 
-    async fn run_builtin(self: &Arc<Self>, req: &ActionInvoke) -> ActionResult {
+    async fn run_builtin(self: &Arc<Self>, req: &ActionInvoke, preapproved: bool) -> ActionResult {
         let Some(spec) = builtin::actions().into_iter().find(|a| a.id == req.action) else {
             return fail(
                 ErrorCode::InvalidParams,
                 format!("module '{}' has no action '{}'", req.module, req.action),
             );
         };
-        if let Some(denied) = permission(&req.actor, &spec) {
+        if let Some(denied) = permission(&req.actor, &spec, preapproved) {
             return denied;
         }
         match req.action.as_str() {
@@ -193,19 +229,113 @@ impl Node {
                 }
                 Err(e) => fail(ErrorCode::ModuleFailed, e),
             },
+            "logs.tail" => self.logs_tail(req),
+            "settings.get" | "settings.set" => self.module_settings(req),
+            "diag.bundle" => {
+                let extra = [
+                    ("modules.json", json!(self.catalog())),
+                    (
+                        "events.json",
+                        json!(self.events.query(200, None).unwrap_or_default()),
+                    ),
+                    (
+                        "activity.json",
+                        json!(self.activity.query(200, None).unwrap_or_default()),
+                    ),
+                ];
+                match crate::maintenance::diagnostics(&self.cfg, &extra) {
+                    Ok(path) => ActionResult::success(crate::maintenance::diag_summary(&path)),
+                    Err(e) => fail(ErrorCode::ModuleFailed, e.to_string()),
+                }
+            }
+            "backup.now" => match crate::maintenance::backup(&self.cfg, &self.activity) {
+                Ok(path) => ActionResult::success(json!({ "saved": path.to_string_lossy() })),
+                Err(e) => fail(ErrorCode::ModuleFailed, e),
+            },
             _ => fail(ErrorCode::Internal, "unhandled built-in action"),
+        }
+    }
+
+    fn module_settings(&self, req: &ActionInvoke) -> ActionResult {
+        let module = req
+            .params
+            .get("module")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let Some(slot) = self.supervisor.get(module) else {
+            return fail(
+                ErrorCode::InvalidParams,
+                format!("unknown module '{module}'"),
+            );
+        };
+        let file = self
+            .cfg
+            .module_settings_dir()
+            .join(format!("{module}.toml"));
+        if req.action == "settings.get" {
+            return match crate::settings::describe(&slot.manifest, &file) {
+                Ok(v) => ActionResult::success(v),
+                Err(e) => fail(ErrorCode::ModuleFailed, e),
+            };
+        }
+        let values = req
+            .params
+            .get("values")
+            .and_then(|v| v.as_str())
+            .unwrap_or("{}");
+        let Ok(serde_json::Value::Object(values)) = serde_json::from_str(values) else {
+            return fail(ErrorCode::InvalidParams, "values must be a JSON object");
+        };
+        match crate::settings::save(&slot.manifest, &file, &values) {
+            Ok(changed) => {
+                let restarted = !changed.is_empty() && self.supervisor.reload(module);
+                ActionResult::success(json!({ "changed": changed, "restarted": restarted }))
+            }
+            Err(e) => fail(ErrorCode::InvalidParams, e),
+        }
+    }
+
+    fn logs_tail(&self, req: &ActionInvoke) -> ActionResult {
+        let module = req
+            .params
+            .get("module")
+            .and_then(|v| v.as_str())
+            .unwrap_or(builtin::ID);
+        let lines = req
+            .params
+            .get("lines")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100)
+            .clamp(1, 1000) as usize;
+        if module != builtin::ID && self.supervisor.get(module).is_none() {
+            return fail(
+                ErrorCode::InvalidParams,
+                format!("unknown module '{module}'"),
+            );
+        }
+        let Some(path) = crate::maintenance::log_path(&self.cfg, module) else {
+            return fail(ErrorCode::InvalidParams, "no log yet");
+        };
+        match crate::maintenance::tail(&path, lines) {
+            Ok(lines) => ActionResult::success(json!({ "module": module, "lines": lines })),
+            Err(e) => fail(ErrorCode::InvalidParams, format!("no log yet ({e})")),
         }
     }
 
     /// Quiet actions (safe, read-only, polled) stay out of the activity log.
     fn is_quiet(&self, req: &ActionInvoke) -> bool {
+        if req.module == builtin::ID {
+            return builtin::actions()
+                .iter()
+                .any(|a| a.id == req.action && a.quiet);
+        }
         self.supervisor
             .get(&req.module)
             .and_then(|slot| slot.manifest.action(&req.action).map(|a| a.spec.quiet))
             .unwrap_or(false)
     }
 
-    async fn run(&self, req: &ActionInvoke) -> ActionResult {
+    async fn run(&self, req: &ActionInvoke, preapproved: bool) -> ActionResult {
         let Some(slot) = self.supervisor.get(&req.module) else {
             return fail(
                 ErrorCode::InvalidParams,
@@ -219,7 +349,7 @@ impl Node {
             );
         };
 
-        if let Some(denied) = permission(&req.actor, &action.spec) {
+        if let Some(denied) = permission(&req.actor, &action.spec, preapproved) {
             return denied;
         }
 

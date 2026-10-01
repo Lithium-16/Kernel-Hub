@@ -164,8 +164,11 @@ class Watcher:
         windows: WindowControl | None = None,
         roots: list[Path] | None = None,
         global_settings: Path | None = None,
+        emit: Callable[..., None] | None = None,
     ) -> None:
         self.settings = settings
+        self.emit = emit or (lambda *args, **kwargs: None)
+        self.closing = False  # we're closing the client ourselves, so its exit isn't news
         if settings["priority"] not in PRIORITIES:
             raise ValueError(f"priority must be one of {', '.join(PRIORITIES)}")
         self.win = windows if windows is not None else window_control()
@@ -228,9 +231,15 @@ class Watcher:
         else:
             self.prepare_launch()
         snap.update(self.low_power)
+        before = self.snapshot["state"]
         self.snapshot = snap
+        if snap["state"] == "in_game" and before != "in_game":
+            self.emit("game.joined", "Joined the game", place_id=snap["place_id"])
+        if before != "closed" and snap["state"] == "closed" and not self.closing:
+            self.emit("client.closed", "Roblox closed", level="warn")
         if disconnected_now:
-            await self.maybe_auto_rejoin()
+            outcome = await self.maybe_auto_rejoin()
+            self.emit("game.disconnected", f"Disconnected from the game{outcome}", level="warn")
         return snap
 
     # -- low-power AFK mode ---------------------------------------------------------------
@@ -324,6 +333,7 @@ class Watcher:
     async def close(self, timeout: float = 5.0) -> dict[str, Any]:
         """Ask the client to exit, then force it after `timeout` seconds."""
         procs = self.processes()
+        self.closing = True
         for p in procs:
             try:
                 p.terminate()
@@ -338,7 +348,12 @@ class Watcher:
                     p.kill()
                 except psutil.Error:
                     pass
+        # Stays set until the next poll has seen the client gone.
+        asyncio.get_running_loop().call_later(self.settings["poll_s"] * 2 + 1, self._closed)
         return {"closed": len(procs)}
+
+    def _closed(self) -> None:
+        self.closing = False
 
     async def relaunch(self) -> dict[str, Any]:
         place = self.place()  # check before closing anything
@@ -347,14 +362,17 @@ class Watcher:
         self.last_rejoin = self.clock()
         return {"closed": closed, "rejoining": place}
 
-    async def maybe_auto_rejoin(self) -> None:
+    async def maybe_auto_rejoin(self) -> str:
+        """Rejoin if the settings allow it now. Returns how that went, for the event."""
         if not self.settings["auto_rejoin"]:
-            return
+            return ""
         cooldown = float(self.settings["rejoin_cooldown_min"]) * 60
         if self.last_rejoin is not None and self.clock() - self.last_rejoin < cooldown:
-            return
+            return "; not rejoining (rejoined recently)"
         try:
             await self.relaunch()
             self.log.event("disconnected; rejoining automatically", self.clock())
+            return "; rejoining"
         except ActionError as e:
             self.log.event(f"disconnected; couldn't rejoin: {e.message}", self.clock())
+            return f"; couldn't rejoin: {e.message}"

@@ -32,6 +32,17 @@ pub struct Config {
     pub supervisor: SupervisorConfig,
     #[serde(default)]
     pub update: UpdateConfig,
+    #[serde(default)]
+    pub notify: NotifyConfig,
+    /// Actions to run on a timer (`[[schedule]]` tables).
+    #[serde(default)]
+    pub schedule: Vec<crate::schedule::ScheduleConfig>,
+    /// Actions run when an event happens (`[[on_event]]` tables).
+    #[serde(default)]
+    pub on_event: Vec<crate::automations::OnEventConfig>,
+    /// Actions run when a module's status meets a condition for a while (`[[when]]` tables).
+    #[serde(default)]
+    pub when: Vec<crate::automations::WhenConfig>,
     /// The file this config was loaded from; the update helper restarts kerneld with it.
     #[serde(skip)]
     pub path: Option<PathBuf>,
@@ -68,6 +79,31 @@ impl Default for UpdateConfig {
             auto_install: false,
             uv: "uv".into(),
             scheduled_task: String::new(),
+        }
+    }
+}
+
+/// Alerts for events (see `notify.rs`).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct NotifyConfig {
+    /// Discord webhook URL (channel settings, Integrations, Webhooks). Empty turns alerts off.
+    pub discord_webhook: String,
+    /// Send events at this level and above: "info", "warn" or "error".
+    pub min_level: String,
+    /// Also send these events whatever their level, like "player.joined" or "minecraft.*".
+    pub include: Vec<String>,
+    /// Never send these, even when the level says so.
+    pub mute: Vec<String>,
+}
+
+impl Default for NotifyConfig {
+    fn default() -> Self {
+        Self {
+            discord_webhook: String::new(),
+            min_level: "warn".into(),
+            include: Vec::new(),
+            mute: Vec::new(),
         }
     }
 }
@@ -159,6 +195,22 @@ impl Config {
         let repo = &self.update.repo;
         if !repo.is_empty() && repo.split('/').filter(|p| !p.is_empty()).count() != 2 {
             bail!("update.repo must look like owner/repo");
+        }
+        crate::automations::Automations::new(&self.on_event, &self.when)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        for s in &self.schedule {
+            crate::schedule::parse(&s.at)
+                .map_err(|e| anyhow::anyhow!("schedule \"{}\": {e}", s.name))?;
+        }
+        if kernel_protocol::EventLevel::parse(&self.notify.min_level).is_none() {
+            bail!("notify.min_level must be info, warn or error");
+        }
+        let hook = &self.notify.discord_webhook;
+        if !hook.is_empty()
+            && !hook.starts_with("https://")
+            && !hook.starts_with("http://127.0.0.1")
+        {
+            bail!("notify.discord_webhook must be an https:// URL");
         }
         Ok(())
     }

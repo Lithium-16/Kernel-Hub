@@ -17,6 +17,11 @@ sample_s = 2.0
 power_delay_s = 60
 # Drives or mount points to show. Empty shows every fixed disk.
 disks = []
+# Alerts (events) when a reading stays at or over its limit for alert_after_s. 0 turns one off.
+alert_gpu_temp_c = 85
+alert_memory_pct = 95
+alert_disk_pct = 95
+alert_after_s = 60
 
 [[actions]]
 id = "power.sleep"

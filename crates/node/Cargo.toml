@@ -29,6 +29,7 @@ reqwest = { workspace = true }
 zip = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
 tokio-tungstenite = { workspace = true }

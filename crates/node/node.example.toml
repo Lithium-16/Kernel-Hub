@@ -25,3 +25,50 @@ ping_misses = 3
 status_interval_ms = 2000
 max_crashes = 5
 crash_window_s = 300
+
+# Alerts for events (crashes, disconnects, new builds) through a Discord channel webhook:
+# channel settings > Integrations > Webhooks > New Webhook > Copy Webhook URL.
+[notify]
+discord_webhook = ""
+min_level = "warn"          # info, warn or error
+include = []                # also send these, e.g. ["player.joined", "minecraft.*"]
+mute = []                   # never send these
+
+# Actions on a timer, in this PC's local time. Runs missed while the PC was off are skipped.
+# at: "daily 04:00", "sun 03:30", "mon,wed,fri 18:00", "weekdays 07:00", "every 30m", "every 6h".
+# Actions that need approval run only with approved = true; button-only actions never do.
+#
+# [[schedule]]
+# name = "Nightly backup"
+# at = "daily 04:00"
+# module = "minecraft"
+# action = "world.backup"
+#
+# [[schedule]]
+# name = "Weekly restart"
+# at = "mon 05:00"
+# module = "minecraft"
+# action = "server.stop"
+# params = { delay_min = 5 }
+# approved = true
+
+# Automations with triggers. Same permission rules as schedules (approved = true for
+# actions that normally ask first).
+#
+# When an event happens (a kind, or module.kind; a trailing * matches anything after it):
+# [[on_event]]
+# name = "Free VRAM after a batch"
+# event = "comfyui.queue.finished"
+# module = "vram"
+# action = "vram.free_idle"
+# cooldown_min = 1
+#
+# When a module's status meets a condition for a while (==, !=, <, <=, >, >=):
+# [[when]]
+# name = "Stop an empty server"
+# status = "minecraft"
+# condition = "players_online == 0"
+# for_min = 30
+# module = "minecraft"
+# action = "server.stop"
+# approved = true

@@ -15,6 +15,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-global-shortcut = "2"
+# Keep on the same minor version as @tauri-apps/plugin-notification (tauri build checks).
+tauri-plugin-notification = "~2.4"
 tauri-plugin-single-instance = "2"
 
 [lints.rust]

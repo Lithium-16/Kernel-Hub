@@ -50,6 +50,7 @@ export function value(key: string, v: unknown): string {
     if (key === 'bytes' || key.endsWith('_bytes')) return bytes(v);
     if (key.endsWith('_pct')) return `${Math.round(v)}%`;
     if (key.endsWith('_c')) return `${Math.round(v)} °C`;
+    if (key.endsWith('_w')) return `${Math.round(v)} W`;
     if (key.endsWith('_bps')) return `${bytes(v)}/s`;
     return Number.isInteger(v) ? String(v) : v.toFixed(1);
   }

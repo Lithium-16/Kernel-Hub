@@ -7,7 +7,9 @@ import inspect
 import json
 import logging
 import os
+import re
 import sys
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +22,9 @@ from mcp.server.stdio import stdio_server
 from .manifest import Action, Manifest, Param, load_manifest, load_settings
 
 STATUS_URI = "kernel://status"
+EVENTS_URI = "kernel://events"
+EVENT_LEVELS = ("info", "warn", "error")
+EVENT_KIND = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$")
 
 ERROR_CODES = frozenset(
     {"invalid_params", "module_failed", "timeout", "busy", "not_permitted", "disabled", "offline", "internal"}
@@ -109,6 +114,8 @@ class Module:
         self._handlers: dict[str, Handler] = {}
         self._status: Handler | None = None
         self._background: list[Callable[[], Awaitable[None]]] = []
+        # Events wait here until the node reads them (every couple of seconds).
+        self._events: deque[dict[str, Any]] = deque(maxlen=200)
         self.settings = load_settings(self.manifest)
         self.log = logging.getLogger(f"kernel.{self.manifest.id}")
 
@@ -126,6 +133,26 @@ class Module:
     def status(self, fn: Handler) -> Handler:
         self._status = fn
         return fn
+
+    def emit(self, kind: str, message: str, level: str = "info", **data: Any) -> None:
+        """Report something that happened, like `mod.emit("player.joined", "Steve joined", player="Steve")`.
+
+        The node keeps it, shows it in the app and can send it to Discord. `level` is info, warn
+        or error; `kind` is a short dotted name. Extra keyword arguments must be JSON values.
+        """
+        if not EVENT_KIND.match(kind):
+            raise ValueError(f"event kind '{kind}' must look like 'server.crashed'")
+        if level not in EVENT_LEVELS:
+            raise ValueError(f"event level must be one of {EVENT_LEVELS}")
+        json.dumps(data)
+        self.log.info("event %s: %s", kind, message)
+        self._events.append({"kind": kind, "level": level, "message": message, "data": data})
+
+    def take_events(self) -> list[dict[str, Any]]:
+        """Events not yet read by the node; reading clears them."""
+        events = list(self._events)
+        self._events.clear()
+        return events
 
     def background(self, fn: Callable[[], Awaitable[None]]) -> Callable[[], Awaitable[None]]:
         """Run a coroutine for the life of the module. It is restarted if it raises."""
@@ -218,18 +245,22 @@ class Module:
 
         async def list_resources(ctx: Any, params: Any) -> types.ListResourcesResult:
             return types.ListResourcesResult(
-                resources=[types.Resource(name="status", uri=STATUS_URI, mime_type="application/json")]
+                resources=[
+                    types.Resource(name="status", uri=STATUS_URI, mime_type="application/json"),
+                    types.Resource(name="events", uri=EVENTS_URI, mime_type="application/json"),
+                ]
             )
 
         async def read_resource(ctx: Any, params: types.ReadResourceRequestParams) -> types.ReadResourceResult:
-            if str(params.uri) != STATUS_URI:
+            uri = str(params.uri)
+            if uri == STATUS_URI:
+                value: Any = await self.current_status()
+            elif uri == EVENTS_URI:
+                value = self.take_events()
+            else:
                 raise ValueError(f"unknown resource {params.uri}")
             return types.ReadResourceResult(
-                contents=[
-                    types.TextResourceContents(
-                        uri=STATUS_URI, mime_type="application/json", text=json.dumps(await self.current_status())
-                    )
-                ]
+                contents=[types.TextResourceContents(uri=uri, mime_type="application/json", text=json.dumps(value))]
             )
 
         return Server(

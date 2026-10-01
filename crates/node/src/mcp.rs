@@ -16,6 +16,7 @@ use tokio::sync::{Mutex, mpsc, oneshot, watch};
 
 pub const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 pub const STATUS_URI: &str = "kernel://status";
+pub const EVENTS_URI: &str = "kernel://events";
 
 #[derive(Debug, thiserror::Error)]
 pub enum McpError {
@@ -167,16 +168,28 @@ impl McpClient {
         Ok(parse_tool_result(&result))
     }
 
-    pub async fn read_status(&self, timeout: Duration) -> Result<Map<String, Value>, McpError> {
+    async fn read_json(&self, uri: &str, timeout: Duration) -> Result<Value, McpError> {
         let result = self
-            .request("resources/read", json!({"uri": STATUS_URI}), timeout)
+            .request("resources/read", json!({"uri": uri}), timeout)
             .await?;
         let text = result["contents"][0]["text"]
             .as_str()
-            .ok_or_else(|| McpError::Protocol("status resource has no text".into()))?;
-        match serde_json::from_str::<Value>(text) {
-            Ok(Value::Object(map)) => Ok(map),
+            .ok_or_else(|| McpError::Protocol(format!("{uri} has no text")))?;
+        serde_json::from_str(text).map_err(|_| McpError::Protocol(format!("{uri} is not JSON")))
+    }
+
+    pub async fn read_status(&self, timeout: Duration) -> Result<Map<String, Value>, McpError> {
+        match self.read_json(STATUS_URI, timeout).await? {
+            Value::Object(map) => Ok(map),
             _ => Err(McpError::Protocol("status is not a JSON object".into())),
+        }
+    }
+
+    /// Events the module reported since the last read (the module forgets them once read).
+    pub async fn read_events(&self, timeout: Duration) -> Result<Vec<Value>, McpError> {
+        match self.read_json(EVENTS_URI, timeout).await? {
+            Value::Array(events) => Ok(events),
+            _ => Err(McpError::Protocol("events is not a JSON list".into())),
         }
     }
 }

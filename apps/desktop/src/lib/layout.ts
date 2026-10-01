@@ -8,13 +8,15 @@ export interface Tile {
   max?: unknown;
 }
 
-/** Pairs shown as one tile, "value / max": players_online + players_max, memory_used_mb + memory_total_mb. */
+/** Pairs shown as one tile, "value / max": players_online + players_max, memory_used_mb + memory_total_mb,
+ * gpu_power_w + gpu_power_limit_w. */
 const PAIRS: {
   re: RegExp;
   max: (m: RegExpMatchArray) => string;
   name: (m: RegExpMatchArray) => string;
 }[] = [
   { re: /^(.+)_online$/, max: (m) => `${m[1]}_max`, name: (m) => m[1] ?? '' },
+  { re: /^(.+)_power_w$/, max: (m) => `${m[1]}_power_limit_w`, name: (m) => `${m[1]}_power` },
   {
     re: /^(.+)_used(_[a-z]+)?$/,
     max: (m) => `${m[1]}_total${m[2] ?? ''}`,

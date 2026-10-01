@@ -18,7 +18,7 @@ import logging
 import re
 import shlex
 import subprocess
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -212,8 +212,42 @@ def parse_status(out: str) -> dict[str, Any]:
     return status
 
 
+Emit = Callable[..., None]
+
+
+def changes(old: dict[str, Any], new: dict[str, Any], busy: bool) -> list[tuple[str, str, str, dict[str, Any]]]:
+    """Events between two status snapshots: (kind, level, message, data).
+
+    `busy` means one of our own start/stop/restart/backup operations is running, so a stop is
+    expected rather than a surprise. "unknown" (WSL unreachable) never counts as a change.
+    """
+    was, now = old.get("state"), new.get("state")
+    out: list[tuple[str, str, str, dict[str, Any]]] = []
+    if was != now and "unknown" not in (was, now) and was is not None:
+        if now == "crashed":
+            out.append(("server.crashed", "error", "The server crashed", {}))
+        elif now == "running":
+            out.append(("server.started", "info", "The server is up", {"version": new.get("version")}))
+        elif now == "stopped" and was in ("running", "starting", "stopping"):
+            if busy:
+                out.append(("server.stopped", "info", "The server stopped", {}))
+            else:
+                out.append(("server.stopped", "warn", "The server stopped on its own", {}))
+    if was == now == "running":
+        before, after = set(old.get("players") or []), set(new.get("players") or [])
+        out += [("player.joined", "info", f"{p} joined", {"player": p}) for p in sorted(after - before)]
+        out += [("player.left", "info", f"{p} left", {"player": p}) for p in sorted(before - after)]
+    return out
+
+
 class Server:
-    def __init__(self, settings: dict[str, Any], shell: Shell | None = None, log: logging.Logger | None = None):
+    def __init__(
+        self,
+        settings: dict[str, Any],
+        shell: Shell | None = None,
+        log: logging.Logger | None = None,
+        emit: Emit | None = None,
+    ):
         check_settings(settings)
         self.settings = settings
         self.shell = shell or Shell(linux_argv(settings, "bash", "-s"))
@@ -221,6 +255,8 @@ class Server:
         self.save_timeout_s = 120
         self.snapshot: dict[str, Any] = {"state": "unknown"}
         self.keepalive_up = False
+        self.emit: Emit = emit or (lambda *args, **kwargs: None)
+        self._last_known: dict[str, Any] = self.snapshot
         self._lock = asyncio.Lock()
         self._vars = {
             "MC_DIR": settings["server_dir"],
@@ -266,10 +302,18 @@ class Server:
     # -- status ---------------------------------------------------------------------------
 
     async def refresh(self) -> dict[str, Any]:
+        old = self.snapshot
         try:
-            self.snapshot = parse_status(await self.run("status", timeout=20))
+            new = parse_status(await self.run("status", timeout=20))
         except ActionError as e:
-            self.snapshot = {"state": "unknown", "error": e.message}
+            new = {"state": "unknown", "error": e.message}
+        # Keep the last known state through "unknown", so a WSL hiccup isn't a stop and a start.
+        if new["state"] == "unknown" and old.get("state") != "unknown":
+            self._last_known = old
+        base = old if old.get("state") != "unknown" else self._last_known
+        for kind, level, message, data in changes(base, new, self._lock.locked()):
+            self.emit(kind, message, level=level, **data)
+        self.snapshot = new
         return self.snapshot
 
     def status(self) -> dict[str, Any]:
@@ -387,12 +431,19 @@ class Server:
 
     async def backup(self) -> dict[str, Any]:
         async with self.exclusive():
-            out = await self.run("backup", timeout=1700, SAVE_TIMEOUT_S=self.save_timeout_s)
+            try:
+                out = await self.run("backup", timeout=1700, SAVE_TIMEOUT_S=self.save_timeout_s)
+            except ActionError as e:
+                self.emit("backup.failed", f"Backup failed: {e.message}", level="error")
+                raise
         kv = key_values(out)
         values = dict(kv)
         await self.refresh()
+        size = int(values["bytes"]) if values.get("bytes", "").isdigit() else None
+        mb = f" ({size / 1e6:.0f} MB)" if size else ""
+        self.emit("backup.done", f"Backed up the world{mb}", file=values.get("file"), bytes=size)
         return {
             "file": values.get("file"),
-            "bytes": int(values["bytes"]) if values.get("bytes", "").isdigit() else None,
+            "bytes": size,
             "deleted": [v for k, v in kv if k == "deleted"],
         }

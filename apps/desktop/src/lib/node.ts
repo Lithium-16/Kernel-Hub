@@ -3,12 +3,14 @@ import {
   type ErrorInfo,
   Message,
   type ModuleInfo,
+  type NodeEvent,
   PROTOCOL_VERSION,
 } from '@kernel/protocol';
 import type { z } from 'zod';
 
 export type Module = z.infer<typeof ModuleInfo>;
 export type Activity = z.infer<typeof ActivityEntry>;
+export type KernelEvent = z.infer<typeof NodeEvent>;
 export type NodeError = z.infer<typeof ErrorInfo>;
 export type ActionResult = { ok: boolean; result?: unknown; error?: NodeError };
 type Msg = z.infer<typeof Message>;
@@ -55,6 +57,7 @@ export class NodeClient {
   private ws: WebSocket | null = null;
   private pending = new Map<string, Pending>();
   private listeners = new Set<() => void>();
+  private eventListeners = new Set<(e: KernelEvent) => void>();
   private snap: Snapshot = { conn: 'idle', node: null, modules: [], error: null };
   private retryMs = 1000;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -69,6 +72,12 @@ export class NodeClient {
   };
 
   getSnapshot = (): Snapshot => this.snap;
+
+  /** Events the node pushes as they happen (a crash, a player joining). */
+  onEvent = (fn: (e: KernelEvent) => void): (() => void) => {
+    this.eventListeners.add(fn);
+    return () => this.eventListeners.delete(fn);
+  };
 
   start(): void {
     if (!this.stopped) return;
@@ -119,6 +128,12 @@ export class NodeClient {
   async activity(limit = 100, module?: string): Promise<Activity[]> {
     const m = await this.request('activity.query', module ? { limit, module } : { limit });
     if (m.type === 'activity') return m.body.entries;
+    throw new Error(m.type === 'error' ? m.body.message : `unexpected reply ${m.type}`);
+  }
+
+  async events(limit = 100, module?: string): Promise<KernelEvent[]> {
+    const m = await this.request('events.query', module ? { limit, module } : { limit });
+    if (m.type === 'events') return m.body.events;
     throw new Error(m.type === 'error' ? m.body.message : `unexpected reply ${m.type}`);
   }
 
@@ -205,7 +220,12 @@ export class NodeClient {
       return;
     }
     const parsed = Message.safeParse(raw);
-    if (!parsed.success || !parsed.data.re) return;
+    if (!parsed.success) return;
+    if (parsed.data.type === 'event') {
+      for (const fn of this.eventListeners) fn(parsed.data.body);
+      return;
+    }
+    if (!parsed.data.re) return;
     const p = this.pending.get(parsed.data.re);
     if (!p) return;
     this.pending.delete(parsed.data.re);

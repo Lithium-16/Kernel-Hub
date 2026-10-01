@@ -3,7 +3,7 @@ import json
 import pytest
 from mcp import Client
 
-from kernel_sdk import STATUS_URI, ActionError, Module, parse_manifest
+from kernel_sdk import EVENTS_URI, STATUS_URI, ActionError, Module, parse_manifest
 
 MANIFEST = parse_manifest(
     {
@@ -121,3 +121,22 @@ async def test_over_mcp():
 
         status = await client.read_resource(STATUS_URI)
         assert json.loads(status.contents[0].text) == {"greetings": 1}
+
+
+async def test_events_are_read_once_over_mcp():
+    mod = make_module()
+    mod.emit("player.joined", "Steve joined", player="Steve")
+    mod.emit("server.crashed", "It stopped", level="error")
+    with pytest.raises(ValueError):
+        mod.emit("Bad Kind", "x")
+    with pytest.raises(ValueError):
+        mod.emit("a.b", "x", level="loud")
+    with pytest.raises(TypeError):
+        mod.emit("a.b", "x", thing=object())
+    async with Client(mod.server()) as client:
+        first = json.loads((await client.read_resource(EVENTS_URI)).contents[0].text)
+        assert first == [
+            {"kind": "player.joined", "level": "info", "message": "Steve joined", "data": {"player": "Steve"}},
+            {"kind": "server.crashed", "level": "error", "message": "It stopped", "data": {}},
+        ]
+        assert json.loads((await client.read_resource(EVENTS_URI)).contents[0].text) == []

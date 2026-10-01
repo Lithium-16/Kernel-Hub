@@ -25,11 +25,13 @@ param(
   [string]$Root = (Join-Path $env:LOCALAPPDATA 'Kernel\node'),
   [int]$Port = 47800,
   # Modules to run. hello is only for tests.
-  [string[]]$Modules = @('minecraft', 'pc-monitor', 'roblox'),
+  [string[]]$Modules = @('minecraft', 'pc-monitor', 'roblox', 'comfyui', 'vram'),
   [switch]$NoFirewall
 )
 
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 may still default to old TLS versions, which GitHub refuses.
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $ProgressPreference = 'SilentlyContinue'  # Invoke-WebRequest is very slow with the progress bar
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Asset = 'kernel-node-windows-x64.zip'
@@ -74,33 +76,47 @@ if ($Zip) {
   Note "Using $bundle"
 } else {
   if (-not $GitHubToken) {
-    Note "The repo is private, so the node needs a read-only GitHub token to download builds."
+    Note "If the repo is private, the node needs a read-only GitHub token to download builds."
     Note "Create one at https://github.com/settings/personal-access-tokens/new :"
     Note "  Repository access: only $Repo.  Permissions: Contents = Read-only.  Nothing else."
-    $GitHubToken = Read-Secret 'Paste the token'
+    Note "If the repo is public, just press Enter."
+    $GitHubToken = Read-Secret 'Paste the token (or Enter for none)'
   }
   $headers = @{
-    Authorization          = "Bearer $GitHubToken"
     'X-GitHub-Api-Version' = '2022-11-28'
     'User-Agent'           = 'kernel-installer'
   }
-  $releases = Invoke-RestMethod -Headers ($headers + @{ Accept = 'application/vnd.github+json' }) `
-    -Uri "https://api.github.com/repos/$Repo/releases?per_page=30"
-  $best = $null; $bestBuild = -1
-  foreach ($r in $releases) {
-    if ($r.draft -or $r.prerelease -or $r.tag_name -notmatch '^node-build-(\d+)$') { continue }
-    $n = [int]$Matches[1]
-    $hasZip = $r.assets | Where-Object { $_.name -eq $Asset }
-    $hasSha = $r.assets | Where-Object { $_.name -eq "$Asset.sha256" }
-    if ($hasZip -and $hasSha -and $n -gt $bestBuild) { $best = $r; $bestBuild = $n }
-  }
-  if (-not $best) { throw "No node builds found in $Repo. Merge to main once so CI publishes one." }
-  Note "Newest build: $($best.tag_name)"
+  if ($GitHubToken) { $headers.Authorization = "Bearer $GitHubToken" }
   $bundle = Join-Path $download $Asset
-  foreach ($name in @($Asset, "$Asset.sha256")) {
-    $a = $best.assets | Where-Object { $_.name -eq $name }
-    Invoke-WebRequest -Headers ($headers + @{ Accept = 'application/octet-stream' }) `
-      -Uri $a.url -OutFile (Join-Path $download $name) -UseBasicParsing
+  $releases = $null
+  try {
+    $releases = Invoke-RestMethod -Headers ($headers + @{ Accept = 'application/vnd.github+json' }) `
+      -Uri "https://api.github.com/repos/$Repo/releases?per_page=30"
+  } catch {
+    Note "Couldn't reach GitHub's API ($($_.Exception.Message)); downloading the latest release directly."
+  }
+  if ($null -ne $releases) {
+    $best = $null; $bestBuild = -1
+    foreach ($r in $releases) {
+      if ($r.draft -or $r.prerelease -or $r.tag_name -notmatch '^node-build-(\d+)$') { continue }
+      $n = [int]$Matches[1]
+      $hasZip = $r.assets | Where-Object { $_.name -eq $Asset }
+      $hasSha = $r.assets | Where-Object { $_.name -eq "$Asset.sha256" }
+      if ($hasZip -and $hasSha -and $n -gt $bestBuild) { $best = $r; $bestBuild = $n }
+    }
+    if (-not $best) { throw "No node builds found in $Repo. Merge to main once so CI publishes one." }
+    Note "Newest build: $($best.tag_name)"
+    foreach ($name in @($Asset, "$Asset.sha256")) {
+      $a = $best.assets | Where-Object { $_.name -eq $name }
+      Invoke-WebRequest -Headers ($headers + @{ Accept = 'application/octet-stream' }) `
+        -Uri $a.url -OutFile (Join-Path $download $name) -UseBasicParsing
+    }
+  } else {
+    # Public repos only: the release GitHub marks as latest, without the API.
+    foreach ($name in @($Asset, "$Asset.sha256")) {
+      Invoke-WebRequest -Uri "https://github.com/$Repo/releases/latest/download/$name" `
+        -OutFile (Join-Path $download $name) -UseBasicParsing
+    }
   }
   $expected = ((Get-Content (Join-Path $download "$Asset.sha256") -Raw).Trim() -split '\s+')[0].ToLower()
   $actual = (Get-FileHash -Algorithm SHA256 $bundle).Hash.ToLower()

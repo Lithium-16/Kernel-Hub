@@ -76,6 +76,20 @@ export const ActivityEntry = z.object({
   duration_ms: z.number().int().nonnegative(),
 });
 
+export const EventLevel = z.enum(['info', 'warn', 'error']);
+
+/** Something that happened without anyone asking (a crash, a player joining). Modules report them. */
+export const NodeEvent = z.object({
+  id: z.string(),
+  ts: z.iso.datetime(),
+  node_id: z.string(),
+  module: z.string(),
+  kind: z.string().regex(/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/),
+  level: EventLevel,
+  message: z.string(),
+  data: z.record(z.string(), z.unknown()),
+});
+
 const msg = <T extends string, B extends z.ZodType>(type: T, body: B) =>
   z.object({
     v: z.literal(PROTOCOL_VERSION),
@@ -136,6 +150,19 @@ export const ActivityQuery = msg(
 
 export const Activity = msg('activity', z.object({ entries: z.array(ActivityEntry) }));
 
+export const EventsQuery = msg(
+  'events.query',
+  z.object({
+    limit: z.number().int().min(1).max(500).optional(),
+    module: z.string().optional(),
+  }),
+);
+
+export const Events = msg('events', z.object({ events: z.array(NodeEvent) }));
+
+/** Pushed to every connected client as it happens. */
+export const Event = msg('event', NodeEvent);
+
 export const ErrorMessage = msg('error', ErrorInfo);
 
 export const Message = z.discriminatedUnion('type', [
@@ -147,6 +174,9 @@ export const Message = z.discriminatedUnion('type', [
   ActionResult,
   ActivityQuery,
   Activity,
+  EventsQuery,
+  Events,
+  Event,
   ErrorMessage,
 ]);
 export type Message = z.infer<typeof Message>;

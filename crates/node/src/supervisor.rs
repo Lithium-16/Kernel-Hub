@@ -12,7 +12,10 @@ use tokio::process::Command;
 use tokio::sync::{Notify, watch};
 use tokio::task::JoinHandle;
 
+use kernel_protocol::EventLevel;
+
 use crate::config::{Config, SupervisorConfig};
+use crate::events::{self, EventHub};
 use crate::manifest::{Manifest, Runtime};
 use crate::mcp::McpClient;
 
@@ -44,6 +47,7 @@ pub struct Slot {
     pub manifest: Manifest,
     inner: RwLock<SlotState>,
     restart: Notify,
+    reload: Notify,
 }
 
 impl Slot {
@@ -52,6 +56,7 @@ impl Slot {
             manifest,
             inner: RwLock::default(),
             restart: Notify::new(),
+            reload: Notify::new(),
         }
     }
 
@@ -123,6 +128,7 @@ struct RunCtx {
     node: String,
     logs_dir: PathBuf,
     settings_dir: PathBuf,
+    events: Arc<EventHub>,
 }
 
 pub struct Supervisor {
@@ -133,6 +139,7 @@ impl Supervisor {
     pub fn start(
         manifests: Vec<Manifest>,
         cfg: &Config,
+        events: Arc<EventHub>,
         shutdown: watch::Receiver<bool>,
     ) -> (Arc<Self>, Vec<JoinHandle<()>>) {
         let ctx = RunCtx {
@@ -141,6 +148,7 @@ impl Supervisor {
             node: cfg.node.clone(),
             logs_dir: cfg.logs_dir().join("modules"),
             settings_dir: cfg.module_settings_dir(),
+            events,
         };
         let mut slots = BTreeMap::new();
         let mut handles = Vec::new();
@@ -164,11 +172,27 @@ impl Supervisor {
     pub fn restart(&self, id: &str) -> bool {
         self.slots.get(id).map(|s| s.restart.notify_one()).is_some()
     }
+
+    /// Restart a module now (after its settings changed), whatever state it's in.
+    pub fn reload(&self, id: &str) -> bool {
+        let Some(slot) = self.slots.get(id) else {
+            return false;
+        };
+        match slot.state() {
+            ModuleState::Failed => slot.restart.notify_one(),
+            ModuleState::Running => slot.reload.notify_one(),
+            // Starting or backing off: it'll pick up the new settings on its next start.
+            _ => {}
+        }
+        true
+    }
 }
 
 enum Exit {
     Shutdown,
     Crashed(String),
+    /// Asked to restart (new settings): straight back up, not counted as a crash.
+    Reload,
 }
 
 async fn run_slot(slot: Arc<Slot>, ctx: RunCtx, mut shutdown: watch::Receiver<bool>) {
@@ -191,6 +215,11 @@ async fn run_slot(slot: Arc<Slot>, ctx: RunCtx, mut shutdown: watch::Receiver<bo
                 tracing::info!(module = %id, "module stopped");
                 return;
             }
+            Exit::Reload => {
+                slot.set_down(ModuleState::Starting, None);
+                tracing::info!(module = %id, "restarting module with new settings");
+                continue;
+            }
             Exit::Crashed(reason) => {
                 tracing::warn!(module = %id, %reason, "module exited");
                 let now = Instant::now();
@@ -210,6 +239,17 @@ async fn run_slot(slot: Arc<Slot>, ctx: RunCtx, mut shutdown: watch::Receiver<bo
                         Some(format!("crashed {} times: {reason}", crashes.len())),
                     );
                     tracing::error!(module = %id, "module failed; waiting for a manual restart");
+                    ctx.events.emit(
+                        &id,
+                        "module.failed",
+                        EventLevel::Error,
+                        format!(
+                            "{} stopped after crashing {} times: {reason}",
+                            slot.manifest.name,
+                            crashes.len()
+                        ),
+                        Map::new(),
+                    );
                     tokio::select! {
                         _ = slot.restart.notified() => {}
                         _ = shutdown.changed() => {}
@@ -303,6 +343,7 @@ async fn run_once(slot: &Slot, ctx: &RunCtx, shutdown: &mut watch::Receiver<bool
     if let Ok(status) = client.read_status(rpc_timeout).await {
         slot.set_status(status);
     }
+    collect_events(&client, &m.id, &ctx.events, rpc_timeout).await;
 
     let mut ping = tokio::time::interval_at(
         tokio::time::Instant::now() + ctx.cfg.ping_interval(),
@@ -332,6 +373,14 @@ async fn run_once(slot: &Slot, ctx: &RunCtx, shutdown: &mut watch::Receiver<bool
                 if let Ok(status) = client.read_status(rpc_timeout).await {
                     slot.set_status(status);
                 }
+                collect_events(&client, &m.id, &ctx.events, rpc_timeout).await;
+            }
+            _ = slot.reload.notified() => {
+                client.close();
+                if tokio::time::timeout(Duration::from_secs(5), child.wait()).await.is_err() {
+                    let _ = child.kill().await;
+                }
+                return Exit::Reload;
             }
             _ = shutdown.changed() => {
                 client.close();
@@ -340,6 +389,21 @@ async fn run_once(slot: &Slot, ctx: &RunCtx, shutdown: &mut watch::Receiver<bool
                 }
                 return Exit::Shutdown;
             }
+        }
+    }
+}
+
+/// Move the module's new events into the hub. Modules without events just fail the read.
+async fn collect_events(client: &McpClient, module: &str, hub: &EventHub, timeout: Duration) {
+    let Ok(raw) = client.read_events(timeout).await else {
+        return;
+    };
+    for entry in raw.iter().take(100) {
+        match events::from_module(entry) {
+            Some((kind, level, message, data)) => {
+                hub.emit(module, &kind, level, message, data);
+            }
+            None => tracing::warn!(module, %entry, "module sent a malformed event"),
         }
     }
 }

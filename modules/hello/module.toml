@@ -5,6 +5,10 @@ version = "0.1.0"
 runtime = "python"
 entry = "main.py"
 
+[settings]
+# How greetings start.
+greeting = "Hello"
+
 [[actions]]
 id = "greet.say"
 label = "Say hello"
@@ -40,3 +44,11 @@ id = "debug.crash"
 label = "Crash the module"
 description = "Exits the process, for testing supervision."
 ai = "never"
+
+[[actions]]
+id = "event.emit"
+label = "Report an event"
+description = "Reports an event to the node, for testing events and alerts."
+ai = "safe"
+params.message = { type = "string", default = "Something happened" }
+params.level = { type = "enum", options = ["info", "warn", "error"], default = "info" }
