@@ -11,6 +11,7 @@ import type { z } from 'zod';
 export type Module = z.infer<typeof ModuleInfo>;
 export type Activity = z.infer<typeof ActivityEntry>;
 export type KernelEvent = z.infer<typeof NodeEvent>;
+export type ChatReply = Extract<Msg, { type: 'chat.reply' }>['body'];
 export type NodeError = z.infer<typeof ErrorInfo>;
 export type ActionResult = { ok: boolean; result?: unknown; error?: NodeError };
 type Msg = z.infer<typeof Message>;
@@ -43,6 +44,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
 // Actions carry their own timeouts on the node (a delayed stop can take 30+ minutes).
 const ACTION_TIMEOUT_MS = 45 * 60_000;
 const RETRY_MAX_MS = 15_000;
+const CHAT_TIMEOUT_MS = 6 * 60_000;
 
 export function now(): string {
   return `${new Date().toISOString().slice(0, 19)}Z`;
@@ -123,6 +125,18 @@ export class NodeClient {
     if (reply.type === 'action.result') return reply.body;
     if (reply.type === 'error') return { ok: false, error: reply.body };
     return { ok: false, error: { code: 'internal', message: `unexpected reply ${reply.type}` } };
+  }
+
+  /** Ask the assistant. Answers can take a while (a local model may need to load first). */
+  async chat(
+    text: string,
+    conversation?: string,
+    provider: 'auto' | 'local' | 'claude' = 'auto',
+  ): Promise<ChatReply> {
+    const body = conversation ? { text, conversation, provider } : { text, provider };
+    const m = await this.request('chat.send', body, CHAT_TIMEOUT_MS);
+    if (m.type === 'chat.reply') return m.body;
+    throw new Error(m.type === 'error' ? m.body.message : `unexpected reply ${m.type}`);
   }
 
   async activity(limit = 100, module?: string): Promise<Activity[]> {

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { matches } from '../src/components/Palette.tsx';
 import { type Action, coerce, defaults, needsConfirm } from '../src/lib/actions.ts';
+import { ChatStore } from '../src/lib/chat.ts';
 import { bytes, duration, label, stateTone, summary, value, valueTone } from '../src/lib/format.ts';
 import { layoutStatus } from '../src/lib/layout.ts';
 import { DEFAULT_LOOK, loadLook, moduleTint } from '../src/lib/look.ts';
@@ -243,6 +244,54 @@ describe('look', () => {
     expect(loadLook()).toEqual(DEFAULT_LOOK);
     localStorage.setItem('kernel.look', JSON.stringify({ theme: 'dark', moduleColors: false }));
     expect(loadLook()).toMatchObject({ theme: 'dark', moduleColors: false, textSize: 'normal' });
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('assistant chat', () => {
+  it('keeps the conversation and records approvals', async () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => store.set(k, v),
+    });
+    const chat = new ChatStore();
+    const asked: (string | undefined)[] = [];
+    const reply = {
+      conversation: 'c1',
+      text: 'Said hi.',
+      steps: [],
+      approvals: [{ module: 'hello', action: 'counter.reset', params: {}, label: 'Reset counter' }],
+      provider: 'local' as const,
+      model: 'qwen3:8b',
+      cost_usd: 0,
+    };
+    await chat.send('hi', async (_t, conv) => {
+      asked.push(conv);
+      return reply;
+    });
+    await chat.send('again', async (_t, conv) => {
+      asked.push(conv);
+      return reply;
+    });
+    expect(asked).toEqual([undefined, 'c1']);
+    const s = chat.getSnapshot();
+    expect(s.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
+    const bot = s.messages[1];
+    if (bot?.role !== 'assistant') throw new Error('expected a reply');
+    chat.markApproved(bot.id, 0, 'done');
+    const after = chat.getSnapshot().messages[1];
+    expect(after?.role === 'assistant' && after.approved[0]).toBe('done');
+    await chat.send('fail', async () => {
+      throw new Error('Ollama is down');
+    });
+    expect(chat.getSnapshot().messages.at(-1)).toMatchObject({
+      role: 'error',
+      text: 'Ollama is down',
+    });
+    expect(new ChatStore().getSnapshot().conversation).toBe('c1'); // survives a restart
+    chat.clear();
+    expect(chat.getSnapshot().messages).toEqual([]);
     vi.unstubAllGlobals();
   });
 });

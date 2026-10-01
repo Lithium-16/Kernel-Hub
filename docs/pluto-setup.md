@@ -45,6 +45,30 @@ The app updates itself: **Settings > App updates > Check for updates** (it also 
 and shows "Update available" in the sidebar). It downloads the installer from the newest
 release, checks its SHA-256, installs quietly and reopens. The first install is still by hand.
 
+## The assistant
+
+Kernel's assistant (the **Assistant** page in the app) answers with a model on Pluto, for free,
+and can press your modules' buttons. It only runs actions that are safe for it; anything that
+normally asks first shows you an **Approve** button, and button-only actions are never offered.
+
+1. Install [Ollama](https://ollama.com/download) on Pluto, then in PowerShell:
+   `ollama pull qwen3:8b` (about 5 GB). Any Ollama model with tool support works; set
+   `model` in `[assistant]` in node.toml to switch.
+2. That's it: the assistant talks to Ollama through the VRAM module's turn-taking proxy, so it
+   waits for ComfyUI jobs instead of fighting them for the GPU.
+3. Optional, Claude as the fallback when the local model fails or for hard questions (the
+   **Claude** button on the page): make an API key at <https://console.anthropic.com>, then in
+   node.toml:
+
+   ```toml
+   [assistant]
+   anthropic_api_key = "sk-ant-..."
+   monthly_budget_usd = 3.0     # it stops using Claude for the month at this
+   ```
+
+   The Node page shows this month's spend. Everything the assistant runs is in Activity, as the
+   assistant.
+
 ## Discord alerts
 
 Kernel can post to a Discord channel when something happens: the Minecraft server crashes or
