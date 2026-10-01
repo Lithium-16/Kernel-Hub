@@ -263,6 +263,7 @@ mod tests {
             [
                 "comfyui",
                 "hello",
+                "laya",
                 "minecraft",
                 "pc-monitor",
                 "roblox",

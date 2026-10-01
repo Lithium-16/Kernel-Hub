@@ -69,6 +69,37 @@ normally asks first shows you an **Approve** button, and button-only actions are
    The Node page shows this month's spend. Everything the assistant runs is in Activity, as the
    assistant.
 
+### LAYA (optional): quicker answers to "is X up?"
+
+[LAYA](https://pypi.org/project/laya/) is a small decision model (Apache-2.0) the assistant can
+ask before the chat model. When it's sure you're asking how a module is doing, the status is read
+straight away, so the reply takes one model round instead of two. It never presses buttons
+(it's sometimes confidently wrong about those). Replies it helped show "LAYA: …" under them.
+
+1. Add `"laya"` to `enabled_modules` in node.toml and restart kerneld (new installs have it).
+2. On the **LAYA** page, press **Install LAYA**: it installs the laya package and PyTorch
+   (a few hundred MB, from PyPI). Then **Load model**: the first load downloads ~1.7 GB from
+   Hugging Face. Both need a network where PyPI and huggingface.co work.
+3. It runs on the CPU by default (~2 GB of RAM). Be honest with yourself about the trade: on a
+   CPU it adds roughly 1-3 s to *every* message and saves a model round only on status
+   questions. With `device = "cuda"` in `data\settings\laya.toml` it takes tens of
+   milliseconds, but needs a CUDA build of PyTorch that still supports the 1080 Ti (like
+   ComfyUI's) and ~1-2 GB of VRAM. Try it; if chat feels slower, press **Unload model** or
+   remove the module.
+
+Knobs in `[assistant]` (defaults shown):
+
+```toml
+laya = true             # use it when the module is running
+laya_fast = 0.9         # how sure it must be to read a status early; above 1 turns that off
+laya_tools = 0          # e.g. 12: the local model only sees LAYA's top 12 buttons (faster, but a
+                        # wrong guess hides the right one)
+laya_claude = 0.0       # e.g. 0.8: requests that look like several steps go to Claude first
+laya_timeout_ms = 3000  # slower than this and it's skipped for 10 minutes
+```
+
+The thresholds are guesses from a small test; watch the "LAYA: …" notes and adjust.
+
 ## Discord alerts
 
 Kernel can post to a Discord channel when something happens: the Minecraft server crashes or

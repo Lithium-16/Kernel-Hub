@@ -197,6 +197,8 @@ export const ChatReply = msg(
     provider: z.enum(['local', 'claude']),
     model: z.string(),
     cost_usd: z.number().nonnegative(),
+    /** What LAYA decided before the model ran, in a few words (absent without LAYA). */
+    route: z.string().optional(),
   }),
 );
 

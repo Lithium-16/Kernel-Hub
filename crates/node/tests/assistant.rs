@@ -113,37 +113,23 @@ async fn chat(ws: &mut Ws, text: &str, conversation: Option<String>, provider: &
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn assistant_runs_tools_asks_for_approval_and_falls_back() {
-    let Some(python) = std::env::var_os("KERNEL_TEST_PYTHON") else {
-        eprintln!("skipping: set KERNEL_TEST_PYTHON to a Python with kernel_sdk installed");
-        return;
-    };
-    let fakes = Arc::new(Fakes::default());
-    let ollama_url = serve(
-        Router::new()
-            .route("/api/chat", post(ollama))
-            .with_state(fakes.clone()),
-    )
-    .await;
-    let claude_url = serve(
-        Router::new()
-            .route("/v1/messages", post(claude))
-            .with_state(fakes.clone()),
-    )
-    .await;
-
-    let data = tempfile::tempdir().unwrap();
+async fn start_node(
+    modules_dir: PathBuf,
+    enabled: &[&str],
+    assistant: AssistantConfig,
+    data: &std::path::Path,
+) -> (kernel_node::Running, Ws) {
+    let python = std::env::var_os("KERNEL_TEST_PYTHON").unwrap();
     let cfg = Config {
         node_id: "test-node".into(),
         node_name: "Test node".into(),
         listen: "127.0.0.1:0".parse().unwrap(),
         token: TOKEN.into(),
-        modules_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../modules"),
-        data_dir: data.path().to_path_buf(),
+        modules_dir,
+        data_dir: data.to_path_buf(),
         python: PathBuf::from(python).to_string_lossy().into_owned(),
         node: "node".into(),
-        enabled_modules: vec!["hello".into()],
+        enabled_modules: enabled.iter().map(|m| m.to_string()).collect(),
         supervisor: SupervisorConfig {
             status_interval_ms: 200,
             ..SupervisorConfig::default()
@@ -154,13 +140,7 @@ async fn assistant_runs_tools_asks_for_approval_and_falls_back() {
         schedule: vec![],
         on_event: vec![],
         when: vec![],
-        assistant: AssistantConfig {
-            // The first address is down (like the VRAM proxy when the module is off).
-            ollama_urls: vec!["http://127.0.0.1:1".into(), ollama_url],
-            anthropic_api_key: "test-key".into(),
-            anthropic_api: claude_url,
-            ..AssistantConfig::default()
-        },
+        assistant,
         path: None,
     };
     let running = kernel_node::start(cfg).await.expect("node starts");
@@ -183,15 +163,84 @@ async fn assistant_runs_tools_asks_for_approval_and_falls_back() {
         let Payload::Catalog(c) = request(&mut ws, Payload::CatalogGet(Empty {})).await else {
             panic!()
         };
-        if c.modules
-            .iter()
-            .any(|m| m.id == "hello" && m.state == ModuleState::Running)
-        {
+        if enabled.iter().all(|id| {
+            c.modules
+                .iter()
+                .any(|m| m.id == *id && m.state == ModuleState::Running)
+        }) {
             break;
         }
-        assert!(Instant::now() < deadline, "hello never started");
+        assert!(
+            Instant::now() < deadline,
+            "{enabled:?} never started: {:?}",
+            c.modules
+                .iter()
+                .map(|m| (&m.id, m.state, &m.status))
+                .collect::<Vec<_>>()
+        );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    (running, ws)
+}
+
+fn repo_modules() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../modules")
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for e in std::fs::read_dir(from).unwrap() {
+        let e = e.unwrap();
+        let name = e.file_name();
+        if name == "__pycache__" || name == "tests" {
+            continue;
+        }
+        if e.file_type().unwrap().is_dir() {
+            copy_dir(&e.path(), &to.join(&name));
+        } else {
+            std::fs::copy(e.path(), to.join(&name)).unwrap();
+        }
+    }
+}
+
+fn offered(seen: &Value) -> Vec<String> {
+    seen["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["function"]["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn assistant_runs_tools_asks_for_approval_and_falls_back() {
+    if std::env::var_os("KERNEL_TEST_PYTHON").is_none() {
+        eprintln!("skipping: set KERNEL_TEST_PYTHON to a Python with kernel_sdk installed");
+        return;
+    }
+    let fakes = Arc::new(Fakes::default());
+    let ollama_url = serve(
+        Router::new()
+            .route("/api/chat", post(ollama))
+            .with_state(fakes.clone()),
+    )
+    .await;
+    let claude_url = serve(
+        Router::new()
+            .route("/v1/messages", post(claude))
+            .with_state(fakes.clone()),
+    )
+    .await;
+
+    let data = tempfile::tempdir().unwrap();
+    let assistant = AssistantConfig {
+        // The first address is down (like the VRAM proxy when the module is off).
+        ollama_urls: vec!["http://127.0.0.1:1".into(), ollama_url],
+        anthropic_api_key: "test-key".into(),
+        anthropic_api: claude_url,
+        ..AssistantConfig::default()
+    };
+    let (running, mut ws) = start_node(repo_modules(), &["hello"], assistant, data.path()).await;
 
     // Local model: a safe action runs, a confirm action becomes an Approve button.
     let r = chat(
@@ -300,6 +349,103 @@ async fn assistant_runs_tools_asks_for_approval_and_falls_back() {
             .iter()
             .any(|e| e.action == "greet.say" && e.actor.kind == ActorKind::Assistant)
     );
+
+    running.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn laya_reads_status_early_and_shortens_the_tool_list() {
+    if std::env::var_os("KERNEL_TEST_PYTHON").is_none() {
+        eprintln!("skipping: set KERNEL_TEST_PYTHON to a Python with kernel_sdk installed");
+        return;
+    }
+    let fakes = Arc::new(Fakes::default());
+    let ollama_url = serve(
+        Router::new()
+            .route("/api/chat", post(ollama))
+            .with_state(fakes.clone()),
+    )
+    .await;
+    // hello, and a stand-in for LAYA with canned decisions.
+    let modules = tempfile::tempdir().unwrap();
+    copy_dir(&repo_modules().join("hello"), &modules.path().join("hello"));
+    copy_dir(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fake_laya"),
+        &modules.path().join("laya"),
+    );
+    let data = tempfile::tempdir().unwrap();
+    let assistant = AssistantConfig {
+        ollama_urls: vec![ollama_url],
+        laya_tools: 2,
+        ..AssistantConfig::default()
+    };
+    let (running, mut ws) = start_node(
+        modules.path().to_path_buf(),
+        &["hello", "laya"],
+        assistant,
+        data.path(),
+    )
+    .await;
+
+    // Sure it's a status question: the status is read before the model is asked, and the
+    // model sees two buttons (LAYA's first two) plus the status tool.
+    let r = chat(&mut ws, "how is hello doing?", None, "auto").await;
+    assert!(r.steps.is_empty(), "a status read isn't a button press");
+    assert_eq!(
+        r.route.as_deref(),
+        Some("LAYA: 2 of 11 buttons, checked Hello first (97% sure)")
+    );
+    {
+        let seen = fakes.ollama_seen.lock().unwrap();
+        assert_eq!(seen.len(), 1, "one model call instead of two");
+        let messages = seen[0]["messages"].as_array().unwrap();
+        let last = messages.last().unwrap();
+        assert_eq!(last["role"], "tool");
+        assert!(
+            last["content"].as_str().unwrap().contains("greetings"),
+            "{last}"
+        );
+        assert_eq!(offered(&seen[0]).len(), 3);
+        assert_eq!(offered(&seen[0])[0], "kernel_status");
+    }
+
+    // Sure of a button: it is NOT pressed; the model decides (and the fake model calls
+    // greet.say and counter.reset, as always).
+    let r2 = chat(&mut ws, "count them", Some(r.conversation.clone()), "auto").await;
+    assert_eq!(r2.route.as_deref(), Some("LAYA: 2 of 11 buttons"));
+    assert!(r2.steps.iter().all(|s| s.action != "greet.count"));
+    assert!(
+        offered(&fakes.ollama_seen.lock().unwrap()[1]).contains(&"hello__greet_count".to_string()),
+        "LAYA's first guess is offered"
+    );
+
+    // What LAYA was asked: hello's buttons and its status, never LAYA's own; the message
+    // before as context.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let laya = loop {
+        let m = running
+            .node
+            .catalog()
+            .into_iter()
+            .find(|m| m.id == "laya")
+            .unwrap();
+        if m.status.as_ref().is_some_and(|s| s["seen"][1].is_object()) {
+            break m;
+        }
+        assert!(Instant::now() < deadline, "LAYA's status never caught up");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    let asked = &laya.status.unwrap()["seen"][1];
+    assert_eq!(asked["context"], "how is hello doing?");
+    let options: Vec<&str> = asked["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o.as_str().unwrap())
+        .collect();
+    assert!(options.contains(&"status:hello") && options.contains(&"hello__greet_say"));
+    assert!(!options.iter().any(|o| o.contains("laya")), "{options:?}");
+    assert!(!options.contains(&"hello__debug_crash"));
 
     running.shutdown().await;
 }

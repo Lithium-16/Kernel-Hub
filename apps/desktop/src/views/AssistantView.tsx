@@ -198,6 +198,7 @@ export function AssistantView({
               <div className="meta muted">
                 {m.reply.provider === 'claude' ? 'Claude' : 'Local'} · {m.reply.model}
                 {m.reply.cost_usd > 0 ? ` · $${m.reply.cost_usd.toFixed(4)}` : ''}
+                {m.reply.route ? ` · ${m.reply.route}` : ''}
               </div>
             </div>
           ),

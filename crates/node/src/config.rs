@@ -104,6 +104,20 @@ pub struct AssistantConfig {
     pub persona: bool,
     /// Messages API base URL (changed only by tests).
     pub anthropic_api: String,
+    /// Ask LAYA (the `laya` module) first, when it's running: it picks the likely tools for a
+    /// message in a fraction of a second. Without the module this does nothing.
+    pub laya: bool,
+    /// How many tools the model sees: LAYA's best guesses (plus the status tool). Fewer tools
+    /// make a small local model quicker, but a wrong guess hides the right one. 0: all of them.
+    pub laya_tools: usize,
+    /// How sure LAYA must be (0-1) that a message asks about one module's status to read it
+    /// before the model is asked, saving the model a round. It never presses buttons. Above 1: off.
+    pub laya_fast: f64,
+    /// Above this "needs several steps" probability, Auto asks Claude first (with a key and
+    /// budget left). 0: off.
+    pub laya_claude: f64,
+    /// Skip LAYA when it takes longer than this.
+    pub laya_timeout_ms: u64,
 }
 
 impl Default for AssistantConfig {
@@ -121,6 +135,11 @@ impl Default for AssistantConfig {
             max_steps: 8,
             persona: true,
             anthropic_api: "https://api.anthropic.com".into(),
+            laya: true,
+            laya_tools: 0,
+            laya_fast: 0.9,
+            laya_claude: 0.0,
+            laya_timeout_ms: 3000,
         }
     }
 }

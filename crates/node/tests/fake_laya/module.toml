@@ -1,0 +1,22 @@
+# A stand-in for modules/laya with canned decisions, for crates/node/tests/assistant.rs.
+id = "laya"
+name = "LAYA (fake)"
+icon = "route"
+version = "0.1.0"
+runtime = "python"
+entry = "main.py"
+
+[[actions]]
+id = "tools.rank"
+label = "Pick tools"
+icon = "route"
+description = "Ranks the assistant's tools for a message. The node's assistant calls this."
+ai = "safe"
+quiet = true
+timeout_s = 30
+params.text = { type = "string", description = "The person's message" }
+params.context = { type = "string", description = "The message before it", default = "" }
+params.options = { type = "string", description = "JSON object: tool name -> what it does" }
+params.keep = { type = "int", description = "How many tools to keep", default = 16, min = 1, max = 200 }
+params.pick = { type = "int", description = "How many of those LAYA chooses between", default = 10, min = 2, max = 40 }
+

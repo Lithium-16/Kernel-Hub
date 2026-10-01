@@ -368,6 +368,9 @@ pub struct ChatReply {
     pub model: String,
     /// What this reply cost on the Claude API (0 for local).
     pub cost_usd: f64,
+    /// What LAYA decided before the model ran, in a few words (absent without LAYA).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

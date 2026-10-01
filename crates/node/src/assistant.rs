@@ -4,6 +4,13 @@
 //! assistant, so the normal permission tiers apply: `safe` actions run, `confirm` actions come
 //! back to the person as an Approve button, `never` actions aren't offered at all. Every run is
 //! in the activity log like any other.
+//!
+//! When the `laya` module runs, LAYA (a small, fast decision model) looks at each message first.
+//! When it's sure the message asks how a module is doing, that status is read straight away, so
+//! the model answers in one round instead of two. Optionally, the model only gets LAYA's best
+//! guesses as tools, and requests that look like several steps go to Claude first. LAYA is
+//! overconfident on button choices, so it never presses one; it only changes what the model is
+//! given. Without it the assistant works the same, minus the shortcut.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -19,6 +26,11 @@ use crate::config::AssistantConfig;
 use crate::node::Node;
 
 const STATUS_TOOL: &str = "kernel_status";
+pub const LAYA_MODULE: &str = "laya";
+/// LAYA's option for reading one module's status: `status:<module>`.
+const STATUS_OPTION: &str = "status:";
+/// How long to go without LAYA after it was too slow.
+const LAYA_PAUSE: Duration = Duration::from_secs(600);
 const KEEP_TURNS: usize = 40;
 const KEEP_CONVERSATIONS: usize = 50;
 const IDLE_FORGET: Duration = Duration::from_secs(2 * 3600);
@@ -51,6 +63,7 @@ pub enum Turn {
 pub struct Tool {
     pub name: String,
     pub module: String,
+    pub module_name: String,
     pub action: String,
     pub label: String,
     pub description: String,
@@ -96,6 +109,8 @@ pub struct Assistant {
     pub cfg: AssistantConfig,
     http: reqwest::Client,
     conversations: Mutex<HashMap<String, Conversation>>,
+    /// LAYA was too slow: go without it until then, rather than make every message wait.
+    laya_paused: Mutex<Option<Instant>>,
 }
 
 // -- tools -------------------------------------------------------------------------------
@@ -159,6 +174,7 @@ pub fn tools(node: &Node) -> Vec<Tool> {
     let mut out = vec![Tool {
         name: STATUS_TOOL.into(),
         module: String::new(),
+        module_name: String::new(),
         action: String::new(),
         label: "Read status".into(),
         description: "The current status of a module (what its page shows): states, numbers, \
@@ -171,7 +187,8 @@ pub fn tools(node: &Node) -> Vec<Tool> {
         }),
     }];
     for m in node.catalog() {
-        if m.state != ModuleState::Running {
+        // LAYA's own actions are for the assistant's plumbing, not for the model.
+        if m.state != ModuleState::Running || m.id == LAYA_MODULE {
             continue;
         }
         for a in &m.actions {
@@ -186,6 +203,7 @@ pub fn tools(node: &Node) -> Vec<Tool> {
             out.push(Tool {
                 name: tool_name(&m.id, &a.id),
                 module: m.id.clone(),
+                module_name: m.name.clone(),
                 action: a.id.clone(),
                 label: a.label.clone(),
                 description: format!(
@@ -199,6 +217,113 @@ pub fn tools(node: &Node) -> Vec<Tool> {
         }
     }
     out
+}
+
+// -- LAYA ------------------------------------------------------------------------------
+
+/// What LAYA made of a message.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Decision {
+    /// Tool names (or `status:<module>`), most likely first.
+    pub ranked: Vec<String>,
+    /// How sure LAYA is of the first one (0-1).
+    pub confidence: f64,
+    /// Probability that it needs several steps.
+    pub hard: f64,
+}
+
+impl Decision {
+    pub fn parse(v: &Value) -> Option<Self> {
+        let ranked: Vec<String> = v["ranked"]
+            .as_array()?
+            .iter()
+            .filter_map(|x| x.as_str().map(String::from))
+            .collect();
+        if ranked.is_empty() {
+            return None;
+        }
+        let num = |k: &str| v[k].as_f64().unwrap_or(0.0);
+        Some(Self {
+            ranked,
+            confidence: num("confidence"),
+            hard: num("hard"),
+        })
+    }
+}
+
+/// What LAYA chooses between: every tool, and reading each running module's status.
+pub fn laya_options(node: &Node, tools: &[Tool]) -> Map<String, Value> {
+    let mut out = Map::new();
+    for t in tools.iter().filter(|t| t.name != STATUS_TOOL) {
+        out.insert(
+            t.name.clone(),
+            json!(format!("{}: {}", t.module_name, t.label)),
+        );
+    }
+    for m in node.catalog() {
+        if m.state == ModuleState::Running && m.id != LAYA_MODULE {
+            out.insert(
+                format!("{STATUS_OPTION}{}", m.id),
+                json!(format!("{} status", m.name)),
+            );
+        }
+    }
+    out
+}
+
+/// What LAYA's decision changes for one message.
+#[derive(Debug, Default, PartialEq)]
+pub struct Plan {
+    /// The tools the model is given (by name); `None` is all of them.
+    pub offer: Option<Vec<String>>,
+    /// A tool call to run before the model is asked.
+    pub run_first: Option<Call>,
+    /// Ask Claude before the local model.
+    pub claude_first: bool,
+    /// For the person: what LAYA did, in a few words each.
+    pub notes: Vec<String>,
+}
+
+pub fn plan(
+    cfg: &AssistantConfig,
+    d: &Decision,
+    tools: &[Tool],
+    names: &HashMap<String, String>,
+) -> Plan {
+    let mut p = Plan::default();
+    let real = tools.iter().filter(|t| t.name != STATUS_TOOL).count();
+    if cfg.laya_tools > 0 && real > cfg.laya_tools {
+        let mut offer = vec![STATUS_TOOL.to_string()];
+        offer.extend(
+            d.ranked
+                .iter()
+                .filter(|n| tools.iter().any(|t| &t.name == *n && t.name != STATUS_TOOL))
+                .take(cfg.laya_tools)
+                .cloned(),
+        );
+        p.notes
+            .push(format!("{} of {real} buttons", offer.len() - 1));
+        p.offer = Some(offer);
+    }
+    // Only reads: LAYA is sometimes sure of the wrong button, and a wrong read costs nothing.
+    if d.confidence >= cfg.laya_fast
+        && let Some(module) = d.ranked[0].strip_prefix(STATUS_OPTION)
+    {
+        let mut args = Map::new();
+        args.insert("module".into(), json!(module));
+        p.run_first = Some(Call {
+            id: format!("call_{}", new_id()),
+            name: STATUS_TOOL.into(),
+            args,
+        });
+        let name = names.get(module).map_or(module, String::as_str);
+        p.notes.push(format!(
+            "checked {name} first ({:.0}% sure)",
+            d.confidence * 100.0
+        ));
+    }
+    p.claude_first = cfg.laya_claude > 0.0 && d.hard >= cfg.laya_claude;
+    p
 }
 
 // -- prompts -----------------------------------------------------------------------------
@@ -436,6 +561,7 @@ impl Assistant {
             cfg,
             http,
             conversations: Mutex::default(),
+            laya_paused: Mutex::default(),
         }
     }
 
@@ -543,6 +669,60 @@ impl Assistant {
             return Err(ModelError::Failed(format!("Claude API answered {status}")));
         }
         parse_claude(&value)
+    }
+
+    /// LAYA's take on a message, if the module is running and answers in time.
+    async fn ask_laya(
+        &self,
+        node: &Arc<Node>,
+        text: &str,
+        before: &str,
+        tools: &[Tool],
+        conversation: &str,
+    ) -> Option<Decision> {
+        let running = node
+            .catalog()
+            .iter()
+            .any(|m| m.id == LAYA_MODULE && m.state == ModuleState::Running);
+        let paused = *self.laya_paused.lock().expect("laya_paused");
+        if !running || paused.is_some_and(|until| Instant::now() < until) {
+            return None;
+        }
+        let options = laya_options(node, tools);
+        let keep = if self.cfg.laya_tools > 0 {
+            self.cfg.laya_tools + 4
+        } else {
+            16
+        };
+        let mut params = Map::new();
+        params.insert("text".into(), json!(text));
+        params.insert("context".into(), json!(before));
+        params.insert("options".into(), json!(Value::Object(options).to_string()));
+        params.insert("keep".into(), json!(keep.min(200)));
+        let req = ActionInvoke {
+            module: LAYA_MODULE.into(),
+            action: "tools.rank".into(),
+            params,
+            actor: Actor {
+                kind: ActorKind::Assistant,
+                reference: Some(format!("chat {conversation}")),
+            },
+            approval_id: None,
+        };
+        let wait = Duration::from_millis(self.cfg.laya_timeout_ms);
+        let Ok(res) = tokio::time::timeout(wait, node.invoke(req)).await else {
+            tracing::info!("LAYA took longer than {wait:?}; going without it for {LAYA_PAUSE:?}");
+            *self.laya_paused.lock().expect("laya_paused") = Some(Instant::now() + LAYA_PAUSE);
+            return None;
+        };
+        match (res.result, res.error) {
+            (_, Some(e)) => {
+                tracing::debug!(error = %e.message, "LAYA didn't decide");
+                None
+            }
+            (Some(v), None) => Decision::parse(&v),
+            (None, None) => None,
+        }
     }
 
     /// Run one tool call. Returns what the model sees, plus what the person sees.
@@ -657,17 +837,67 @@ impl Assistant {
         let mut usage = Usage::default();
         let mut final_text = String::new();
 
+        // LAYA first: which tools to offer, anything to run right away, who should answer.
+        let mut offered = tools.clone();
+        let mut route = None;
+        let before = turns
+            .iter()
+            .rev()
+            .skip(1)
+            .find_map(|t| match t {
+                Turn::User(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .unwrap_or("");
+        let decision = if self.cfg.laya {
+            self.ask_laya(node, &req.text, before, &tools, &conversation)
+                .await
+        } else {
+            None
+        };
+        if let Some(d) = decision {
+            let names: HashMap<String, String> =
+                node.catalog().into_iter().map(|m| (m.id, m.name)).collect();
+            let mut p = plan(&self.cfg, &d, &tools, &names);
+            if let Some(keep) = &p.offer {
+                offered.retain(|t| keep.contains(&t.name));
+            }
+            let auto = !matches!(req.provider.as_deref(), Some("local" | "claude"));
+            if p.claude_first
+                && auto
+                && brain == Brain::Local
+                && self.claude_available(node).is_ok()
+            {
+                brain = Brain::Claude;
+                p.notes
+                    .push("asked Claude (looks like several steps)".into());
+            }
+            if let Some(call) = p.run_first.take() {
+                let (r, s, a) = Self::run_tool(node, &tools, &call, &conversation).await;
+                steps.extend(s);
+                approvals.extend(a);
+                turns.push(Turn::Assistant {
+                    text: String::new(),
+                    calls: vec![call],
+                });
+                turns.push(Turn::Results(vec![r]));
+            }
+            if !p.notes.is_empty() {
+                route = Some(format!("LAYA: {}", p.notes.join(", ")));
+            }
+        }
+
         for step in 0..=self.cfg.max_steps {
             let reply = match brain {
                 Brain::Local => {
-                    match self.ask_ollama(&system, &turns, &tools).await {
+                    match self.ask_ollama(&system, &turns, &offered).await {
                         Ok(r) => r,
                         Err(local) if may_fall_back => {
                             self.claude_available(node)
                             .map_err(|why| format!("The local model failed ({local}), and Claude can't step in: {why}."))?;
                             tracing::info!(error = %local, "local model failed; asking Claude");
                             brain = Brain::Claude;
-                            self.ask_claude(&system, &turns, &tools)
+                            self.ask_claude(&system, &turns, &offered)
                                 .await
                                 .map_err(|e| e.to_string())?
                         }
@@ -675,7 +905,7 @@ impl Assistant {
                     }
                 }
                 Brain::Claude => self
-                    .ask_claude(&system, &turns, &tools)
+                    .ask_claude(&system, &turns, &offered)
                     .await
                     .map_err(|e| e.to_string())?,
             };
@@ -746,6 +976,7 @@ impl Assistant {
             .into(),
             model,
             cost_usd,
+            route,
         })
     }
 
@@ -827,6 +1058,107 @@ mod tests {
         );
         assert_eq!(s["properties"]["tone"]["enum"], json!(["warm", "dry"]));
         assert_eq!(s["required"], json!(["name"]));
+    }
+
+    fn tool(module: &str, action: &str, required: &[&str]) -> Tool {
+        Tool {
+            name: tool_name(module, action),
+            module: module.into(),
+            module_name: module.to_uppercase(),
+            action: action.into(),
+            label: action.into(),
+            description: String::new(),
+            schema: json!({"type": "object", "properties": {}, "required": required}),
+        }
+    }
+
+    #[test]
+    fn laya_plans() {
+        let mut tools = vec![
+            tool("", "", &["module"]),
+            tool("mc", "server.start", &[]),
+            tool("mc", "command.send", &["command"]),
+            tool("vram", "memory.free", &[]),
+            tool("comfy", "workflow.run", &["workflow"]),
+        ];
+        tools[0].name = STATUS_TOOL.into();
+        let names = HashMap::from([("mc".to_string(), "Minecraft".to_string())]);
+        let cfg = AssistantConfig::default();
+        let d = |ranked: &[&str], confidence: f64| Decision {
+            ranked: ranked.iter().map(|s| s.to_string()).collect(),
+            confidence,
+            hard: 0.1,
+        };
+
+        // Sure it's about a module's status: read it before the model is asked.
+        let p = plan(
+            &cfg,
+            &d(&["status:mc", "mc__server_start"], 0.95),
+            &tools,
+            &names,
+        );
+        let call = p.run_first.unwrap();
+        assert_eq!(
+            (call.name.as_str(), &call.args["module"]),
+            (STATUS_TOOL, &json!("mc"))
+        );
+        assert_eq!(p.offer, None, "all tools by default");
+        assert_eq!(p.notes, vec!["checked Minecraft first (95% sure)"]);
+        // Not sure enough, or a button however sure: nothing runs.
+        assert_eq!(
+            plan(&cfg, &d(&["status:mc"], 0.6), &tools, &names),
+            Plan::default()
+        );
+        assert_eq!(
+            plan(&cfg, &d(&["vram__memory_free"], 0.99), &tools, &names),
+            Plan::default()
+        );
+
+        // A short tool list, when asked for.
+        let short = AssistantConfig {
+            laya_tools: 2,
+            ..AssistantConfig::default()
+        };
+        let p = plan(
+            &short,
+            &d(
+                &[
+                    "status:mc",
+                    "comfy__workflow_run",
+                    "status:vram",
+                    "mc__server_start",
+                    "vram__memory_free",
+                ],
+                0.4,
+            ),
+            &tools,
+            &names,
+        );
+        assert_eq!(
+            p.offer.unwrap(),
+            vec![STATUS_TOOL, "comfy__workflow_run", "mc__server_start"]
+        );
+        assert_eq!(p.notes, vec!["2 of 4 buttons"]);
+
+        // Claude for multi-step requests only when switched on.
+        let mut hard = d(&["mc__server_start"], 0.3);
+        hard.hard = 0.9;
+        assert!(!plan(&cfg, &hard, &tools, &names).claude_first);
+        let on = AssistantConfig {
+            laya_claude: 0.8,
+            ..AssistantConfig::default()
+        };
+        assert!(plan(&on, &hard, &tools, &names).claude_first);
+
+        assert_eq!(
+            Decision::parse(&json!({"ranked": ["a"], "confidence": 0.5, "hard": 0.2})),
+            Some(Decision {
+                ranked: vec!["a".into()],
+                confidence: 0.5,
+                hard: 0.2
+            })
+        );
+        assert_eq!(Decision::parse(&json!({"ranked": []})), None);
     }
 
     #[test]

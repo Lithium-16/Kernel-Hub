@@ -1085,6 +1085,9 @@
             "cost_usd": {
               "type": "number",
               "minimum": 0
+            },
+            "route": {
+              "type": "string"
             }
           },
           "required": [
