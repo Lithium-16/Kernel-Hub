@@ -163,6 +163,43 @@ export const Events = msg('events', z.object({ events: z.array(NodeEvent) }));
 /** Pushed to every connected client as it happens. */
 export const Event = msg('event', NodeEvent);
 
+export const ChatSend = msg(
+  'chat.send',
+  z.object({
+    conversation: z.string().optional(),
+    text: z.string().min(1).max(8000),
+    provider: z.enum(['auto', 'local', 'claude']).optional(),
+  }),
+);
+
+const ChatStep = z.object({
+  module: z.string(),
+  action: z.string(),
+  params: z.record(z.string(), z.unknown()),
+  ok: z.boolean(),
+  summary: z.string(),
+});
+
+const ChatApproval = z.object({
+  module: z.string(),
+  action: z.string(),
+  params: z.record(z.string(), z.unknown()),
+  label: z.string(),
+});
+
+export const ChatReply = msg(
+  'chat.reply',
+  z.object({
+    conversation: z.string(),
+    text: z.string(),
+    steps: z.array(ChatStep),
+    approvals: z.array(ChatApproval),
+    provider: z.enum(['local', 'claude']),
+    model: z.string(),
+    cost_usd: z.number().nonnegative(),
+  }),
+);
+
 export const ErrorMessage = msg('error', ErrorInfo);
 
 export const Message = z.discriminatedUnion('type', [
@@ -177,6 +214,8 @@ export const Message = z.discriminatedUnion('type', [
   EventsQuery,
   Events,
   Event,
+  ChatSend,
+  ChatReply,
   ErrorMessage,
 ]);
 export type Message = z.infer<typeof Message>;

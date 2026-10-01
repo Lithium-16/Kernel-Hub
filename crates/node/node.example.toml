@@ -72,3 +72,14 @@ mute = []                   # never send these
 # module = "minecraft"
 # action = "server.stop"
 # approved = true
+
+# The assistant: Ollama on this PC answers first, Claude is the optional fallback.
+[assistant]
+enabled = true
+# Through the VRAM module's turn-taking proxy first, then Ollama directly.
+ollama_urls = ["http://127.0.0.1:11435", "http://127.0.0.1:11434"]
+model = "qwen3:8b"
+anthropic_api_key = ""          # optional: console.anthropic.com > API keys
+claude_model = "claude-haiku-4-5"
+monthly_budget_usd = 3.0
+persona = true                  # tsundere catgirl; false for plain

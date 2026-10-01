@@ -34,6 +34,8 @@ pub struct Config {
     pub update: UpdateConfig,
     #[serde(default)]
     pub notify: NotifyConfig,
+    #[serde(default)]
+    pub assistant: AssistantConfig,
     /// Actions to run on a timer (`[[schedule]]` tables).
     #[serde(default)]
     pub schedule: Vec<crate::schedule::ScheduleConfig>,
@@ -79,6 +81,46 @@ impl Default for UpdateConfig {
             auto_install: false,
             uv: "uv".into(),
             scheduled_task: String::new(),
+        }
+    }
+}
+
+/// The assistant (see `assistant.rs`): a local model first, Claude as the fallback.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AssistantConfig {
+    pub enabled: bool,
+    /// Tried in order. The first is the VRAM module's turn-taking proxy, the second Ollama itself.
+    pub ollama_urls: Vec<String>,
+    pub model: String,
+    /// Optional. Without it there is no fallback.
+    pub anthropic_api_key: String,
+    pub claude_model: String,
+    /// Claude API spend per calendar month; at the cap, only the local model answers.
+    pub monthly_budget_usd: f64,
+    /// Tool calls per message, at most.
+    pub max_steps: usize,
+    /// Kernel's tsundere catgirl voice (D11). Off: plain and neutral.
+    pub persona: bool,
+    /// Messages API base URL (changed only by tests).
+    pub anthropic_api: String,
+}
+
+impl Default for AssistantConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ollama_urls: vec![
+                "http://127.0.0.1:11435".into(),
+                "http://127.0.0.1:11434".into(),
+            ],
+            model: "qwen3:8b".into(),
+            anthropic_api_key: String::new(),
+            claude_model: "claude-haiku-4-5".into(),
+            monthly_budget_usd: 3.0,
+            max_steps: 8,
+            persona: true,
+            anthropic_api: "https://api.anthropic.com".into(),
         }
     }
 }

@@ -21,7 +21,7 @@ use crate::netfilter;
 use crate::node::Node;
 
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
-const CAPABILITIES: &[&str] = &["catalog", "actions", "activity", "events"];
+const CAPABILITIES: &[&str] = &["catalog", "actions", "activity", "events", "chat"];
 
 #[derive(Clone)]
 pub struct AppState {
@@ -207,6 +207,26 @@ async fn serve_client(
                     Err(e) => error(Some(&env.id), ErrorCode::Internal, e.to_string()),
                 };
                 let _ = tx.send(reply).await;
+            }
+            Payload::ChatSend(req) => {
+                // Answers take seconds to minutes; don't hold up the connection.
+                let node = state.node.clone();
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let reply = if !node.assistant.cfg.enabled {
+                        error(
+                            Some(&env.id),
+                            ErrorCode::Disabled,
+                            "the assistant is turned off ([assistant] enabled)",
+                        )
+                    } else {
+                        match node.assistant.chat(&node, req).await {
+                            Ok(r) => Envelope::reply(&env.id, Payload::ChatReply(r)),
+                            Err(e) => error(Some(&env.id), ErrorCode::Offline, e),
+                        }
+                    };
+                    let _ = tx.send(reply).await;
+                });
             }
             Payload::EventsQuery(q) => {
                 let reply = match state
