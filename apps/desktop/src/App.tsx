@@ -8,6 +8,7 @@ import { loadNotifyLevel, shouldNotify, show, title } from './lib/notify.ts';
 import { loadSettings, type NodeSettings, saveSettings } from './lib/settings.ts';
 import { inTauri } from './lib/window.ts';
 import { ActivityView } from './views/ActivityView.tsx';
+import { AssistantView } from './views/AssistantView.tsx';
 import { ModuleView } from './views/ModuleView.tsx';
 import { SettingsView } from './views/SettingsView.tsx';
 
@@ -92,6 +93,8 @@ export function App() {
   let main: React.ReactNode;
   if (view.kind === 'settings') {
     main = <SettingsView settings={settings} snapshot={snap} onSave={save} />;
+  } else if (view.kind === 'assistant') {
+    main = <AssistantView client={client} modules={snap.modules} online={snap.conn === 'online'} />;
   } else if (view.kind === 'activity') {
     main = <ActivityView client={client} modules={snap.modules} online={snap.conn === 'online'} />;
   } else {

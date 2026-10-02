@@ -326,6 +326,53 @@ pub struct Events {
     pub events: Vec<NodeEvent>,
 }
 
+/// A message to the assistant. Without `conversation`, a new one starts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatSend {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
+    pub text: String,
+    /// "auto" (local first, Claude as fallback), "local" or "claude".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+/// One action the assistant ran while answering.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatStep {
+    pub module: String,
+    pub action: String,
+    pub params: Map<String, Value>,
+    pub ok: bool,
+    /// One line: the result, or why it didn't run.
+    pub summary: String,
+}
+
+/// An action the assistant wants to run that needs a person to press the button.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatApproval {
+    pub module: String,
+    pub action: String,
+    pub params: Map<String, Value>,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatReply {
+    pub conversation: String,
+    pub text: String,
+    pub steps: Vec<ChatStep>,
+    pub approvals: Vec<ChatApproval>,
+    /// "local" or "claude".
+    pub provider: String,
+    pub model: String,
+    /// What this reply cost on the Claude API (0 for local).
+    pub cost_usd: f64,
+    /// What LAYA decided before the model ran, in a few words (absent without LAYA).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "body")]
 pub enum Payload {
@@ -352,6 +399,10 @@ pub enum Payload {
     /// Pushed to every connected client as it happens (no `re`).
     #[serde(rename = "event")]
     Event(NodeEvent),
+    #[serde(rename = "chat.send")]
+    ChatSend(ChatSend),
+    #[serde(rename = "chat.reply")]
+    ChatReply(ChatReply),
     #[serde(rename = "error")]
     Error(ErrorInfo),
 }

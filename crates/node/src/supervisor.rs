@@ -128,6 +128,7 @@ struct RunCtx {
     node: String,
     logs_dir: PathBuf,
     settings_dir: PathBuf,
+    module_data_dir: PathBuf,
     events: Arc<EventHub>,
 }
 
@@ -148,6 +149,7 @@ impl Supervisor {
             node: cfg.node.clone(),
             logs_dir: cfg.logs_dir().join("modules"),
             settings_dir: cfg.module_settings_dir(),
+            module_data_dir: cfg.data_dir.join("module-data"),
             events,
         };
         let mut slots = BTreeMap::new();
@@ -288,6 +290,8 @@ fn command_for(m: &Manifest, ctx: &RunCtx) -> Command {
             "KERNEL_SETTINGS_FILE",
             ctx.settings_dir.join(format!("{}.toml", m.id)),
         )
+        // A module's own files (downloads, saves), kept across updates like its settings.
+        .env("KERNEL_DATA_DIR", ctx.module_data_dir.join(&m.id))
         .env("KERNEL_LOG_LEVEL", "INFO")
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONIOENCODING", "utf-8")

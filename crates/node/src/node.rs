@@ -29,6 +29,7 @@ pub struct Node {
     pub events: Arc<EventHub>,
     pub scheduler: Scheduler,
     pub automations: crate::automations::Automations,
+    pub assistant: crate::assistant::Assistant,
     pub updater: Updater,
     /// Set to true to ask the process to exit (after handing off to the update helper).
     pub exit: watch::Sender<bool>,
@@ -75,6 +76,16 @@ impl Node {
         status.insert("uptime_s".into(), json!(self.started.elapsed().as_secs()));
         if !self.scheduler.entries.is_empty() {
             status.insert("schedules".into(), self.scheduler.status());
+        }
+        if self.assistant.cfg.enabled && !self.assistant.cfg.anthropic_api_key.is_empty() {
+            status.insert(
+                "claude_spend_usd".into(),
+                json!((self.assistant.spend(self) * 100.0).round() / 100.0),
+            );
+            status.insert(
+                "claude_budget_usd".into(),
+                json!(self.assistant.cfg.monthly_budget_usd),
+            );
         }
         if !self.automations.is_empty() {
             status.insert("automations".into(), self.automations.status());

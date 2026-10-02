@@ -363,17 +363,18 @@ There's no module-supplied UI code in v1 (a sandboxed iframe block comes **later
   - you ask for it ("ask Claude …", or a button on the reply)
   - Pluto is unreachable or its GPU is busy past a timeout
   - Never silently: the reply is marked "Claude" with its cost, and the budget below applies.
-- **Decision layer (LAYA, D21) runs first.** [LAYA](https://laya.convaiinnovations.com/) is a
-  small local classifier (421M params, Apache 2.0, ~30 ms) that answers choice / score / yes-no
-  questions with probabilities, not text:
-  - **choice** over the catalog's actions picks the likely action. Confident and the action
-    takes no input → it runs directly (still through tiers and approvals), no LLM at all.
-  - Otherwise the LLM gets only the **top ~5 actions** as tools, not the whole catalog.
-  - **yes/no** "needs multi-step reasoning?" sends hard requests straight to Claude instead of
-    letting the local model fail twice first.
-  - **yes/no** "does this call match the request?" before a call runs; no → ask the user.
-  - LAYA only chooses; the LLM still fills in values (player names, messages). Thresholds are
-    tuned on the 30-request eval set, run with and without LAYA, before the fast path is on.
+- **Decision layer (LAYA, D21, as built in D26) runs first.** [LAYA](https://laya.convaiinnovations.com/)
+  is a small local classifier (421M params, Apache 2.0) that answers choice / score / yes-no
+  questions with probabilities, not text. It runs in the `laya` module; the node asks it with
+  every message (one **choice** over every action plus "status of <module>", one **yes/no**
+  "needs several steps?"):
+  - Sure (≥ `laya_fast`, 0.9) the message asks how a module is doing → that status is read
+    first, so the model answers in one round instead of two. **It never presses a button:**
+    zero-shot, it is sometimes sure of the wrong one (see D26).
+  - Optional (`laya_tools`): the model gets only LAYA's top N actions as tools.
+  - Optional (`laya_claude`): "needs several steps" above the threshold → Auto asks Claude first.
+  - Not built: the "does this call match?" check. Too slow or not running → skipped (and paused
+    for 10 minutes after a timeout). It only changes what the model is given, never tiers.
 - **tools:** built from the live catalog, `<module>__<action>`, description and JSON Schema
   from the manifest. No shell, file or web tools in v1. Only module actions.
 - **permissions:** each tool call goes through the node's tier check plus `confirm_when`.
@@ -1003,3 +1004,6 @@ Resolved: Minecraft runs in WSL Ubuntu on Pluto under systemd (D16) · Pluto run
 | D22 | Events and alerts first, through a Discord webhook; plain `[[schedule]]` tables in node.toml before the full automation engine (§6.3) | Discord is already on my phone, so alerts work before the PWA and web push exist. Schedules cover the common case (nightly backup, weekly restart) now. They run as automations, and `confirm` actions need `approved = true` in the schedule itself |
 | D23 | A VRAM module shares Pluto's GPU by priority: Ollama and ComfyUI are unloaded through their APIs, other apps are measured per process (Windows' own GPU memory counters) and closed only when marked, Roblox is never touched; `exclusive` apps (video gen) clear everything below them while busy | one 11 GB card runs the local LLM (D20), image and video generation, and the Roblox AFK client. Unloading beats crashing with out-of-memory, and busy ComfyUI jobs are never interrupted |
 | D24 | LLM and image work take turns through local proxies (Ollama 11435, ComfyUI 8189); images queued around an LLM request are batched, with an LLM max wait against starvation; out-of-memory image jobs are retried once | model swaps cost seconds each, so grouping by model beats strict arrival order; the max wait keeps the assistant responsive. Proxies need no changes to Ollama or ComfyUI |
+| D25 | The assistant runs inside kerneld: one tool loop over Ollama's /api/chat (through the VRAM proxy) with Claude Haiku 4.5 over the Messages API as the fallback; tools are module actions plus a status read; confirm-tier calls become Approve buttons the person presses as themselves. LAYA (D21) comes later as a shortlist/fast path in front of the same loop | the node already owns permissions, the activity log and the catalog, so the assistant gets them for free; approvals as buttons need no new approval protocol yet |
+| D26 | LAYA ships as the `laya` module (installed from its page, model on the CPU by default) and only reads a status early, shortens the tool list (opt-in) or routes to Claude (opt-in); it never runs an action itself. Measured zero-shot on 16 Kernel-style requests with ~25 options: right tool first 11 times, in the top 4 15 times, but wrong answers at 95-100% confidence (e.g. "Stop AFK" for "put roblox in afk mode") and its small-talk yes/no was noise; ~2-3 s per message on a weak 4-core CPU | a status read is harmless when wrong; a button press isn't. Its similarity shortlist was far worse than letting it choose among all options at once, so it chooses among all of them (54 fit) |
+| D27 | Flow Race (the user's own game, a separate repo) runs as the `flowrace` module: downloaded from GitHub and built with npm into the module's data folder, run with Node under a Kernel host (its `server/core` behind file-backed players, 127.0.0.1 only, a connection cap, /kernel/status), falling back to its own `server/main.ts` if the host stops fitting. Friends reach it through Tailscale Funnel (or Serve for tailnet only), switched on by a button-only action | the game stays its own project; one public address for the game alone keeps everything else Tailscale-only, and friends need nothing installed |

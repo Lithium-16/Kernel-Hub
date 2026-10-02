@@ -5,7 +5,11 @@ import type { Module, Snapshot } from '../lib/node.ts';
 import { Icon } from './Icon.tsx';
 import { Logo } from './Logo.tsx';
 
-export type View = { kind: 'module'; id: string } | { kind: 'activity' } | { kind: 'settings' };
+export type View =
+  | { kind: 'module'; id: string }
+  | { kind: 'activity' }
+  | { kind: 'assistant' }
+  | { kind: 'settings' };
 
 /** "1/20" for modules that report players, otherwise their state. */
 function moduleMeta(m: Module): { tone: string; text: string } {
@@ -53,6 +57,14 @@ export function Sidebar({ snapshot, view, onView, onPalette, updateBuild }: Prop
       >
         <Icon name="list-clock" />
         <span className="grow">Activity</span>
+      </button>
+      <button
+        type="button"
+        className={`row ${on({ kind: 'assistant' }) ? 'on' : ''}`}
+        onClick={() => onView({ kind: 'assistant' })}
+      >
+        <Icon name="sparkles" />
+        <span className="grow">Assistant</span>
       </button>
 
       <div className="sect">Modules</div>

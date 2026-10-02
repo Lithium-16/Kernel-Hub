@@ -1,6 +1,7 @@
 //! kerneld: runs modules, exposes them over a WebSocket API, and logs every action.
 
 pub mod activity;
+pub mod assistant;
 pub mod automations;
 pub mod builtin;
 pub mod config;
@@ -138,6 +139,7 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
     let (exit, _) = watch::channel(false);
     let updater = Updater::new(&cfg);
     let cfg_schedules = cfg.schedule.clone();
+    let cfg_assistant = cfg.assistant.clone();
     let automations =
         automations::Automations::new(&cfg.on_event, &cfg.when).map_err(anyhow::Error::msg)?;
     let node = Arc::new(Node {
@@ -147,6 +149,7 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
         events,
         scheduler: schedule::Scheduler::new(&cfg_schedules),
         automations,
+        assistant: assistant::Assistant::new(cfg_assistant),
         updater,
         exit,
         started: Instant::now(),

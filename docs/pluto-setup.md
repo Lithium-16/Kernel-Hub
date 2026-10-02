@@ -45,6 +45,98 @@ The app updates itself: **Settings > App updates > Check for updates** (it also 
 and shows "Update available" in the sidebar). It downloads the installer from the newest
 release, checks its SHA-256, installs quietly and reopens. The first install is still by hand.
 
+## The assistant
+
+Kernel's assistant (the **Assistant** page in the app) answers with a model on Pluto, for free,
+and can press your modules' buttons. It only runs actions that are safe for it; anything that
+normally asks first shows you an **Approve** button, and button-only actions are never offered.
+
+1. Install [Ollama](https://ollama.com/download) on Pluto, then in PowerShell:
+   `ollama pull qwen3:8b` (about 5 GB). Any Ollama model with tool support works; set
+   `model` in `[assistant]` in node.toml to switch.
+2. That's it: the assistant talks to Ollama through the VRAM module's turn-taking proxy, so it
+   waits for ComfyUI jobs instead of fighting them for the GPU.
+3. Optional, Claude as the fallback when the local model fails or for hard questions (the
+   **Claude** button on the page): make an API key at <https://console.anthropic.com>, then in
+   node.toml:
+
+   ```toml
+   [assistant]
+   anthropic_api_key = "sk-ant-..."
+   monthly_budget_usd = 3.0     # it stops using Claude for the month at this
+   ```
+
+   The Node page shows this month's spend. Everything the assistant runs is in Activity, as the
+   assistant.
+
+### LAYA (optional): quicker answers to "is X up?"
+
+[LAYA](https://pypi.org/project/laya/) is a small decision model (Apache-2.0) the assistant can
+ask before the chat model. When it's sure you're asking how a module is doing, the status is read
+straight away, so the reply takes one model round instead of two. It never presses buttons
+(it's sometimes confidently wrong about those). Replies it helped show "LAYA: …" under them.
+
+1. Add `"laya"` to `enabled_modules` in node.toml and restart kerneld (new installs have it).
+2. On the **LAYA** page, press **Install LAYA**: it installs the laya package and PyTorch
+   (a few hundred MB, from PyPI). Then **Load model**: the first load downloads ~1.7 GB from
+   Hugging Face. Both need a network where PyPI and huggingface.co work.
+3. It runs on the CPU by default (~2 GB of RAM). Be honest with yourself about the trade: on a
+   CPU it adds roughly 1-3 s to *every* message and saves a model round only on status
+   questions. With `device = "cuda"` in `data\settings\laya.toml` it takes tens of
+   milliseconds, but needs a CUDA build of PyTorch that still supports the 1080 Ti (like
+   ComfyUI's) and ~1-2 GB of VRAM. Try it; if chat feels slower, press **Unload model** or
+   remove the module.
+
+Knobs in `[assistant]` (defaults shown):
+
+```toml
+laya = true             # use it when the module is running
+laya_fast = 0.9         # how sure it must be to read a status early; above 1 turns that off
+laya_tools = 0          # e.g. 12: the local model only sees LAYA's top 12 buttons (faster, but a
+                        # wrong guess hides the right one)
+laya_claude = 0.0       # e.g. 0.8: requests that look like several steps go to Claude first
+laya_timeout_ms = 3000  # slower than this and it's skipped for 10 minutes
+```
+
+The thresholds are guesses from a small test; watch the "LAYA: …" notes and adjust.
+
+## Flow Race: a game server your friends can join
+
+The **Flow Race** module keeps [Flow Race](https://github.com/Lithium-16/FlowRace) running on
+Pluto all the time and gives you a link to send friends. They open it in a browser and play;
+they don't install anything.
+
+1. **Node.js 22.18+** is needed (the installer gets it with winget; or
+   `winget install OpenJS.NodeJS.LTS`). Restart Kernel after installing it by hand.
+2. Add `"flowrace"` to `enabled_modules` in node.toml (new installs have it) and restart kerneld.
+   On first start it downloads the game from GitHub, runs `npm ci` and builds it (a minute or
+   two, on a network where github.com and npm work), then starts the server. It restarts it if
+   it crashes, and after reboots.
+3. On the **Flow Race** page, press **Share** → *anyone with the link*. The first time,
+   Tailscale shows a link to switch Funnel on for your tailnet: open it, allow it, press
+   **Share** again. The page then shows the link, like `https://pluto.tailXXXX.ts.net`. Send
+   that to your friends.
+
+What sharing does and doesn't open:
+
+- **Anyone with the link** uses [Tailscale Funnel](https://tailscale.com/kb/1223/funnel): that
+  one address forwards to the game only (Kernel, Minecraft's console, ComfyUI and the rest stay
+  Tailscale-only). The game listens on 127.0.0.1, so nothing is opened on your router or home
+  network. It is still a server on the public internet: anyone who finds the link can play,
+  and you're trusting the game's code with that. **Stop sharing** takes the link down at once.
+- **My tailnet** is the same link but only for devices on your tailnet (friends you've
+  [shared Pluto with](https://tailscale.com/kb/1084/sharing) need Tailscale installed).
+
+Players, ratings and the leaderboard are saved in `data\module-data\flowrace\save` and
+survive restarts. **Update game** pulls your latest commit from GitHub and restarts on it; it
+waits while people are playing unless you tick *force*. The page also says when a new commit
+is up (checked every 6 hours). If a future version of the game changes in a way Kernel's host
+doesn't understand, it falls back to the game's own server and the page says ratings won't be
+saved until that's fixed.
+
+Wins show up as events ("Pluto won a Flow Race"), so you can send them to Discord like any
+other event (`flowrace.match.*` in `[notify] include`).
+
 ## Discord alerts
 
 Kernel can post to a Discord channel when something happens: the Minecraft server crashes or

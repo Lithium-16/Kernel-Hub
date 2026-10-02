@@ -262,7 +262,9 @@ mod tests {
             ids,
             [
                 "comfyui",
+                "flowrace",
                 "hello",
+                "laya",
                 "minecraft",
                 "pc-monitor",
                 "roblox",

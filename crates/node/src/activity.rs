@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS activity (
 );
 CREATE INDEX IF NOT EXISTS activity_ts ON activity (ts DESC, id DESC);
 CREATE INDEX IF NOT EXISTS activity_module ON activity (module, ts DESC);
+CREATE TABLE IF NOT EXISTS assistant_usage (
+    month         TEXT PRIMARY KEY,
+    usd           REAL NOT NULL,
+    input_tokens  INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL
+);
 ";
 
 fn result_str(r: ActivityResult) -> &'static str {
@@ -90,6 +96,35 @@ impl ActivityStore {
             ],
         )?;
         Ok(())
+    }
+
+    /// Add Claude API spend to a month (`2026-10`).
+    pub fn add_usage(
+        &self,
+        month: &str,
+        usd: f64,
+        input: u64,
+        output: u64,
+    ) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().expect("activity db lock");
+        conn.execute(
+            "INSERT INTO assistant_usage (month, usd, input_tokens, output_tokens) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(month) DO UPDATE SET usd = usd + ?2, input_tokens = input_tokens + ?3,
+             output_tokens = output_tokens + ?4",
+            params![month, usd, input as i64, output as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Claude API spend in a month, in USD.
+    pub fn usage(&self, month: &str) -> f64 {
+        let conn = self.conn.lock().expect("activity db lock");
+        conn.query_row(
+            "SELECT usd FROM assistant_usage WHERE month = ?1",
+            params![month],
+            |r| r.get(0),
+        )
+        .unwrap_or(0.0)
     }
 
     /// A consistent copy of the whole database (activity and events) at `path`.
@@ -213,5 +248,15 @@ mod backup_tests {
         store.backup_to(&copy).unwrap();
         let again = ActivityStore::open(&copy).unwrap();
         assert!(again.query(10, None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn adds_up_assistant_spend() {
+        let store = ActivityStore::in_memory().unwrap();
+        assert_eq!(store.usage("2026-10"), 0.0);
+        store.add_usage("2026-10", 0.25, 1000, 200).unwrap();
+        store.add_usage("2026-10", 0.5, 10, 20).unwrap();
+        assert!((store.usage("2026-10") - 0.75).abs() < 1e-9);
+        assert_eq!(store.usage("2026-11"), 0.0);
     }
 }

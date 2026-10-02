@@ -229,6 +229,7 @@ async fn node_runs_hello_module_end_to_end() {
             .unwrap(),
         ],
         when: vec![],
+        assistant: Default::default(),
         path: None,
     };
     let running = kernel_node::start(cfg).await.expect("node starts");

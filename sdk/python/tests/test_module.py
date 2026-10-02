@@ -140,3 +140,9 @@ async def test_events_are_read_once_over_mcp():
             {"kind": "server.crashed", "level": "error", "message": "It stopped", "data": {}},
         ]
         assert json.loads((await client.read_resource(EVENTS_URI)).contents[0].text) == []
+
+
+def test_data_dir_comes_from_the_node(tmp_path, monkeypatch):
+    monkeypatch.setenv("KERNEL_DATA_DIR", str(tmp_path / "module-data" / "x"))
+    d = Module(MANIFEST).data_dir
+    assert d == tmp_path / "module-data" / "x" and d.is_dir()
