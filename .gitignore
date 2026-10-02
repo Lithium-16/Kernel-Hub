@@ -25,3 +25,6 @@ modules/*/settings.local.toml
 # Tauri
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
+
+# Module data when a module runs by hand
+modules/*/data/

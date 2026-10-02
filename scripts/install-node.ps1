@@ -25,7 +25,7 @@ param(
   [string]$Root = (Join-Path $env:LOCALAPPDATA 'Kernel\node'),
   [int]$Port = 47800,
   # Modules to run. hello is only for tests.
-  [string[]]$Modules = @('minecraft', 'pc-monitor', 'roblox', 'comfyui', 'vram', 'laya'),
+  [string[]]$Modules = @('minecraft', 'pc-monitor', 'roblox', 'comfyui', 'vram', 'laya', 'flowrace'),
   [switch]$NoFirewall
 )
 
@@ -170,6 +170,28 @@ Get-ChildItem (Join-Path $app 'modules') -Directory | Sort-Object Name | ForEach
 }
 & $uv @pipArgs
 if ($LASTEXITCODE) { throw 'Installing the Python packages failed' }
+
+# ---------------------------------------------------------------- 4b. Node.js (Flow Race)
+if ($Modules -contains 'flowrace') {
+  Step 'Node.js for Flow Race'
+  $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
+  if (-not $nodeExe -and (Test-Path "$env:ProgramFiles\nodejs\node.exe")) { $nodeExe = "$env:ProgramFiles\nodejs\node.exe" }
+  $nodeOk = $false
+  if ($nodeExe) {
+    $v = (& $nodeExe --version) -replace '^v', ''
+    $nodeOk = [version]$v -ge [version]'22.18'
+    Note "Found Node $v"
+  }
+  if (-not $nodeOk) {
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+      Note 'Installing Node.js LTS with winget'
+      winget install --id OpenJS.NodeJS.LTS -e --silent --accept-package-agreements --accept-source-agreements
+      if ($LASTEXITCODE) { Note 'winget failed; install Node 22.18+ from https://nodejs.org, then restart Kernel' }
+    } else {
+      Note 'Install Node 22.18+ from https://nodejs.org, then restart Kernel (Flow Race waits for it)'
+    }
+  }
+}
 
 # ---------------------------------------------------------------- 5. config
 Step 'Node config'

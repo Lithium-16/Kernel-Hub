@@ -1,0 +1,80 @@
+id = "flowrace"
+name = "Flow Race"
+icon = "gamepad-2"
+version = "0.1.0"
+runtime = "python"
+entry = "main.py"
+
+# Flow Race (github.com/Lithium-16/FlowRace): the puzzle racing game, kept running on this PC
+# so you and your friends can play any time. The game is downloaded from GitHub and built with
+# Node.js (22.18 or newer) on first start; Update game pulls the latest commit.
+# It only listens on this PC. Share makes it reachable through Tailscale: "anyone with the link"
+# (Tailscale Funnel, a public https address for the game only) or "my tailnet".
+[settings]
+repo = "Lithium-16/FlowRace"
+ref = "main"
+# Only for a private repo: a read-only token.
+github_token = ""
+port = 8095
+# The https port of the share link: 443, 8443 or 10000.
+share_port = 443
+# Open connections at most (each browser tab is one).
+max_connections = 64
+# Start the server with the module, and restart it if it stops.
+autostart = true
+# Look for a new commit on GitHub this often (0 = never); it tells you, it doesn't install.
+update_check_h = 6
+node = "node"
+npm = "npm"
+tailscale = "tailscale"
+poll_s = 5.0
+
+[[actions]]
+id = "server.start"
+label = "Start server"
+icon = "play"
+description = "Starts the game server (and keeps it up)."
+ai = "safe"
+timeout_s = 120
+
+[[actions]]
+id = "server.stop"
+label = "Stop server"
+icon = "square"
+description = "Stops the game server; anyone playing is disconnected."
+ai = "confirm"
+timeout_s = 30
+
+[[actions]]
+id = "server.restart"
+label = "Restart server"
+icon = "rotate-cw"
+description = "Restarts the game server; anyone playing reconnects after a few seconds."
+ai = "confirm"
+timeout_s = 150
+
+[[actions]]
+id = "game.update"
+label = "Update game"
+icon = "download"
+description = "Downloads the latest commit from GitHub, builds it and restarts on it. Refuses while people are playing unless forced."
+ai = "confirm"
+timeout_s = 1800
+params.force = { type = "bool", description = "Update even if people are playing", default = false }
+
+[[actions]]
+id = "share.start"
+label = "Share"
+icon = "share-2"
+description = "Makes the game reachable through Tailscale: by anyone with the link (Funnel, public internet), or only your tailnet."
+ai = "never"
+timeout_s = 120
+params.who = { type = "enum", options = ["anyone with the link", "my tailnet"], default = "anyone with the link" }
+
+[[actions]]
+id = "share.stop"
+label = "Stop sharing"
+icon = "lock"
+description = "Takes the share link down; the game keeps running on this PC."
+ai = "safe"
+timeout_s = 90

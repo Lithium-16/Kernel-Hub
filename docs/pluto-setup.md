@@ -100,6 +100,43 @@ laya_timeout_ms = 3000  # slower than this and it's skipped for 10 minutes
 
 The thresholds are guesses from a small test; watch the "LAYA: …" notes and adjust.
 
+## Flow Race: a game server your friends can join
+
+The **Flow Race** module keeps [Flow Race](https://github.com/Lithium-16/FlowRace) running on
+Pluto all the time and gives you a link to send friends. They open it in a browser and play;
+they don't install anything.
+
+1. **Node.js 22.18+** is needed (the installer gets it with winget; or
+   `winget install OpenJS.NodeJS.LTS`). Restart Kernel after installing it by hand.
+2. Add `"flowrace"` to `enabled_modules` in node.toml (new installs have it) and restart kerneld.
+   On first start it downloads the game from GitHub, runs `npm ci` and builds it (a minute or
+   two, on a network where github.com and npm work), then starts the server. It restarts it if
+   it crashes, and after reboots.
+3. On the **Flow Race** page, press **Share** → *anyone with the link*. The first time,
+   Tailscale shows a link to switch Funnel on for your tailnet: open it, allow it, press
+   **Share** again. The page then shows the link, like `https://pluto.tailXXXX.ts.net`. Send
+   that to your friends.
+
+What sharing does and doesn't open:
+
+- **Anyone with the link** uses [Tailscale Funnel](https://tailscale.com/kb/1223/funnel): that
+  one address forwards to the game only (Kernel, Minecraft's console, ComfyUI and the rest stay
+  Tailscale-only). The game listens on 127.0.0.1, so nothing is opened on your router or home
+  network. It is still a server on the public internet: anyone who finds the link can play,
+  and you're trusting the game's code with that. **Stop sharing** takes the link down at once.
+- **My tailnet** is the same link but only for devices on your tailnet (friends you've
+  [shared Pluto with](https://tailscale.com/kb/1084/sharing) need Tailscale installed).
+
+Players, ratings and the leaderboard are saved in `data\module-data\flowrace\save` and
+survive restarts. **Update game** pulls your latest commit from GitHub and restarts on it; it
+waits while people are playing unless you tick *force*. The page also says when a new commit
+is up (checked every 6 hours). If a future version of the game changes in a way Kernel's host
+doesn't understand, it falls back to the game's own server and the page says ratings won't be
+saved until that's fixed.
+
+Wins show up as events ("Pluto won a Flow Race"), so you can send them to Discord like any
+other event (`flowrace.match.*` in `[notify] include`).
+
 ## Discord alerts
 
 Kernel can post to a Discord channel when something happens: the Minecraft server crashes or

@@ -119,6 +119,17 @@ class Module:
         self.settings = load_settings(self.manifest)
         self.log = logging.getLogger(f"kernel.{self.manifest.id}")
 
+    @property
+    def data_dir(self) -> Path:
+        """A folder for the module's own files (downloads, saves), kept across Kernel updates.
+
+        Set by the node; when run by hand, `data/` next to module.toml. Created on first use.
+        """
+        env = os.environ.get("KERNEL_DATA_DIR")
+        path = Path(env) if env else (self.manifest.root or Path.cwd()) / "data"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
     def action(self, action_id: str) -> Callable[[Handler], Handler]:
         spec = self.manifest.action(action_id)
         if spec is None:
