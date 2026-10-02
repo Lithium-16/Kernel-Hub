@@ -8,7 +8,7 @@ entry = "main.py"
 # Flow Race (github.com/Lithium-16/FlowRace): the puzzle racing game, kept running on this PC
 # so you and your friends can play any time. The game is downloaded from GitHub and built with
 # Node.js (22.18 or newer, downloaded by itself if missing) on first start; Update game pulls the
-# latest commit.
+# latest commit right away; new commits also install by themselves when nobody's playing.
 # It only listens on this PC. Share makes it reachable through Tailscale: "anyone with the link"
 # (Tailscale Funnel, a public https address for the game only) or "my tailnet".
 [settings]
@@ -23,8 +23,10 @@ share_port = 443
 max_connections = 64
 # Start the server with the module, and restart it if it stops.
 autostart = true
-# Look for a new commit on GitHub this often (0 = never); it tells you, it doesn't install.
-update_check_h = 6
+# Look for a new commit on GitHub this often (hours; 0 = never).
+update_check_h = 0.5
+# Install new commits by itself, once nobody is playing. Off: it only tells you.
+auto_update = true
 # On Windows, without a recent enough Node.js: download the current LTS into this module's
 # data folder (a zip from nodejs.org, checksum checked; no installer, no admin prompt).
 auto_install_node = true
