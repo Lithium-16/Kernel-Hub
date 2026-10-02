@@ -338,6 +338,25 @@ Pluto:
 
 These switches are buttons only: the assistant can't flip them.
 
+### From any browser: the Kernel page
+
+Pluto also serves a small page at **http://pluto:47800** (its Tailscale name or 100.x address,
+same port as the app), so you can do all of this from your phone or any PC on your tailnet
+without the app. Sign in with the token from node.toml once; the browser remembers it.
+
+- **Update everything**: updates each game that has a new commit, then Kernel itself (with all
+  its modules); the page reconnects when Pluto is back.
+- Kernel's build, **Check now**, **Update now** and the auto-update switch.
+- **Games**: version, players online, **Update game**, **Share** / **Stop sharing**, and once
+  shared, **Open** and **Copy link** for the address to send friends.
+- **Modules**: the on/off switches.
+- **Desktop app**: a link to the newest installer. The app can't be updated from Pluto (it runs
+  on your PC), but with **Install app updates automatically** on in its Settings it updates
+  itself.
+
+Like the app, the page only answers on Tailscale and this PC; it has no password of its own
+besides the node token.
+
 The WSL keepalive drops for those few seconds while the node restarts. WSL waits a little
 before shutting down, so it rides through, but keep the **WSL keepalive** scheduled task as a
 backup anyway.

@@ -32,8 +32,35 @@ pub struct AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        .route("/", get(web_page))
         .route("/ws", get(ws_handler))
         .with_state(state)
+}
+
+/// A small page for updating Kernel, its modules and games from any browser on the tailnet.
+/// It holds nothing secret: it asks for the token and talks to /ws like the app does.
+const WEB_PAGE: &str = include_str!("web/index.html");
+
+async fn web_page(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+) -> Response {
+    if !netfilter::is_allowed(addr.ip(), state.node.cfg.allow_lan) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "no-store"),
+            (
+                axum::http::header::CONTENT_SECURITY_POLICY,
+                "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; \
+                 connect-src 'self' ws: wss:; img-src 'self' data:; frame-ancestors 'none'",
+            ),
+        ],
+        WEB_PAGE,
+    )
+        .into_response()
 }
 
 async fn ws_handler(

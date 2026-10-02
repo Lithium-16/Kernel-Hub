@@ -371,6 +371,9 @@ impl Updater {
             json!(s.latest.as_ref().map(|r| r.build)),
         );
         m.insert("last_check".into(), json!(s.last_check));
+        if self.enabled() {
+            m.insert("repo".into(), json!(self.cfg.repo));
+        }
         if let Some(r) = &s.latest {
             m.insert("release".into(), json!(r.page));
             m.insert("released_at".into(), json!(r.published_at));
