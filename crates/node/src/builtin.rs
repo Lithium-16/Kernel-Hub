@@ -36,6 +36,47 @@ pub fn actions() -> Vec<ActionSpec> {
             "Downloads the newest build and restarts the node on it. Rolls back if it fails.",
             AiTier::Confirm,
         ),
+        ActionSpec {
+            params: json!({
+                "enabled": {"type": "bool", "description": "Install new builds as soon as they're found", "default": true},
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+            ..spec(
+                "update.auto",
+                "Auto-update",
+                "refresh-ccw-dot",
+                "Turns installing new builds by themselves on or off (found every few hours).",
+                AiTier::Never,
+            )
+        },
+        ActionSpec {
+            quiet: true,
+            ..spec(
+                "modules.list",
+                "List modules",
+                "blocks",
+                "Every module this build has, and whether it's switched on.",
+                AiTier::Safe,
+            )
+        },
+        ActionSpec {
+            params: json!({
+                "module": {"type": "string", "description": "Module id"},
+                "enabled": {"type": "bool", "default": true},
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default(),
+            ..spec(
+                "modules.enable",
+                "Switch module on or off",
+                "toggle-right",
+                "Turns a module on or off on this PC and restarts Kernel to apply it.",
+                AiTier::Never,
+            )
+        },
         spec(
             "node.restart",
             "Restart node",

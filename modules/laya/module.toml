@@ -9,7 +9,8 @@ entry = "main.py"
 # first. In a fraction of a second it guesses which buttons a message is about, so the chat
 # model gets a short tool list, and a plain "is the server up?" runs straight away.
 # The assistant works without it; it just skips this step.
-# Needs the laya package (the Install button) and a ~1.7 GB model download on first load.
+# Installs the laya package by itself (or with the Install button) and downloads the ~1.7 GB
+# model on first load.
 [settings]
 # "cpu" keeps the GPU free for LLMs and images. "cuda" is faster but takes ~1 GB of VRAM
 # (and needs the CUDA build of PyTorch).
@@ -18,6 +19,8 @@ device = "cpu"
 model = "english"
 # Load the model when the module starts, so the first message doesn't wait for it.
 preload = true
+# Install the laya package (and PyTorch, a few hundred MB) by itself when it's missing.
+auto_install = true
 # For Hugging Face, only if downloads are refused.
 hf_token = ""
 

@@ -88,8 +88,8 @@ async def test_not_ready_answers_quickly_and_starts_loading():
 
 
 async def test_not_installed():
-    d = decider(installed=False)
-    await d.start()  # doesn't try to load
+    d = Decider({"auto_install": False}, engine_factory=lambda s: FakeEngine(), is_installed=lambda: False)
+    await d.start()  # doesn't try to install or load
     assert d.snapshot()["state"] == "not installed"
     with pytest.raises(ActionError) as e:
         await d.decide("hi", "", '{"a": "A", "b": "B"}', 4, 2)
@@ -131,3 +131,26 @@ def test_manifest_matches_the_handlers():
     m = load_manifest(Path(__file__).resolve().parent.parent / "module.toml")
     assert [a.id for a in m.actions] == ["tools.rank", "model.load", "model.unload", "setup.install"]
     assert m.action("tools.rank").quiet
+
+
+async def test_installs_itself_when_missing(monkeypatch):
+    present = {"yes": False}
+    d = Decider({"preload": True}, engine_factory=lambda s: FakeEngine(), is_installed=lambda: present["yes"])
+
+    async def install():
+        present["yes"] = True
+        await d.load()
+        return {"installed": True}
+
+    monkeypatch.setattr(d, "install", install)
+    await d.start()
+    assert d.snapshot()["state"] == "ready"
+
+    failing = Decider({}, engine_factory=lambda s: FakeEngine(), is_installed=lambda: False)
+
+    async def broken():
+        raise ActionError("module_failed", "no network")
+
+    monkeypatch.setattr(failing, "install", broken)
+    await failing.start()  # reported, not raised
+    assert failing.error == "no network"

@@ -212,3 +212,48 @@ def test_manifest_matches_the_handlers():
 
     m = load_manifest(Path(__file__).resolve().parent.parent / "module.toml")
     assert m.action("share.start").ai == "never"
+
+
+def node_zip(version):
+    buf = io.BytesIO()
+    with __import__("zipfile").ZipFile(buf, "w") as z:
+        z.writestr(f"node-{version}-win-x64/node.exe", "fake")
+        z.writestr(f"node-{version}-win-x64/npm.cmd", "fake")
+    return buf.getvalue()
+
+
+def test_downloads_node_when_missing(tmp_path):
+    import hashlib
+
+    zipped = node_zip("v24.1.0")
+    good = hashlib.sha256(zipped).hexdigest()
+    sums = {"value": f"{good}  node-v24.1.0-win-x64.zip\nabc  node-v24.1.0-linux-x64.tar.gz\n"}
+    fetched = []
+
+    def get(url, timeout=5, headers=None):
+        fetched.append(url)
+        if url.endswith("index.json"):
+            return json.dumps([{"version": "v25.0.0", "lts": False}, {"version": "v24.1.0", "lts": "Krypton"}]).encode()
+        if url.endswith("SHASUMS256.txt"):
+            return sums["value"].encode()
+        return zipped
+
+    def run(cmd, **k):
+        return Ran(0, "v24.1.0\n") if "node-v24.1.0-win-x64" in cmd[0] else Ran(127, "node not found")
+
+    events = []
+    g = FlowRace({"node": "no-such-node"}, tmp_path, emit=lambda k, m, **d: events.append(k), run=run, get=get)
+    g.windows = False
+    with pytest.raises(ActionError):  # only on Windows
+        g.ensure_node()
+    g.windows = True
+    sums["value"] = "0" * 64 + "  node-v24.1.0-win-x64.zip\n"
+    with pytest.raises(ActionError) as e:
+        g.ensure_node()
+    assert "checksum" in e.value.message and g._portable_node() is None
+    sums["value"] = f"{good}  node-v24.1.0-win-x64.zip\n"
+    assert g.ensure_node() == "v24.1.0"
+    assert fetched[-1] == "https://nodejs.org/dist/v24.1.0/node-v24.1.0-win-x64.zip"
+    assert g._tool("npm", "npm.cmd").endswith("node-v24.1.0-win-x64/npm.cmd".replace("/", __import__("os").sep))
+    assert g._env()["PATH"].startswith(str(tmp_path / "node" / "node-v24.1.0-win-x64"))
+    assert events == ["node.installed"]

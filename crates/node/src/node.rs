@@ -31,6 +31,8 @@ pub struct Node {
     pub automations: crate::automations::Automations,
     pub assistant: crate::assistant::Assistant,
     pub updater: Updater,
+    /// Switches set from the app (see `prefs.rs`).
+    pub prefs: std::sync::Mutex<crate::prefs::Prefs>,
     /// Set to true to ask the process to exit (after handing off to the update helper).
     pub exit: watch::Sender<bool>,
     pub started: Instant,
@@ -74,6 +76,7 @@ impl Node {
         let mut modules = self.supervisor.catalog();
         let mut status = self.updater.status();
         status.insert("uptime_s".into(), json!(self.started.elapsed().as_secs()));
+        status.insert("auto_install".into(), json!(self.auto_install_on()));
         if !self.scheduler.entries.is_empty() {
             status.insert("schedules".into(), self.scheduler.status());
         }
@@ -109,6 +112,105 @@ impl Node {
             tokio::time::sleep(Duration::from_secs(1)).await;
             let _ = node.exit.send(true);
         });
+    }
+
+    /// Whether new builds install themselves (the app's switch, else `[update] auto_install`).
+    pub fn auto_install_on(&self) -> bool {
+        self.prefs.lock().expect("prefs").auto_install(&self.cfg)
+    }
+
+    fn change_prefs(&self, change: impl FnOnce(&mut crate::prefs::Prefs)) -> Result<(), String> {
+        let mut p = self.prefs.lock().expect("prefs");
+        let mut next = p.clone();
+        change(&mut next);
+        next.save(&crate::prefs::Prefs::path(&self.cfg))
+            .map_err(|e| format!("saving node-prefs.json: {e}"))?;
+        *p = next;
+        Ok(())
+    }
+
+    /// Every module in modules_dir, on or off, for the app's switches.
+    fn modules_list(&self) -> ActionResult {
+        let running = self.catalog();
+        let prefs = self.prefs.lock().expect("prefs").clone();
+        let mut out = Vec::new();
+        for m in crate::manifest::discover(&self.cfg.modules_dir)
+            .into_iter()
+            .flatten()
+        {
+            if m.id == builtin::ID {
+                continue;
+            }
+            let state = running.iter().find(|r| r.id == m.id).map(|r| r.state);
+            out.push(json!({
+                "id": m.id,
+                "name": m.name,
+                "icon": m.icon,
+                "enabled": prefs.module_enabled(&self.cfg, &m.id),
+                "state": state,
+            }));
+        }
+        ActionResult::success(json!({ "modules": out }))
+    }
+
+    fn modules_enable(self: &Arc<Self>, req: &ActionInvoke) -> ActionResult {
+        let id = req
+            .params
+            .get("module")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let on = req
+            .params
+            .get("enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let known = crate::manifest::discover(&self.cfg.modules_dir)
+            .into_iter()
+            .flatten()
+            .any(|m| m.id == id && m.id != builtin::ID);
+        if !known {
+            return fail(
+                ErrorCode::InvalidParams,
+                format!("no module '{id}' in this build"),
+            );
+        }
+        if let Err(e) = self.change_prefs(|p| {
+            p.modules.insert(id.to_string(), on);
+        }) {
+            return fail(ErrorCode::ModuleFailed, e);
+        }
+        // Modules are chosen at start, so the change takes a restart.
+        match self.updater.restart() {
+            Ok(()) => {
+                self.exit_soon();
+                ActionResult::success(json!({
+                    "module": id, "enabled": on, "message": "restarting Kernel, back in a few seconds"
+                }))
+            }
+            Err(e) => ActionResult::success(json!({
+                "module": id, "enabled": on, "message": format!("saved; restart Kernel to apply ({e})")
+            })),
+        }
+    }
+
+    fn update_auto(self: &Arc<Self>, req: &ActionInvoke) -> ActionResult {
+        let on = req
+            .params
+            .get("enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        if let Err(e) = self.change_prefs(|p| p.auto_install = Some(on)) {
+            return fail(ErrorCode::ModuleFailed, e);
+        }
+        // Already waiting on a build: install it now rather than at the next check.
+        if on && self.updater.status().get("update").and_then(|v| v.as_str()) == Some("available") {
+            let node = self.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                node.auto_install().await;
+            });
+        }
+        ActionResult::success(json!({ "auto_install": on }))
     }
 
     /// Install a new build without a button press (`[update] auto_install`).
@@ -241,6 +343,9 @@ impl Node {
                 Err(e) => fail(ErrorCode::ModuleFailed, e),
             },
             "logs.tail" => self.logs_tail(req),
+            "modules.list" => self.modules_list(),
+            "modules.enable" => self.modules_enable(req),
+            "update.auto" => self.update_auto(req),
             "settings.get" | "settings.set" => self.module_settings(req),
             "diag.bundle" => {
                 let extra = [
