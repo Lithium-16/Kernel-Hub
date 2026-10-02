@@ -60,6 +60,9 @@ pub struct UpdateConfig {
     pub token: String,
     /// GitHub API base URL (changed only by tests).
     pub api: String,
+    /// GitHub's website, used when the API refuses (its hourly limit is shared by everything on
+    /// the home network). Changed only by tests.
+    pub web: String,
     /// How often to look for a new build. 0 = only when asked.
     pub check_interval_h: u64,
     /// Install new builds as soon as they're found, instead of waiting for the button.
@@ -77,6 +80,7 @@ impl Default for UpdateConfig {
             repo: String::new(),
             token: String::new(),
             api: "https://api.github.com".into(),
+            web: "https://github.com".into(),
             check_interval_h: 6,
             auto_install: false,
             uv: "uv".into(),

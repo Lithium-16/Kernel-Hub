@@ -169,12 +169,48 @@ class WebGame:
             headers["Authorization"] = f"Bearer {self.settings['github_token']}"
         return self.get(f"https://api.github.com/repos/{self.settings['repo']}/{path}", timeout=60, headers=headers)
 
+    @staticmethod
+    def _refusal(e: Exception) -> str:
+        """Why GitHub said no: its hourly limit (shared by the whole home network), or else."""
+        if isinstance(e, urllib.error.HTTPError):
+            if e.code in (403, 429) and e.headers.get("x-ratelimit-remaining") == "0":
+                reset = e.headers.get("x-ratelimit-reset", "")
+                when = time.strftime(" (resets at %H:%M UTC)", time.gmtime(int(reset))) if reset.isdigit() else ""
+                return f"GitHub's hourly limit for this network is used up{when}"
+            return f"GitHub answered {e.code} {e.reason}"
+        return str(e)
+
     def latest_commit(self) -> str:
+        """The newest commit on the branch: from the API, else from github.com's commit feed (which
+        doesn't count against the API's hourly limit)."""
+        ref = self.settings.get("ref", "main")
         try:
-            sha = self._github(f"commits/{self.settings.get('ref', 'main')}", "application/vnd.github.sha")
+            return self._github(f"commits/{ref}", "application/vnd.github.sha").decode().strip()
         except (urllib.error.URLError, OSError) as e:
-            raise ActionError("offline", f"couldn't reach GitHub ({e}); downloads need a network where github.com works") from None
-        return sha.decode().strip()
+            api = self._refusal(e)
+        try:
+            feed = self.get(f"https://github.com/{self.settings['repo']}/commits/{ref}.atom", timeout=60).decode()
+            found = re.search(r"Grit::Commit/([0-9a-f]{40})", feed)
+            if found:
+                self.log.info("GitHub API refused (%s); used the commit feed", api)
+                return found[1]
+            web = "no commits in the feed"
+        except (urllib.error.URLError, OSError) as e:
+            web = self._refusal(e)
+        raise ActionError(
+            "offline", f"couldn't ask GitHub for the newest commit: {api}; github.com: {web}"
+        )
+
+    def _download(self, sha: str) -> bytes:
+        """The source at `sha`: the API's tarball, else codeload (not rate-limited the same way)."""
+        try:
+            return self._github(f"tarball/{sha}", "application/vnd.github+json")
+        except (urllib.error.URLError, OSError) as e:
+            api = self._refusal(e)
+        try:
+            return self.get(f"https://codeload.github.com/{self.settings['repo']}/tar.gz/{sha}", timeout=300)
+        except (urllib.error.URLError, OSError) as e:
+            raise ActionError("offline", f"couldn't download the game: {api}; codeload: {self._refusal(e)}") from None
 
     def _portable_node(self) -> Path | None:
         """The Node.js this module downloaded itself, if any (newest first)."""
@@ -267,7 +303,7 @@ class WebGame:
         shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir(parents=True)
         try:
-            raw = self._github(f"tarball/{sha}", "application/vnd.github+json")
+            raw = self._download(sha)
             with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tar:
                 members = [m for m in tar.getmembers() if "/" in m.name]
                 for m in members:

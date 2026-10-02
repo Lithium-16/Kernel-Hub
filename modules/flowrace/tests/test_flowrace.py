@@ -290,3 +290,39 @@ def test_downloads_node_when_missing(tmp_path):
     assert g._tool("npm", "npm.cmd").endswith("node-v24.1.0-win-x64/npm.cmd".replace("/", __import__("os").sep))
     assert g._env()["PATH"].startswith(str(tmp_path / "node" / "node-v24.1.0-win-x64"))
     assert events == ["node.installed"]
+
+
+def test_falls_back_to_github_com_when_the_api_refuses(tmp_path):
+    import email.message
+    import urllib.error
+
+    def limited(url):
+        h = email.message.Message()
+        h["x-ratelimit-remaining"] = "0"
+        h["x-ratelimit-reset"] = "1790955600"
+        return urllib.error.HTTPError(url, 403, "rate limit exceeded", h, None)
+
+    asked = []
+    sha = "ab" * 20
+
+    def get(url, timeout=5, headers=None):
+        asked.append(url)
+        if "api.github.com" in url:
+            raise limited(url)
+        if url.endswith(".atom"):
+            return f"<feed><entry><id>tag:github.com,2008:Grit::Commit/{sha}</id></entry></feed>".encode()
+        return b"tarball"
+
+    g = FlowRace({"repo": "Lithium-16/FlowRace", "ref": "main"}, tmp_path, get=get)
+    assert g.latest_commit() == sha
+    assert asked[-1] == "https://github.com/Lithium-16/FlowRace/commits/main.atom"
+    assert g._download(sha) == b"tarball"
+    assert asked[-1] == f"https://codeload.github.com/Lithium-16/FlowRace/tar.gz/{sha}"
+
+    def nothing_works(url, timeout=5, headers=None):
+        raise limited(url) if "api." in url else urllib.error.URLError("blocked")
+
+    g = FlowRace({"repo": "Lithium-16/FlowRace"}, tmp_path, get=nothing_works)
+    with pytest.raises(ActionError) as e:
+        g.latest_commit()
+    assert "hourly limit" in e.value.message and "15:40 UTC" in e.value.message
