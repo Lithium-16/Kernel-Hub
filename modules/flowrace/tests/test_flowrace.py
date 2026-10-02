@@ -146,7 +146,14 @@ def fake_npm(cmd, cwd=None, timeout=0, env=None):
 async def test_installs_runs_restarts_and_updates(tmp_path, monkeypatch):
     gh = FakeGitHub()
     events = []
-    settings = {"repo": "Lithium-16/FlowRace", "ref": "main", "port": free_port(), "npm": "npm", "github_token": "t0k"}
+    settings = {
+        "repo": "Lithium-16/FlowRace",
+        "ref": "main",
+        "port": free_port(),
+        "npm": "npm",
+        "github_token": "t0k",
+        "auto_update": False,
+    }
     g = FlowRace(settings, tmp_path, emit=lambda k, m, **d: events.append(k), run=fake_npm, get=gh)
     monkeypatch.setattr(g, "check_node", lambda: "v22.18.0")
     monkeypatch.setenv("CRASH_FILE", str(tmp_path / "crash"))
@@ -154,7 +161,7 @@ async def test_installs_runs_restarts_and_updates(tmp_path, monkeypatch):
     out = await g.install()
     assert out == {"version": "aaaaaaa", "updated": True, "was": ""}
     assert g.snapshot()["state"] == "running" and g.mode == "standalone"
-    assert not g.snapshot()["saves_ratings"]
+    assert not g.snapshot()["saves_players"]
     assert gh.seen[0][1]["Authorization"] == "Bearer t0k"
     assert "game.fallback" in events
     assert urllib.request.urlopen(f"{g.local_url()}/health", timeout=2).read() == b"ok"
@@ -177,8 +184,34 @@ async def test_installs_runs_restarts_and_updates(tmp_path, monkeypatch):
     assert g.snapshot()["update_available"] and "game.update_available" in events
     out = await g.install()
     assert out["version"] == "bbbbbbb" and out["was"] == "aaaaaaa"
-    assert sorted(p.name for p in (tmp_path / "versions").iterdir()) == ["a" * 40, "b" * 40]
+    assert sorted(p.name for p in (tmp_path / "versions").iterdir() if not p.name.startswith(".")) == [
+        "a" * 40,
+        "b" * 40,
+    ]
     assert g.process_alive() and not g.snapshot()["update_available"]
+
+    # Auto-update on: a new commit installs by itself, but only once nobody is playing.
+    g.settings["auto_update"] = True
+    gh.sha = "c" * 40
+    await g.check_update()
+    g.game = {"online": 2}
+    await g.maybe_auto_update()
+    assert g.version() == "bbbbbbb"  # people are playing: waits
+    g.game = {"online": 0}
+    await g.maybe_auto_update()
+    assert g.version() == "ccccccc" and g.process_alive()
+
+    # A commit that fails to build isn't retried over and over.
+    gh.sha = "d" * 40
+    await g.check_update()
+    real_run = g.run
+    g.run = lambda cmd, **k: Ran(1, "npm ERR! boom") if "npm" in str(cmd[0]) else real_run(cmd, **k)
+    await g.maybe_auto_update()
+    assert "game.update_failed" in events and g.version() == "ccccccc"
+    tries = events.count("game.update_failed")
+    await g.maybe_auto_update()
+    assert events.count("game.update_failed") == tries
+    g.run = real_run
 
     # Stopped on purpose: stays stopped.
     await g.stop()

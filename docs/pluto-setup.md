@@ -129,14 +129,33 @@ What sharing does and doesn't open:
   [shared Pluto with](https://tailscale.com/kb/1084/sharing) need Tailscale installed).
 
 Players, ratings and the leaderboard are saved in `data\module-data\flowrace\save` and
-survive restarts. **Update game** pulls your latest commit from GitHub and restarts on it; it
-waits while people are playing unless you tick *force*. The page also says when a new commit
-is up (checked every 6 hours). If a future version of the game changes in a way Kernel's host
+survive restarts. New commits install by themselves when nobody's playing (see "Updates for
+both games" below); **Update game** does it right away, and waits while people are playing
+unless you tick *force*. If a future version of the game changes in a way Kernel's host
 doesn't understand, it falls back to the game's own server and the page says ratings won't be
 saved until that's fixed.
 
 Wins show up as events ("Pluto won a Flow Race"), so you can send them to Discord like any
 other event (`flowrace.match.*` in `[notify] include`).
+
+## OpenFork: the strategy game, same idea
+
+The **OpenFork** module does for [OpenFork](https://github.com/B0RE16/OpenFork) what Flow Race's
+does: downloads it, builds it, keeps it running, and shares it through Tailscale. Turn it on in
+**Settings > Node updates and modules**, then press **Share** on its page. Its link uses port
+8443 (`https://pluto.tailXXXX.ts.net:8443`), so both games can be shared at the same time.
+
+It follows the `claude/brave-goldberg-jcd77j` branch. Once that's merged, set `ref = "main"` in
+the module's settings (the gear on its page). Guest identities and match history are saved, so
+an update or restart doesn't forget who is who; games in progress do end when the server
+restarts.
+
+### Updates for both games
+
+Both check GitHub every 30 minutes (`update_check_h`). With `auto_update` on (the default) a new
+commit is downloaded, built and switched to by itself, but only when nobody is connected, so a
+game in progress is never cut off. **Update game** does it right away. If a commit fails to
+build, the old version keeps running and you get an event; it tries again on the next commit.
 
 ## Discord alerts
 

@@ -25,7 +25,7 @@ param(
   [string]$Root = (Join-Path $env:LOCALAPPDATA 'Kernel\node'),
   [int]$Port = 47800,
   # Modules to run. hello is only for tests.
-  [string[]]$Modules = @('minecraft', 'pc-monitor', 'roblox', 'comfyui', 'vram', 'laya', 'flowrace'),
+  [string[]]$Modules = @('minecraft', 'pc-monitor', 'roblox', 'comfyui', 'vram', 'laya', 'flowrace', 'openfork'),
   [switch]$NoFirewall
 )
 
@@ -172,8 +172,8 @@ Get-ChildItem (Join-Path $app 'modules') -Directory | Sort-Object Name | ForEach
 if ($LASTEXITCODE) { throw 'Installing the Python packages failed' }
 
 # ---------------------------------------------------------------- 4b. Node.js (Flow Race)
-if ($Modules -contains 'flowrace') {
-  Step 'Node.js for Flow Race'
+if ($Modules -contains 'flowrace' -or $Modules -contains 'openfork') {
+  Step 'Node.js for the game modules'
   $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
   if (-not $nodeExe -and (Test-Path "$env:ProgramFiles\nodejs\node.exe")) { $nodeExe = "$env:ProgramFiles\nodejs\node.exe" }
   $nodeOk = $false
