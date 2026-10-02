@@ -68,19 +68,69 @@ async fn get(url: &str) -> Result<Vec<u8>, String> {
         .await
         .map_err(|e| format!("couldn't reach GitHub ({e})"))?;
     if !resp.status().is_success() {
-        return Err(format!("GitHub answered {}", resp.status()));
+        let limited = resp
+            .headers()
+            .get("x-ratelimit-remaining")
+            .is_some_and(|v| v == "0");
+        return Err(if limited {
+            "GitHub's hourly limit for this network is used up".into()
+        } else {
+            format!("GitHub answered {}", resp.status())
+        });
     }
     Ok(resp.bytes().await.map_err(|e| e.to_string())?.to_vec())
 }
 
+/// The release a `releases/latest` redirect points at, with its files' download links.
+pub fn from_latest_location(location: &str) -> Option<Available> {
+    let tag = location.rsplit('/').next()?;
+    let build = tag.strip_prefix("node-build-")?.parse().ok()?;
+    let file = |name: String| format!("https://github.com/{REPO}/releases/download/{tag}/{name}");
+    Some(Available {
+        build,
+        installer: file(ASSET.to_string()),
+        sha256: file(format!("{ASSET}.sha256")),
+    })
+}
+
+/// github.com's own `releases/latest`, for when the API refuses (its hourly limit is shared
+/// by everything on the home network).
+async fn latest_from_web() -> Result<Option<Available>, String> {
+    let resp = reqwest::Client::builder()
+        .user_agent(concat!("kernel-desktop/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| e.to_string())?
+        .get(format!("https://github.com/{REPO}/releases/latest"))
+        .send()
+        .await
+        .map_err(|e| format!("couldn't reach github.com ({e})"))?;
+    let location = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| format!("github.com answered {}", resp.status()))?;
+    Ok(from_latest_location(location))
+}
+
 /// A newer build than this one, if there is one.
 pub async fn check() -> Result<Option<Available>, String> {
-    let body = get(&format!(
+    let latest = match get(&format!(
         "https://api.github.com/repos/{REPO}/releases?per_page=30"
     ))
-    .await?;
-    let releases: serde_json::Value = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
-    Ok(newest(&releases).filter(|a| a.build > build()))
+    .await
+    {
+        Ok(body) => {
+            let releases: serde_json::Value =
+                serde_json::from_slice(&body).map_err(|e| e.to_string())?;
+            newest(&releases)
+        }
+        Err(api) => latest_from_web()
+            .await
+            .map_err(|web| format!("{api}; asking github.com directly failed too: {web}"))?,
+    };
+    Ok(latest.filter(|a| a.build > build()))
 }
 
 /// The hex hash at the start of a `sha256sum` line.
@@ -160,6 +210,27 @@ mod tests {
         assert_eq!(a.build, 149);
         assert_eq!(a.installer, "https://x/node-build-149/exe");
         assert!(newest(&json!([release("node-build-123", false)])).is_none());
+    }
+
+    #[test]
+    fn reads_the_latest_redirect() {
+        let a = from_latest_location(
+            "https://github.com/B0RE16/laughing-waffle/releases/tag/node-build-164",
+        )
+        .unwrap();
+        assert_eq!(a.build, 164);
+        assert_eq!(
+            a.installer,
+            "https://github.com/B0RE16/laughing-waffle/releases/download/node-build-164/kernel-desktop-setup.exe"
+        );
+        assert!(
+            a.sha256
+                .ends_with("node-build-164/kernel-desktop-setup.exe.sha256")
+        );
+        assert_eq!(
+            from_latest_location("https://github.com/x/y/releases/tag/v1"),
+            None
+        );
     }
 
     #[test]

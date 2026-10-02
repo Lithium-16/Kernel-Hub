@@ -19,7 +19,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use kernel_protocol::now_ts;
-use reqwest::header::ACCEPT;
+use reqwest::header::{ACCEPT, ETAG, IF_NONE_MATCH, LOCATION};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -37,6 +37,12 @@ pub fn build() -> u64 {
     option_env!("KERNEL_BUILD")
         .and_then(|b| b.parse().ok())
         .unwrap_or(0)
+}
+
+/// `HH:MM` (UTC) of a Unix time, without a date library.
+fn chrono_like_utc(unix: i64) -> Option<String> {
+    let secs = unix.rem_euclid(86_400);
+    Some(format!("{:02}:{:02}", secs / 3600, (secs % 3600) / 60))
 }
 
 pub fn exe_name() -> String {
@@ -130,6 +136,11 @@ pub struct Updater {
     /// `<root>` when running as `<root>/app/kerneld[.exe]`; `None` for dev builds.
     root: Option<PathBuf>,
     http: reqwest::Client,
+    /// For github.com's `releases/latest`, which answers with a redirect to the newest tag.
+    no_redirect: reqwest::Client,
+    /// The API's last answer and its ETag: asking again with it costs nothing against the
+    /// hourly limit when nothing changed.
+    cached: Mutex<Option<(String, Option<Release>)>>,
     state: Mutex<State>,
     last_outcome: Option<Outcome>,
 }
@@ -147,7 +158,16 @@ impl Updater {
         let last_outcome = std::fs::read(cfg.data_dir.join(RESULT_FILE))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok());
+        let no_redirect = reqwest::Client::builder()
+            .user_agent(concat!("kerneld/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("HTTP client");
         Self {
+            no_redirect,
+            cached: Mutex::default(),
             cfg: cfg.update.clone(),
             config_path: cfg.path.clone(),
             data_dir: cfg.data_dir.clone(),
@@ -206,6 +226,48 @@ impl Updater {
         r
     }
 
+    /// Why GitHub said no, in words: its hourly limit, its own message, or a blocked network.
+    fn refusal(
+        &self,
+        status: reqwest::StatusCode,
+        headers: &reqwest::header::HeaderMap,
+        body: &[u8],
+    ) -> String {
+        let header = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+        };
+        if matches!(status.as_u16(), 403 | 429) && header("x-ratelimit-remaining") == "0" {
+            let reset = header("x-ratelimit-reset")
+                .parse::<i64>()
+                .ok()
+                .and_then(chrono_like_utc)
+                .map(|t| format!(" (it resets at {t} UTC)"))
+                .unwrap_or_default();
+            return format!(
+                "GitHub's hourly limit for requests from this network is used up{reset}"
+            );
+        }
+        let message = serde_json::from_slice::<Value>(body)
+            .ok()
+            .and_then(|v| v["message"].as_str().map(String::from));
+        let hint = match (status.as_u16(), self.cfg.token.is_empty()) {
+            (404, true) => " (if the repo is private, set [update] token in node.toml)",
+            (401 | 403 | 404, false) => " (check that [update] token can read the repo's contents)",
+            _ => "",
+        };
+        match message {
+            Some(m) => format!("GitHub answered {status}: {m}{hint}"),
+            None if body.starts_with(b"<") || body.is_empty() => format!(
+                "GitHub answered {status}{hint}; if that keeps happening, something on this \
+                 network may be blocking GitHub"
+            ),
+            None => format!("GitHub answered {status}{hint}"),
+        }
+    }
+
     async fn fetch(&self, url: &str, accept: &str) -> Res<Vec<u8>> {
         let resp = self
             .get(url, accept)
@@ -214,14 +276,9 @@ impl Updater {
             .map_err(|e| format!("can't reach GitHub: {e}"))?;
         let status = resp.status();
         if !status.is_success() {
-            let hint = if matches!(status.as_u16(), 401 | 403 | 404) && self.cfg.token.is_empty() {
-                " (the repo is private: set [update] token in node.toml)"
-            } else if matches!(status.as_u16(), 401 | 403 | 404) {
-                " (check that [update] token can read the repo's contents)"
-            } else {
-                ""
-            };
-            return Err(format!("GitHub answered {status}{hint}"));
+            let headers = resp.headers().clone();
+            let body = resp.bytes().await.unwrap_or_default();
+            return Err(self.refusal(status, &headers, &body));
         }
         let bytes = resp
             .bytes()
@@ -230,24 +287,101 @@ impl Updater {
         Ok(bytes.to_vec())
     }
 
+    /// The newest build from the API, reusing the last answer when GitHub says nothing changed.
+    async fn latest_from_api(&self) -> Res<Option<Release>> {
+        let url = format!(
+            "{}/repos/{}/releases?per_page=30",
+            self.cfg.api.trim_end_matches('/'),
+            self.cfg.repo
+        );
+        let cached = self.cached.lock().expect("cache").clone();
+        let mut req = self.get(&url, "application/vnd.github+json");
+        if let Some((etag, _)) = &cached {
+            req = req.header(IF_NONE_MATCH, etag);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("can't reach GitHub: {e}"))?;
+        let status = resp.status();
+        if status == reqwest::StatusCode::NOT_MODIFIED
+            && let Some((_, latest)) = cached
+        {
+            return Ok(latest);
+        }
+        let headers = resp.headers().clone();
+        let body = resp.bytes().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(self.refusal(status, &headers, &body));
+        }
+        let releases: Vec<GhRelease> = serde_json::from_slice(&body)
+            .map_err(|e| format!("unexpected reply from GitHub: {e}"))?;
+        let latest = pick_latest(releases);
+        if let Some(etag) = headers.get(ETAG).and_then(|v| v.to_str().ok()) {
+            *self.cached.lock().expect("cache") = Some((etag.to_string(), latest.clone()));
+        }
+        Ok(latest)
+    }
+
+    /// The newest build from github.com itself, for when the API refuses: `releases/latest`
+    /// redirects to the newest tag, and the files are at `releases/download/<tag>/`.
+    async fn latest_from_web(&self) -> Res<Option<Release>> {
+        let web = self.cfg.web.trim_end_matches('/');
+        let url = format!("{web}/{}/releases/latest", self.cfg.repo);
+        let resp = self
+            .no_redirect
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("can't reach github.com: {e}"))?;
+        if !resp.status().is_redirection() {
+            return Err(format!(
+                "github.com answered {} for the latest release",
+                resp.status()
+            ));
+        }
+        let location = resp
+            .headers()
+            .get(LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        let tag = location.rsplit('/').next().unwrap_or_default().to_string();
+        let Some(build) = tag
+            .strip_prefix(TAG_PREFIX)
+            .and_then(|n| n.parse::<u64>().ok())
+        else {
+            return Ok(None);
+        };
+        let file = |name: String| GhAsset {
+            url: format!("{web}/{}/releases/download/{tag}/{name}", self.cfg.repo),
+            name,
+        };
+        Ok(Some(Release {
+            build,
+            page: location.clone(),
+            published_at: None,
+            zip: file(ASSET.to_string()),
+            sha: file(format!("{ASSET}.sha256")),
+            tag,
+        }))
+    }
+
     /// Ask GitHub for the newest build. Returns it when it is newer than this one.
     pub async fn check(&self) -> Res<Option<Release>> {
         if !self.enabled() {
             return Err("updates are off: set [update] repo in node.toml".into());
         }
         self.begin(Phase::Checking)?;
-        let url = format!(
-            "{}/repos/{}/releases?per_page=30",
-            self.cfg.api.trim_end_matches('/'),
-            self.cfg.repo
-        );
-        let result: Res<Option<Release>> = async {
-            let body = self.fetch(&url, "application/vnd.github+json").await?;
-            let releases: Vec<GhRelease> = serde_json::from_slice(&body)
-                .map_err(|e| format!("unexpected reply from GitHub: {e}"))?;
-            Ok(pick_latest(releases))
-        }
-        .await;
+        let result = match self.latest_from_api().await {
+            Ok(latest) => Ok(latest),
+            Err(api) => {
+                tracing::info!(error = %api, "GitHub API refused; asking github.com");
+                self.latest_from_web()
+                    .await
+                    .map_err(|web| format!("{api}. Asking github.com directly failed too: {web}"))
+            }
+        };
         match result {
             Ok(latest) => {
                 let newer = latest.clone().filter(|r| r.build > build());
@@ -684,6 +818,142 @@ pub fn apply(args: &ApplyArgs) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    fn updater_for(base: &str) -> Updater {
+        let mut cfg: Config = toml::from_str(&format!(
+            r#"
+            node_id = "pluto"
+            node_name = "Pluto"
+            listen = "127.0.0.1:0"
+            token = "t"
+            modules_dir = "m"
+            data_dir = "d"
+            [update]
+            repo = "o/r"
+            api = "{base}/api"
+            web = "{base}"
+            "#
+        ))
+        .unwrap();
+        cfg.data_dir = std::env::temp_dir();
+        Updater::new(&cfg)
+    }
+
+    async fn serve(app: axum::Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        base
+    }
+
+    #[tokio::test]
+    async fn falls_back_to_github_com_when_the_api_limit_is_used_up() {
+        use axum::http::StatusCode;
+        use axum::response::IntoResponse;
+        let app = axum::Router::new()
+            .route(
+                "/api/repos/o/r/releases",
+                axum::routing::get(|| async {
+                    (
+                        StatusCode::FORBIDDEN,
+                        [
+                            ("x-ratelimit-remaining", "0"),
+                            ("x-ratelimit-reset", "1790955600"),
+                        ],
+                        r#"{"message":"API rate limit exceeded for 1.2.3.4."}"#,
+                    )
+                        .into_response()
+                }),
+            )
+            .route(
+                "/o/r/releases/latest",
+                axum::routing::get(|| async {
+                    (
+                        StatusCode::FOUND,
+                        [(
+                            "location",
+                            "https://github.com/o/r/releases/tag/node-build-164",
+                        )],
+                    )
+                        .into_response()
+                }),
+            );
+        let u = updater_for(&serve(app).await);
+        let r = u.check().await.unwrap().expect("a newer build");
+        assert_eq!((r.build, r.tag.as_str()), (164, "node-build-164"));
+        assert!(
+            r.zip
+                .url
+                .ends_with("/o/r/releases/download/node-build-164/kernel-node-windows-x64.zip")
+        );
+        assert!(r.sha.url.ends_with("kernel-node-windows-x64.zip.sha256"));
+        assert_eq!(u.status()["update"], "available");
+    }
+
+    #[tokio::test]
+    async fn says_why_github_refused() {
+        use axum::http::StatusCode;
+        use axum::response::IntoResponse;
+        let app = axum::Router::new()
+            .route(
+                "/api/repos/o/r/releases",
+                axum::routing::get(|| async {
+                    (
+                        StatusCode::FORBIDDEN,
+                        [
+                            ("x-ratelimit-remaining", "0"),
+                            ("x-ratelimit-reset", "1790955600"),
+                        ],
+                        "{}",
+                    )
+                        .into_response()
+                }),
+            )
+            .route(
+                "/o/r/releases/latest",
+                axum::routing::get(|| async {
+                    (StatusCode::FORBIDDEN, "<html>blocked</html>").into_response()
+                }),
+            );
+        let err = updater_for(&serve(app).await).check().await.unwrap_err();
+        assert!(
+            err.contains("hourly limit") && err.contains("resets at 15:40 UTC"),
+            "{err}"
+        );
+        assert!(err.contains("github.com directly failed too"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn asks_again_with_the_etag() {
+        use axum::http::{HeaderMap, StatusCode};
+        use axum::response::IntoResponse;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static FULL: AtomicUsize = AtomicUsize::new(0);
+        let app = axum::Router::new().route(
+            "/api/repos/o/r/releases",
+            axum::routing::get(|headers: HeaderMap| async move {
+                if headers.get("if-none-match").is_some_and(|v| v == "\"v1\"") {
+                    return StatusCode::NOT_MODIFIED.into_response();
+                }
+                FULL.fetch_add(1, Ordering::SeqCst);
+                (
+                    [("etag", "\"v1\"")],
+                    r#"[{"tag_name":"node-build-7","assets":[
+                        {"name":"kernel-node-windows-x64.zip","url":"u1"},
+                        {"name":"kernel-node-windows-x64.zip.sha256","url":"u2"}]}]"#,
+                )
+                    .into_response()
+            }),
+        );
+        let u = updater_for(&serve(app).await);
+        assert_eq!(u.check().await.unwrap().unwrap().build, 7);
+        assert_eq!(u.check().await.unwrap().unwrap().build, 7);
+        assert_eq!(
+            FULL.load(Ordering::SeqCst),
+            1,
+            "the second check was a free 304"
+        );
+    }
 
     fn rel(tag: &str, assets: &[&str]) -> GhRelease {
         GhRelease {

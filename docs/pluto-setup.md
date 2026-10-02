@@ -375,6 +375,13 @@ backup anyway.
 
 ## Troubleshooting
 
+- **"GitHub's hourly limit for this network is used up"** (older builds said just
+  "GitHub answered 403"): GitHub's API allows 60 anonymous requests an hour per home IP,
+  shared by every PC and app on the network. Kernel then reads the newest release straight
+  from github.com instead, which has no such limit, so updates keep working. Older builds
+  don't: wait for the time it gives (at most an hour), or rerun `install-node.ps1` once. A
+  read-only token in `[update] token` raises the limit to 5000 an hour.
+
 - **App says "Can't reach the node":** is the task running (`Get-ScheduledTask 'Kernel node'`)?
   Is the firewall rule there? Are both PCs signed in to Tailscale? Use Pluto's Tailscale address
   (`100.x.x.x`): the node refuses home-network connections unless `allow_lan = true`.
