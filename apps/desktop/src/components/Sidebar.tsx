@@ -36,6 +36,15 @@ export function Sidebar({ snapshot, view, onView, onPalette, updateBuild }: Prop
   const on = (v: View) =>
     v.kind === view.kind && (v.kind !== 'module' || (view.kind === 'module' && view.id === v.id));
   const nodeTone = stateTone(snapshot.conn);
+  // The node has a newer build waiting (and won't install it by itself).
+  const nodeStatus = (snapshot.modules.find((m) => m.id === 'node')?.status ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const nodeUpdate =
+    nodeStatus.update === 'available' && nodeStatus.auto_install !== true
+      ? (nodeStatus.latest_build as number)
+      : null;
   return (
     <aside className="sidebar">
       <div className="brand" data-tauri-drag-region>
@@ -104,6 +113,18 @@ export function Sidebar({ snapshot, view, onView, onPalette, updateBuild }: Prop
       </button>
 
       <span style={{ flex: 1 }} />
+      {nodeUpdate ? (
+        <button
+          type="button"
+          className="row"
+          title="Update it from Settings"
+          onClick={() => onView({ kind: 'settings' })}
+        >
+          <Icon name="server" className="i accent" />
+          <span className="grow">Update {snapshot.node?.name ?? 'node'}</span>
+          <span className="r">build {nodeUpdate}</span>
+        </button>
+      ) : null}
       {updateBuild ? (
         <button
           type="button"

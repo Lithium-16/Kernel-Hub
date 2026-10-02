@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { AppUpdates } from '../components/AppUpdates.tsx';
 import { Icon } from '../components/Icon.tsx';
+import { NodeControls } from '../components/NodeControls.tsx';
 import { TitleBar } from '../components/TitleBar.tsx';
 import { stateTone } from '../lib/format.ts';
 import { ACCENTS, type Look, loadLook, saveLook, TEXT_SIZES, THEMES } from '../lib/look.ts';
-import type { Snapshot } from '../lib/node.ts';
+import type { NodeClient, Snapshot } from '../lib/node.ts';
 import {
   loadNotifyLevel,
   type NotifyLevel,
@@ -22,12 +23,13 @@ const CONN_TEXT = {
 } as const;
 
 interface Props {
+  client: NodeClient;
   settings: NodeSettings;
   snapshot: Snapshot;
   onSave: (s: NodeSettings) => void;
 }
 
-export function SettingsView({ settings, snapshot, onSave }: Props) {
+export function SettingsView({ client, settings, snapshot, onSave }: Props) {
   const [url, setUrl] = useState(settings.url);
   const [token, setToken] = useState(settings.token);
   const [show, setShow] = useState(false);
@@ -108,6 +110,12 @@ export function SettingsView({ settings, snapshot, onSave }: Props) {
             </button>
           </div>
         </form>
+        <NodeControls
+          client={client}
+          node={snapshot.modules.find((m) => m.id === 'node')}
+          nodeName={snapshot.node?.name ?? 'the node'}
+          online={snapshot.conn === 'online'}
+        />
         <div className="form" style={{ marginTop: 24 }}>
           <div style={{ fontWeight: 600, fontSize: 14 }}>Appearance</div>
           <div className="field">

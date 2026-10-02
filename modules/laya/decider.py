@@ -128,8 +128,17 @@ class Decider:
     # -- the model ------------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Background task: load the model at start, if asked to and it's installed."""
-        if self.settings.get("preload", True) and self.is_installed():
+        """Background task: install the package if it's missing (auto_install), then load the
+        model if asked to."""
+        if not self.is_installed():
+            if not self.settings.get("auto_install", True):
+                return
+            try:
+                await self.install()  # loads the model afterwards when preload is on
+            except ActionError as e:
+                self.state, self.error = "failed", e.message
+            return
+        if self.settings.get("preload", True):
             await self.load()
 
     def _load_blocking(self) -> None:

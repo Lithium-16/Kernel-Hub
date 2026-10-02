@@ -12,6 +12,7 @@ pub mod mcp;
 pub mod netfilter;
 pub mod node;
 pub mod notify;
+pub mod prefs;
 pub mod schedule;
 pub mod server;
 pub mod settings;
@@ -65,7 +66,7 @@ async fn check_for_updates(node: Arc<Node>, every: Duration, mut stop: watch::Re
         }
         wait = every;
         match node.updater.check().await {
-            Ok(Some(r)) if node.cfg.update.auto_install => {
+            Ok(Some(r)) if node.auto_install_on() => {
                 tracing::info!(build = r.build, "new build found; installing");
                 node.auto_install().await;
             }
@@ -113,15 +114,14 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
     let events =
         Arc::new(EventHub::open(&cfg.db_path(), &cfg.node_id).context("opening event log")?);
 
+    let prefs = prefs::Prefs::load(&prefs::Prefs::path(&cfg));
     let mut manifests = Vec::new();
     for found in manifest::discover(&cfg.modules_dir) {
         match found {
             Ok(m) if m.id == builtin::ID => {
                 tracing::error!(dir = %m.dir.display(), "module id 'node' is reserved for the node itself")
             }
-            Ok(m) if cfg.enabled_modules.is_empty() || cfg.enabled_modules.contains(&m.id) => {
-                manifests.push(m)
-            }
+            Ok(m) if prefs.module_enabled(&cfg, &m.id) => manifests.push(m),
             Ok(m) => tracing::debug!(module = %m.id, "module not enabled"),
             Err(e) => tracing::error!(error = %e, "invalid module manifest"),
         }
@@ -151,6 +151,7 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
         automations,
         assistant: assistant::Assistant::new(cfg_assistant),
         updater,
+        prefs: std::sync::Mutex::new(prefs),
         exit,
         started: Instant::now(),
     });

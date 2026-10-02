@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import io
 import json
 import logging
@@ -29,6 +30,7 @@ import tarfile
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -123,6 +125,7 @@ class FlowRace:
         self.state = "stopped"
         self.busy = ""  # what an action is doing right now
         self.error = ""
+        self.windows = sys.platform == "win32"
         self.restarts: list[float] = []
         self.retry_at = 0.0
         self.game: dict[str, Any] = {}
@@ -165,17 +168,33 @@ class FlowRace:
             raise ActionError("offline", f"couldn't reach GitHub ({e}); downloads need a network where github.com works") from None
         return sha.decode().strip()
 
+    def _portable_node(self) -> Path | None:
+        """The Node.js this module downloaded itself, if any (newest first)."""
+        found = sorted((self.data / "node").glob("node-v*-win-x64"), key=lambda p: node_version(p.name[5:]) or (0, 0))
+        return found[-1] if found and (found[-1] / "node.exe").is_file() else None
+
     def _tool(self, key: str, windows_exe: str) -> str:
-        """A configured program, found on PATH or in Node's default install folder.
+        """A program: the module's own Node.js if it has one, else PATH, else Node's install folder.
 
         kerneld may have started before Node was installed, so its PATH may not have it yet.
         """
+        portable = self._portable_node()
+        if portable is not None and key in ("node", "npm"):
+            return str(portable / windows_exe)
         configured = str(self.settings.get(key, key))
         found = shutil.which(configured)
         if found:
             return found
         default = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "nodejs" / windows_exe
-        return str(default) if sys.platform == "win32" and default.is_file() else configured
+        return str(default) if self.windows and default.is_file() else configured
+
+    def _env(self) -> dict[str, str]:
+        """This environment, with the Node.js in use first on PATH (npm scripts call `node`)."""
+        node_dir = str(Path(self._tool("node", "node.exe")).parent)
+        env = dict(os.environ)
+        if node_dir not in ("", "."):
+            env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
+        return env
 
     def check_node(self) -> str:
         node = self._tool("node", "node.exe")
@@ -189,8 +208,49 @@ class FlowRace:
             raise ActionError("disabled", f"Flow Race needs Node 22.18 or newer; this PC has {r.out.strip()}")
         return r.out.strip()
 
+    def _download_node(self) -> Path:
+        """Fetches the current Node.js LTS (the zip, no installer and no admin prompt) into the
+        module's data folder, checked against nodejs.org's published SHA-256."""
+        base = "https://nodejs.org/dist"
+        try:
+            releases = json.loads(self.get(f"{base}/index.json", timeout=60))
+            release = next(
+                r for r in releases if r.get("lts") and (node_version(r["version"]) or (0, 0)) >= MIN_NODE
+            )
+            version = release["version"]
+            name = f"node-{version}-win-x64"
+            sums = self.get(f"{base}/{version}/SHASUMS256.txt", timeout=60).decode()
+            raw = self.get(f"{base}/{version}/{name}.zip", timeout=900)
+        except (urllib.error.URLError, OSError, ValueError, StopIteration, KeyError) as e:
+            raise ActionError("offline", f"couldn't download Node.js from nodejs.org ({e})") from None
+        want = next((line.split()[0] for line in sums.splitlines() if line.endswith(f" {name}.zip")), "")
+        if hashlib.sha256(raw).hexdigest() != want:
+            raise ActionError("module_failed", "the Node.js download didn't match its published checksum")
+        target = self.data / "node"
+        target.mkdir(parents=True, exist_ok=True)
+        staging = target / f".{name}.partial"
+        shutil.rmtree(staging, ignore_errors=True)
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            z.extractall(staging)
+        shutil.rmtree(target / name, ignore_errors=True)
+        (staging / name).rename(target / name)
+        shutil.rmtree(staging, ignore_errors=True)
+        self.log.info("downloaded Node.js %s", version)
+        self.emit("node.installed", f"Flow Race downloaded Node.js {version} for itself", version=version)
+        return target / name
+
+    def ensure_node(self) -> str:
+        """A usable Node.js, downloading one on Windows when there isn't (auto_install_node)."""
+        try:
+            return self.check_node()
+        except ActionError:
+            if not (self.windows and self.settings.get("auto_install_node", True)):
+                raise
+        self._download_node()
+        return self.check_node()
+
     def _install_blocking(self, sha: str) -> Path:
-        self.check_node()
+        self.ensure_node()
         npm = self._tool("npm", "npm.cmd")
         target = self.versions / sha
         if (target / "public" / "app.js").is_file():
@@ -207,7 +267,7 @@ class FlowRace:
                 extract = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
                 tar.extractall(staging, members=members, **extract)
             for cmd in ([npm, "ci", "--no-audit", "--no-fund"], [npm, "run", "build"]):
-                r = self.run(cmd, cwd=staging, timeout=900)
+                r = self.run(cmd, cwd=staging, timeout=900, env=self._env())
                 if r.code != 0:
                     raise ActionError("module_failed", f"`{' '.join(cmd[1:])}` failed:\n{tail(r.out)}")
             shutil.rmtree(target, ignore_errors=True)
@@ -294,7 +354,7 @@ class FlowRace:
         else:
             entry = "server/main.ts"
         env = {
-            **os.environ,
+            **self._env(),
             "PORT": str(self.port),
             "HOST": "127.0.0.1",
             "DATA_DIR": str(self.data / "save"),

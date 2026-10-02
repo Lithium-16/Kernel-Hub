@@ -559,3 +559,123 @@ async fn node_runs_hello_module_end_to_end() {
     running.shutdown().await;
     assert_eq!(node.supervisor.catalog()[0].state, ModuleState::Stopped);
 }
+
+fn plain_config(python: &std::ffi::OsStr, data: &std::path::Path) -> Config {
+    Config {
+        node_id: "test-node".into(),
+        node_name: "Test node".into(),
+        listen: "127.0.0.1:0".parse().unwrap(),
+        token: TOKEN.into(),
+        modules_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../modules"),
+        data_dir: data.to_path_buf(),
+        python: PathBuf::from(python).to_string_lossy().into_owned(),
+        node: "node".into(),
+        enabled_modules: vec!["hello".into()],
+        supervisor: SupervisorConfig {
+            status_interval_ms: 200,
+            ..SupervisorConfig::default()
+        },
+        allow_lan: false,
+        update: Default::default(),
+        notify: Default::default(),
+        schedule: vec![],
+        on_event: vec![],
+        when: vec![],
+        assistant: Default::default(),
+        path: None,
+    }
+}
+
+/// The app's switches: modules on or off, and auto-update, kept across restarts.
+#[tokio::test(flavor = "multi_thread")]
+async fn switches_from_the_app_stick() {
+    let Some(python) = std::env::var_os("KERNEL_TEST_PYTHON") else {
+        eprintln!("skipping: set KERNEL_TEST_PYTHON to a Python with kernel_sdk installed");
+        return;
+    };
+    let data = tempfile::tempdir().unwrap();
+    let running = kernel_node::start(plain_config(&python, data.path()))
+        .await
+        .expect("node starts");
+    let mut c = Client::connect(running.addr).await;
+    assert!(matches!(c.hello(TOKEN).await, Payload::Welcome(_)));
+    c.wait_for_state(ModuleState::Running).await;
+
+    let list = c
+        .invoke_on("node", ActorKind::User, "modules.list", json!({}))
+        .await;
+    let modules = list.result.unwrap()["modules"].as_array().unwrap().clone();
+    let find = |id: &str| modules.iter().find(|m| m["id"] == id).cloned();
+    assert_eq!(find("hello").unwrap()["enabled"], true);
+    assert_eq!(find("hello").unwrap()["state"], "running");
+    assert_eq!(find("flowrace").unwrap()["enabled"], false);
+    assert!(find("node").is_none());
+
+    // Button-only: the assistant can't flip them.
+    let denied = c
+        .invoke_on(
+            "node",
+            ActorKind::Assistant,
+            "modules.enable",
+            json!({"module": "flowrace"}),
+        )
+        .await;
+    assert_eq!(error_code(&denied), Some(ErrorCode::NotPermitted));
+
+    let auto = c
+        .invoke_on(
+            "node",
+            ActorKind::User,
+            "update.auto",
+            json!({"enabled": true}),
+        )
+        .await;
+    assert!(auto.ok, "{auto:?}");
+    let node = c
+        .catalog()
+        .await
+        .into_iter()
+        .find(|m| m.id == "node")
+        .unwrap();
+    assert_eq!(node.status.unwrap()["auto_install"], true);
+
+    let off = c
+        .invoke_on(
+            "node",
+            ActorKind::User,
+            "modules.enable",
+            json!({"module": "hello", "enabled": false}),
+        )
+        .await;
+    // No config file in tests, so it can't restart itself; it says so.
+    assert!(
+        off.ok
+            && off.result.as_ref().unwrap()["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("saved"),
+        "{off:?}"
+    );
+    let bad = c
+        .invoke_on(
+            "node",
+            ActorKind::User,
+            "modules.enable",
+            json!({"module": "nope"}),
+        )
+        .await;
+    assert_eq!(error_code(&bad), Some(ErrorCode::InvalidParams));
+    running.shutdown().await;
+
+    // Started again: hello stays off although node.toml lists it, and auto-update stays on.
+    let running = kernel_node::start(plain_config(&python, data.path()))
+        .await
+        .expect("node starts again");
+    let mut c = Client::connect(running.addr).await;
+    assert!(matches!(c.hello(TOKEN).await, Payload::Welcome(_)));
+    let catalog = c.catalog().await;
+    assert!(catalog.iter().all(|m| m.id != "hello"), "{catalog:?}");
+    let node = catalog.into_iter().find(|m| m.id == "node").unwrap();
+    assert_eq!(node.status.unwrap()["auto_install"], true);
+    running.shutdown().await;
+}

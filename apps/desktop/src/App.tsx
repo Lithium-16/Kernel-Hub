@@ -92,7 +92,7 @@ export function App() {
   const nodeName = snap.node?.name ?? 'the home node';
   let main: React.ReactNode;
   if (view.kind === 'settings') {
-    main = <SettingsView settings={settings} snapshot={snap} onSave={save} />;
+    main = <SettingsView client={client} settings={settings} snapshot={snap} onSave={save} />;
   } else if (view.kind === 'assistant') {
     main = <AssistantView client={client} modules={snap.modules} online={snap.conn === 'online'} />;
   } else if (view.kind === 'activity') {

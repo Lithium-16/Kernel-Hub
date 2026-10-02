@@ -76,10 +76,11 @@ ask before the chat model. When it's sure you're asking how a module is doing, t
 straight away, so the reply takes one model round instead of two. It never presses buttons
 (it's sometimes confidently wrong about those). Replies it helped show "LAYA: …" under them.
 
-1. Add `"laya"` to `enabled_modules` in node.toml and restart kerneld (new installs have it).
-2. On the **LAYA** page, press **Install LAYA**: it installs the laya package and PyTorch
-   (a few hundred MB, from PyPI). Then **Load model**: the first load downloads ~1.7 GB from
-   Hugging Face. Both need a network where PyPI and huggingface.co work.
+1. Turn **LAYA** on in **Settings > Node updates and modules**.
+2. It installs the laya package and PyTorch by itself (a few hundred MB, from PyPI), then loads
+   the model, which downloads ~1.7 GB from Hugging Face the first time. The **Install LAYA** and
+   **Load model** buttons do the same by hand. Both need a network where PyPI and
+   huggingface.co work.
 3. It runs on the CPU by default (~2 GB of RAM). Be honest with yourself about the trade: on a
    CPU it adds roughly 1-3 s to *every* message and saves a model round only on status
    questions. With `device = "cuda"` in `data\settings\laya.toml` it takes tens of
@@ -106,12 +107,12 @@ The **Flow Race** module keeps [Flow Race](https://github.com/Lithium-16/FlowRac
 Pluto all the time and gives you a link to send friends. They open it in a browser and play;
 they don't install anything.
 
-1. **Node.js 22.18+** is needed (the installer gets it with winget; or
-   `winget install OpenJS.NodeJS.LTS`). Restart Kernel after installing it by hand.
-2. Add `"flowrace"` to `enabled_modules` in node.toml (new installs have it) and restart kerneld.
-   On first start it downloads the game from GitHub, runs `npm ci` and builds it (a minute or
-   two, on a network where github.com and npm work), then starts the server. It restarts it if
-   it crashes, and after reboots.
+1. **Node.js 22.18+** is needed. Without it, the module downloads the current LTS for itself
+   (a zip from nodejs.org, checksum checked, kept in its data folder; no admin prompt).
+2. Turn **Flow Race** on in **Settings > Node updates and modules**. On first start it
+   downloads the game from GitHub, runs `npm ci` and builds it (a minute or two, on a network
+   where github.com and npm work), then starts the server. It restarts it if it crashes, and
+   after reboots.
 3. On the **Flow Race** page, press **Share** → *anyone with the link*. The first time,
    Tailscale shows a link to switch Funnel on for your tailnet: open it, allow it, press
    **Share** again. The page then shows the link, like `https://pluto.tailXXXX.ts.net`. Send
@@ -302,10 +303,21 @@ It only watches the client and relaunches it: it never sends input to the game.
 
 ## Updates
 
-**Node > Check for updates**, then **Install update**. The node downloads the new build, verifies
-it, restarts on it in a few seconds, and puts the old version back if the new one fails to install.
-It also checks on its own every 6 hours (`check_interval_h`). Set `auto_install = true` in
-`node.toml` to install without the button.
+Everything is in the app under **Settings > Node updates and modules**; you don't need to be at
+Pluto:
+
+- **Update now** installs the newest build. The node downloads it, verifies it, restarts on it
+  in a few seconds, and puts the old version back if the new one fails to install. The sidebar
+  says **Update Pluto** when a build is waiting.
+- **Install updates automatically**: Pluto checks GitHub every 6 hours (`check_interval_h`) and
+  installs new builds by itself. Same as `auto_install = true` in node.toml; the switch wins.
+- **Modules**: a switch for every module in the build. New modules arrive switched off; turn
+  one on and Kernel restarts with it (a few seconds). Each one sets itself up the first time:
+  Flow Race downloads the game and, if needed, its own Node.js; LAYA installs its package.
+  The switches win over `enabled_modules` in node.toml. They're kept in
+  `data\node-prefs.json`, which you can delete to go back to node.toml.
+
+These switches are buttons only: the assistant can't flip them.
 
 The WSL keepalive drops for those few seconds while the node restarts. WSL waits a little
 before shutting down, so it rides through, but keep the **WSL keepalive** scheduled task as a
