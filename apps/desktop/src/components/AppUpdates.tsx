@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react';
-import { appBuild, checkForUpdate, installUpdate } from '../lib/app-update.ts';
+import {
+  appBuild,
+  checkForUpdate,
+  installUpdate,
+  loadAutoUpdate,
+  saveAutoUpdate,
+} from '../lib/app-update.ts';
 import { Icon } from './Icon.tsx';
 
 type State =
@@ -14,6 +20,7 @@ type State =
 export function AppUpdates() {
   const [build, setBuild] = useState<number | null>(null);
   const [state, setState] = useState<State>({ kind: 'idle' });
+  const [auto, setAuto] = useState(loadAutoUpdate);
 
   useEffect(() => {
     void appBuild().then(setBuild, () => setBuild(null));
@@ -85,8 +92,22 @@ export function AppUpdates() {
         {text ? (
           <span className={`hint ${state.kind === 'error' ? 'c-bad' : ''}`}>{text}</span>
         ) : null}
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <input
+            type="checkbox"
+            checked={auto}
+            onChange={(e) => {
+              setAuto(e.target.checked);
+              saveAutoUpdate(e.target.checked);
+            }}
+            style={{ width: 16, height: 16 }}
+          />
+          <span>Install app updates automatically</span>
+        </label>
         <span className="hint">
-          Comes from the same GitHub releases as the node's updates, checked with SHA-256.
+          Comes from the same GitHub releases as the node's updates, checked with SHA-256. With
+          automatic updates on, the app installs a new build when it finds one (at start and every
+          six hours) and reopens by itself.
         </span>
       </div>
     </div>

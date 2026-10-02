@@ -601,6 +601,19 @@ async fn switches_from_the_app_stick() {
     assert!(matches!(c.hello(TOKEN).await, Payload::Welcome(_)));
     c.wait_for_state(ModuleState::Running).await;
 
+    // The web page for updating from a browser is served next to /ws.
+    let page = reqwest::get(format!("http://{}/", running.addr))
+        .await
+        .unwrap();
+    assert!(page.status().is_success());
+    assert!(
+        page.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .contains("frame-ancestors 'none'")
+    );
+    assert!(page.text().await.unwrap().contains("Update everything"));
+
     let list = c
         .invoke_on("node", ActorKind::User, "modules.list", json!({}))
         .await;

@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kernel</title>
+<style>
+  :root {
+    --bg: #141417; --panel: #1c1c21; --line: #2c2c33; --text: #d9d9de; --muted: #8b8b95;
+    --accent: #8b5cf6; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f4f4f6; --panel: #fff; --line: #e2e2e8; --text: #222228; --muted: #6b6b75; color-scheme: light; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  header { display: flex; align-items: center; gap: 10px; margin: 8px 0 16px; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  .dot { width: 9px; height: 9px; display: inline-block; background: var(--muted); }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+  section { background: var(--panel); border: 1px solid var(--line); padding: 14px 16px; margin-bottom: 14px; }
+  h2 { font-size: 14px; margin: 0 0 10px; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .grow { flex: 1; min-width: 140px; }
+  .muted { color: var(--muted); }
+  .hl { color: var(--accent); font-weight: 600; }
+  button, .btn { font: inherit; background: transparent; color: var(--text); border: 1px solid var(--line); padding: 5px 10px; cursor: pointer; text-decoration: none; display: inline-block; }
+  button:hover, .btn:hover { border-color: var(--muted); }
+  button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  input[type=password], input[type=text] { font: inherit; background: var(--bg); color: var(--text); border: 1px solid var(--line); padding: 6px 8px; width: 100%; }
+  label.toggle { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  #log { font: 12px/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; max-height: 160px; overflow: auto; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span id="conn" class="dot"></span>
+    <h1 id="title">Kernel</h1>
+    <button id="all" class="primary" disabled>Update everything</button>
+  </header>
+
+  <section id="login" hidden>
+    <h2>Sign in</h2>
+    <p class="muted">The token from <code>node.toml</code> on this PC. It stays in this browser.</p>
+    <form id="loginform" style="display:flex; gap:8px">
+      <input id="token" type="password" autocomplete="off" placeholder="token">
+      <button class="primary">Connect</button>
+    </form>
+  </section>
+
+  <div id="app" hidden>
+    <section>
+      <h2>Kernel on <span id="nodename">this PC</span></h2>
+      <div class="row">
+        <span class="grow" id="nodever"></span>
+        <button data-node="update.check">Check now</button>
+        <button data-node="update.install" id="nodeinstall" class="primary">Update now</button>
+      </div>
+      <div class="row">
+        <label class="toggle grow"><input type="checkbox" id="auto"> Install Kernel updates automatically</label>
+      </div>
+    </section>
+
+    <section>
+      <h2>Desktop app</h2>
+      <div class="row">
+        <span class="grow muted">The app checks for its own updates when it starts; turn on
+          <i>Install app updates automatically</i> in its Settings. Or get the newest installer:</span>
+        <a class="btn" id="desktop" href="#">Download installer</a>
+      </div>
+    </section>
+
+    <section>
+      <h2>Games</h2>
+      <div id="games"><div class="muted">No game modules running.</div></div>
+    </section>
+
+    <section>
+      <h2>Modules</h2>
+      <div id="modules" class="muted">Loading…</div>
+      <p class="muted" style="margin:8px 0 0">Switching one on or off restarts Kernel (a few seconds).
+        Modules update with Kernel; games also update from their own GitHub repos.</p>
+    </section>
+
+    <section>
+      <h2>Log</h2>
+      <div id="log" class="muted"></div>
+    </section>
+  </div>
+</main>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const KEY = "kernel.web.token";
+let ws = null, token = "", pending = new Map(), catalog = [], listed = null, busy = false;
+
+const store = {
+  get() { try { return localStorage.getItem(KEY) || ""; } catch { return ""; } },
+  set(v) { try { localStorage.setItem(KEY, v); } catch {} },
+};
+// Plain http isn't a secure context, so no crypto.randomUUID.
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+
+function log(text) {
+  const line = `${new Date().toLocaleTimeString()}  ${text}\n`;
+  $("log").textContent = (line + $("log").textContent).slice(0, 6000);
+}
+
+function setConn(kind) {
+  $("conn").className = "dot " + ({ online: "ok", connecting: "warn", offline: "bad" }[kind] || "");
+}
+
+function send(type, body, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return reject(new Error("not connected"));
+    const id = newId();
+    const t = setTimeout(() => { pending.delete(id); reject(new Error("no answer")); }, timeoutMs);
+    pending.set(id, (env) => { clearTimeout(t); resolve(env); });
+    ws.send(JSON.stringify({ v: 1, id, ts: new Date().toISOString(), type, body }));
+  });
+}
+
+async function invoke(module, action, params = {}, timeoutMs = 120000) {
+  const env = await send("action.invoke", { module, action, params, actor: { kind: "user", ref: "web" } }, timeoutMs);
+  if (env.type === "error") throw new Error(env.body.message);
+  const r = env.body;
+  if (!r.ok) throw new Error(r.error ? r.error.message : "failed");
+  return r.result;
+}
+
+function connect() {
+  token = store.get();
+  if (!token) { $("login").hidden = false; $("app").hidden = true; return; }
+  setConn("connecting");
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+  ws.onopen = async () => {
+    try {
+      const env = await send("hello", { client: { name: "kernel-web", version: "1" }, token });
+      if (env.type !== "welcome") throw new Error(env.body.message || "refused");
+      setConn("online");
+      $("login").hidden = true; $("app").hidden = false;
+      $("title").textContent = `Kernel · ${env.body.node.name}`;
+      $("nodename").textContent = env.body.node.name;
+      await refresh(true);
+    } catch (e) {
+      log(`sign-in failed: ${e.message}`);
+      store.set(""); $("login").hidden = false; $("app").hidden = true;
+      ws.close();
+    }
+  };
+  ws.onmessage = (m) => {
+    const env = JSON.parse(m.data);
+    const done = env.re && pending.get(env.re);
+    if (done) { pending.delete(env.re); done(env); }
+  };
+  ws.onclose = () => {
+    setConn("offline");
+    for (const done of pending.values()) done({ type: "error", body: { message: "disconnected" } });
+    pending.clear();
+    if (store.get()) setTimeout(connect, 3000); // Kernel restarting after an update: come back
+  };
+}
+
+async function refresh(withModules = false) {
+  const env = await send("catalog.get", {});
+  if (env.type !== "catalog") return;
+  catalog = env.body.modules;
+  if (withModules || listed === null) {
+    try { listed = (await invoke("node", "modules.list")).modules; } catch { listed = []; }
+  }
+  render();
+}
+
+const node = () => catalog.find((m) => m.id === "node");
+const has = (m, action) => !!m && m.actions.some((a) => a.id === action);
+const games = () => catalog.filter((m) => has(m, "game.update"));
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "onclick") e.onclick = v; else if (k in e && k !== "style") e[k] = v; else e.setAttribute(k, v);
+  }
+  for (const k of kids) e.append(k);
+  return e;
+}
+
+async function run(label, fn) {
+  if (busy) return;
+  busy = true; render();
+  log(`${label}…`);
+  try {
+    const r = await fn();
+    log(`${label}: ${r && r.message ? r.message : "done"}`);
+  } catch (e) {
+    log(`${label}: ${e.message}`);
+  } finally {
+    busy = false;
+    refresh(true).catch(() => {});
+  }
+}
+
+function render() {
+  const n = node(), s = (n && n.status) || {};
+  const avail = s.update === "available" && s.latest_build;
+  $("nodever").innerHTML = "";
+  $("nodever").append(`Build ${s.build ?? "?"}`, avail
+    ? el("span", { className: "hl" }, ` · build ${s.latest_build} is out`)
+    : el("span", { className: "muted" }, ` · ${s.update || "unknown"}${s.error ? ": " + s.error : ""}`));
+  $("nodeinstall").disabled = busy || !avail;
+  document.querySelectorAll("[data-node]").forEach((b) => { if (b.id !== "nodeinstall") b.disabled = busy; });
+  $("auto").checked = s.auto_install === true;
+  $("auto").disabled = busy || !has(n, "update.auto");
+  $("desktop").href = s.repo
+    ? `https://github.com/${s.repo}/releases/latest/download/kernel-desktop-setup.exe`
+    : (s.release || "#");
+
+  // Games: link, version, players, update, share.
+  const box = $("games");
+  box.innerHTML = "";
+  for (const g of games()) {
+    const gs = g.status || {};
+    const row = el("div", { className: "row" },
+      el("span", { className: "dot " + (gs.state === "running" ? "ok" : gs.state === "crashed" ? "bad" : "warn") }),
+      el("span", { className: "grow" }, el("b", {}, g.name), " ",
+        el("span", { className: "muted" }, [gs.state || g.state, gs.version, gs.version ? `${gs.online ?? 0} online` : ""]
+          .filter(Boolean).join(" · ")),
+        gs.update_available ? el("span", { className: "hl" }, " · update ready") : "",
+        gs.error ? el("div", { className: "muted" }, gs.error) : ""));
+    if (gs.link) {
+      row.append(el("a", { className: "btn primary", href: gs.link, target: "_blank", rel: "noopener" }, "Open"),
+        el("button", { disabled: busy, onclick: () => { navigator.clipboard?.writeText(gs.link); log(`copied ${gs.link}`); } }, "Copy link"));
+    }
+    row.append(el("button", { disabled: busy, onclick: () => run(`Updating ${g.name}`,
+      () => invoke(g.id, "game.update", { force: false }, 1800000)) }, "Update game"));
+    if (gs.sharing === "public" || gs.sharing === "tailnet") {
+      row.append(el("button", { disabled: busy, onclick: () => run(`Unsharing ${g.name}`, () => invoke(g.id, "share.stop")) }, "Stop sharing"));
+    } else {
+      row.append(el("button", { disabled: busy, onclick: () => run(`Sharing ${g.name}`,
+        () => invoke(g.id, "share.start", { who: "anyone with the link" })) }, "Share"));
+    }
+    box.append(row);
+  }
+  if (!box.children.length) box.append(el("div", { className: "muted" }, "No game modules running."));
+
+  // Modules: switches.
+  const mods = $("modules");
+  mods.innerHTML = "";
+  mods.className = "";
+  if (!listed || !listed.length) {
+    mods.className = "muted";
+    mods.textContent = has(n, "modules.list") ? "Loading…" : "Update Kernel to get the module switches.";
+  }
+  for (const m of listed || []) {
+    if (m.id === "hello" && !m.enabled) continue;
+    const box = el("input", { type: "checkbox", checked: m.enabled, disabled: busy });
+    box.onchange = () => {
+      const on = box.checked;
+      if (!confirm(`${on ? "Turn on" : "Turn off"} ${m.name}? Kernel restarts (a few seconds).`)) { box.checked = !on; return; }
+      run(`${on ? "Turning on" : "Turning off"} ${m.name}`, () => invoke("node", "modules.enable", { module: m.id, enabled: on }));
+    };
+    mods.append(el("div", { className: "row" },
+      el("label", { className: "toggle grow" }, box, m.name),
+      el("span", { className: "muted" }, m.enabled ? (m.state || "starting") : "off")));
+  }
+
+  // Update everything: games first (Kernel restarting would cut them off), then Kernel.
+  const todo = games().filter((g) => g.status && g.status.update_available).length + (avail ? 1 : 0);
+  $("all").disabled = busy || !todo;
+  $("all").textContent = todo ? `Update everything (${todo})` : "Everything's up to date";
+}
+
+$("all").onclick = () => run("Updating everything", async () => {
+  for (const g of games().filter((x) => x.status && x.status.update_available)) {
+    try { await invoke(g.id, "game.update", { force: false }, 1800000); log(`${g.name} updated`); }
+    catch (e) { log(`${g.name}: ${e.message}`); }
+  }
+  const s = (node() || {}).status || {};
+  if (s.update === "available") return invoke("node", "update.install", {}, 600000);
+  return { message: "games done" };
+});
+document.querySelectorAll("[data-node]").forEach((b) => {
+  b.onclick = () => run(b.textContent, () => invoke("node", b.dataset.node, {}, 600000));
+});
+$("auto").onchange = () => run("Auto-update", () => invoke("node", "update.auto", { enabled: $("auto").checked }));
+$("loginform").onsubmit = (e) => { e.preventDefault(); store.set($("token").value.trim()); connect(); };
+
+setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN && !busy) refresh(false).catch(() => {}); }, 4000);
+setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN && !busy) refresh(true).catch(() => {}); }, 30000);
+connect();
+</script>
+</body>
+</html>

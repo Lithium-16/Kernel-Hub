@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { Palette } from './components/Palette.tsx';
 import { Sidebar, type View } from './components/Sidebar.tsx';
 import { TitleBar } from './components/TitleBar.tsx';
-import { checkForUpdate } from './lib/app-update.ts';
+import { checkForUpdate, installUpdate, loadAutoUpdate } from './lib/app-update.ts';
 import { NodeClient } from './lib/node.ts';
 import { loadNotifyLevel, shouldNotify, show, title } from './lib/notify.ts';
 import { loadSettings, type NodeSettings, saveSettings } from './lib/settings.ts';
@@ -40,7 +40,10 @@ export function App() {
     if (!inTauri) return;
     const look = () =>
       void checkForUpdate().then(
-        (a) => setUpdateBuild(a?.build ?? null),
+        (a) => {
+          setUpdateBuild(a?.build ?? null);
+          if (a && loadAutoUpdate()) void installUpdate().catch(() => {});
+        },
         () => {},
       );
     look();

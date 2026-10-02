@@ -20,3 +20,22 @@ export async function checkForUpdate(): Promise<Available | null> {
 export async function installUpdate(): Promise<number> {
   return invoke<number>('update_install');
 }
+
+const AUTO_KEY = 'kernel.appAutoUpdate';
+
+/** Install new app builds by themselves at start (and every few hours). Off unless chosen. */
+export function loadAutoUpdate(): boolean {
+  try {
+    return localStorage.getItem(AUTO_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveAutoUpdate(on: boolean): void {
+  try {
+    localStorage.setItem(AUTO_KEY, on ? '1' : '0');
+  } catch {
+    // private mode etc.: it just won't be remembered
+  }
+}
