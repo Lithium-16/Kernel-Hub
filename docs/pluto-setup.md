@@ -8,7 +8,7 @@ About 10 minutes, once. After that, updates are a button in the app.
   (check the repo's **Releases** page).
 - A **read-only GitHub token**, only while the repo is private (public: press Enter when asked):
   <https://github.com/settings/personal-access-tokens/new>
-  - Repository access: **only** `B0RE16/laughing-waffle`
+  - Repository access: **only** `Lithium-16/Kernel-Hub`
   - Permissions: **Contents: Read-only**. Nothing else.
   - The installer asks for it and saves it in Pluto's `node.toml`, where the node uses it to
     download updates.
@@ -140,13 +140,12 @@ other event (`flowrace.match.*` in `[notify] include`).
 
 ## OpenFork: the strategy game, same idea
 
-The **OpenFork** module does for [OpenFork](https://github.com/B0RE16/OpenFork) what Flow Race's
+The **OpenFork** module does for [OpenFork](https://github.com/Lithium-16/OpenFork) what Flow Race's
 does: downloads it, builds it, keeps it running, and shares it through Tailscale. Turn it on in
 **Settings > Node updates and modules**, then press **Share** on its page. Its link uses port
 8443 (`https://pluto.tailXXXX.ts.net:8443`), so both games can be shared at the same time.
 
-It follows the `claude/brave-goldberg-jcd77j` branch. Once that's merged, set `ref = "main"` in
-the module's settings (the gear on its page). Guest identities and match history are saved, so
+Guest identities and match history are saved, so
 an update or restart doesn't forget who is who; games in progress do end when the server
 restarts.
 
@@ -156,6 +155,11 @@ Both check GitHub every 30 minutes (`update_check_h`). With `auto_update` on (th
 commit is downloaded, built and switched to by itself, but only when nobody is connected, so a
 game in progress is never cut off. **Update game** does it right away. If a commit fails to
 build, the old version keeps running and you get an event; it tries again on the next commit.
+
+Both follow the repository's default branch (`main`). To try a branch first, put its name in
+`ref` (the gear on the game's page); once it's merged and deleted, the module goes back to the
+default branch by itself and tells you. A renamed repository or GitHub username is followed too:
+the module switches to the new name and tells you, so you can save it in `repo`.
 
 ## Discord alerts
 

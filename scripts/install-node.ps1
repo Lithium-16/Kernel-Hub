@@ -21,7 +21,7 @@
 param(
   # Use a downloaded bundle (kernel-node-windows-x64.zip) instead of fetching the newest release.
   [string]$Zip,
-  [string]$Repo = 'B0RE16/laughing-waffle',
+  [string]$Repo = 'Lithium-16/Kernel-Hub',
   [string]$Root = (Join-Path $env:LOCALAPPDATA 'Kernel\node'),
   [int]$Port = 47800,
   # Modules to run. hello is only for tests.

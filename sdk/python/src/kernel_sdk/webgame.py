@@ -141,6 +141,7 @@ class WebGame:
         self.link = ""
         self.latest = ""
         self.auto_failed = ""  # a commit that failed to install by itself; not retried
+        self._moved_checked = False  # looked for a renamed repository since this start
         self._lock = asyncio.Lock()
 
     # -- files ----------------------------------------------------------------------------
@@ -167,7 +168,8 @@ class WebGame:
         headers = {"Accept": accept}
         if self.settings.get("github_token"):
             headers["Authorization"] = f"Bearer {self.settings['github_token']}"
-        return self.get(f"https://api.github.com/repos/{self.settings['repo']}/{path}", timeout=60, headers=headers)
+        url = f"https://api.github.com/repos/{self.settings['repo']}" + (f"/{path}" if path else "")
+        return self.get(url, timeout=60, headers=headers)
 
     @staticmethod
     def _refusal(e: Exception) -> str:
@@ -180,16 +182,62 @@ class WebGame:
             return f"GitHub answered {e.code} {e.reason}"
         return str(e)
 
-    def latest_commit(self) -> str:
-        """The newest commit on the branch: from the API, else from github.com's commit feed (which
-        doesn't count against the API's hourly limit)."""
-        ref = self.settings.get("ref", "main")
+    def _check_moved(self) -> None:
+        """Once per start: if the repository was renamed or its owner changed username, GitHub
+        redirects the old name; switch to the new one (and say so) before the old name is gone."""
+        if self._moved_checked:
+            return
+        self._moved_checked = True
+        repo = str(self.settings["repo"])
         try:
-            return self._github(f"commits/{ref}", "application/vnd.github.sha").decode().strip()
+            info = json.loads(self._github("", "application/vnd.github+json"))
+            now = str(info.get("full_name", ""))
+        except (urllib.error.URLError, OSError, ValueError, AttributeError):
+            return  # offline, rate-limited or not JSON: try again next start
+        if now and now.lower() != repo.lower():
+            self.settings["repo"] = now
+            self.emit(
+                "game.repo_moved",
+                f"{self.title} moved on GitHub from {repo} to {now}; following {now} "
+                f"(set repo = \"{now}\" in its settings to keep it that way)",
+                level="warn",
+                repo=now,
+            )
+
+    def _default_head(self) -> str:
+        """The newest commit on the default branch, or "" if the API won't say."""
+        try:
+            return self._github("commits/HEAD", "application/vnd.github.sha").decode().strip()
+        except (urllib.error.URLError, OSError):
+            return ""
+
+    def latest_commit(self) -> str:
+        """The newest commit to follow: on `ref`, or on the repository's default branch when `ref`
+        is empty or that branch is gone (merged and deleted). From the API, else from github.com's
+        commit feed (which doesn't count against the API's hourly limit)."""
+        self._check_moved()
+        ref = str(self.settings.get("ref") or "").strip()
+        try:
+            return self._github(f"commits/{ref or 'HEAD'}", "application/vnd.github.sha").decode().strip()
+        except urllib.error.HTTPError as e:
+            head = self._default_head() if ref and e.code in (404, 422) else ""
+            if head:
+                # The branch is gone but the repository answers: follow its default branch.
+                self.settings["ref"] = ""
+                self.emit(
+                    "game.branch_gone",
+                    f"{self.title}'s branch {ref} is gone from GitHub (merged?); following the default "
+                    "branch instead (clear ref in its settings to keep it that way)",
+                    level="warn",
+                    branch=ref,
+                )
+                return head
+            api = self._refusal(e)
         except (urllib.error.URLError, OSError) as e:
             api = self._refusal(e)
         try:
-            feed = self.get(f"https://github.com/{self.settings['repo']}/commits/{ref}.atom", timeout=60).decode()
+            path = f"commits/{ref}.atom" if ref else "commits.atom"
+            feed = self.get(f"https://github.com/{self.settings['repo']}/{path}", timeout=60).decode()
             found = re.search(r"Grit::Commit/([0-9a-f]{40})", feed)
             if found:
                 self.log.info("GitHub API refused (%s); used the commit feed", api)
