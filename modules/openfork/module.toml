@@ -5,15 +5,18 @@ version = "0.1.0"
 runtime = "python"
 entry = "main.py"
 
-# OpenFork (github.com/B0RE16/OpenFork): real-time strategy in the browser, kept running on this
+# OpenFork (github.com/Lithium-16/OpenFork): real-time strategy in the browser, kept running on this
 # PC so you and your friends can play any time. Downloaded from GitHub and built with Node.js
-# (22.18 or newer, downloaded by itself if missing) on first start; new commits on the branch
-# below install by themselves when nobody's playing (Update game does it right away).
+# (22.18 or newer, downloaded by itself if missing) on first start; new commits install by
+# themselves when nobody's playing (Update game does it right away).
 # It only listens on this PC. Share makes it reachable through Tailscale: "anyone with the link"
 # (Tailscale Funnel, a public https address for the game only) or "my tailnet".
 [settings]
-repo = "B0RE16/OpenFork"
-ref = "claude/brave-goldberg-jcd77j"
+repo = "Lithium-16/OpenFork"
+# A branch to follow instead of the repository's default branch (empty: the default branch).
+# If it's deleted (merged), the default branch is followed again; a renamed repository or
+# username is followed too (GitHub redirects the old name).
+ref = ""
 # Only for a private repo: a read-only token.
 github_token = ""
 port = 8096
