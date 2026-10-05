@@ -7,7 +7,7 @@
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-pub const REPO: &str = "B0RE16/laughing-waffle";
+pub const REPO: &str = "Lithium-16/Kernel-Hub";
 pub const ASSET: &str = "kernel-desktop-setup.exe";
 
 /// The CI run that built this app; 0 for builds made on a PC (those never update).
@@ -215,13 +215,13 @@ mod tests {
     #[test]
     fn reads_the_latest_redirect() {
         let a = from_latest_location(
-            "https://github.com/B0RE16/laughing-waffle/releases/tag/node-build-164",
+            "https://github.com/Lithium-16/Kernel-Hub/releases/tag/node-build-164",
         )
         .unwrap();
         assert_eq!(a.build, 164);
         assert_eq!(
             a.installer,
-            "https://github.com/B0RE16/laughing-waffle/releases/download/node-build-164/kernel-desktop-setup.exe"
+            "https://github.com/Lithium-16/Kernel-Hub/releases/download/node-build-164/kernel-desktop-setup.exe"
         );
         assert!(
             a.sha256

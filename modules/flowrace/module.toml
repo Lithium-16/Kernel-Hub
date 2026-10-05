@@ -13,7 +13,10 @@ entry = "main.py"
 # (Tailscale Funnel, a public https address for the game only) or "my tailnet".
 [settings]
 repo = "john-doe16/FlowRace"
-ref = "main"
+# A branch to follow instead of the repository's default branch (empty: the default branch).
+# If it's deleted (merged), the default branch is followed again; a renamed repository or
+# username is followed too (GitHub redirects the old name).
+ref = ""
 # Only for a private repo: a read-only token.
 github_token = ""
 port = 8095
