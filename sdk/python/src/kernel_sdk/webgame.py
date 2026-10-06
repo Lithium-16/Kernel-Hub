@@ -142,6 +142,8 @@ class WebGame:
         self.latest = ""
         self.auto_failed = ""  # a commit that failed to install by itself; not retried
         self._moved_checked = False  # looked for a renamed repository since this start
+        self._default_branch = ""  # the repository's default branch, once GitHub has said
+        self._merged_told = ""  # the merged branch already reported (once per start)
         self._lock = asyncio.Lock()
 
     # -- files ----------------------------------------------------------------------------
@@ -192,6 +194,7 @@ class WebGame:
         try:
             info = json.loads(self._github("", "application/vnd.github+json"))
             now = str(info.get("full_name", ""))
+            self._default_branch = str(info.get("default_branch", ""))
         except (urllib.error.URLError, OSError, ValueError, AttributeError):
             return  # offline, rate-limited or not JSON: try again next start
         if now and now.lower() != repo.lower():
@@ -203,6 +206,32 @@ class WebGame:
                 level="warn",
                 repo=now,
             )
+
+    def _unless_merged(self, ref: str, sha: str) -> str:
+        """`sha`, the head of `ref`; but if everything on `ref` is already in the default branch
+        (merged and never deleted), the default branch's head instead. `ref` stays as set, so
+        new commits pushed to it are followed again."""
+        if not ref or not self._default_branch or ref == self._default_branch:
+            return sha
+        try:
+            diff = json.loads(self._github(f"compare/{self._default_branch}...{ref}", "application/vnd.github+json"))
+        except (urllib.error.URLError, OSError, ValueError):
+            return sha  # can't tell: keep following the branch
+        if not isinstance(diff, dict) or diff.get("status") not in ("behind", "identical"):
+            return sha
+        head = self._default_head()
+        if not head:
+            return sha
+        if self._merged_told != ref:
+            self._merged_told = ref
+            self.emit(
+                "game.branch_merged",
+                f"{self.title}'s branch {ref} is merged into {self._default_branch}; following "
+                f"{self._default_branch} (clear ref in its settings, or push to {ref} to follow it again)",
+                level="warn",
+                branch=ref,
+            )
+        return head
 
     def _default_head(self) -> str:
         """The newest commit on the default branch, or "" if the API won't say."""
@@ -218,7 +247,8 @@ class WebGame:
         self._check_moved()
         ref = str(self.settings.get("ref") or "").strip()
         try:
-            return self._github(f"commits/{ref or 'HEAD'}", "application/vnd.github.sha").decode().strip()
+            sha = self._github(f"commits/{ref or 'HEAD'}", "application/vnd.github.sha").decode().strip()
+            return self._unless_merged(ref, sha)
         except urllib.error.HTTPError as e:
             head = self._default_head() if ref and e.code in (404, 422) else ""
             if head:
