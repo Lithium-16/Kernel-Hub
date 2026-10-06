@@ -92,3 +92,26 @@ def test_a_renamed_repository_is_followed(tmp_path):
     assert asked[-1] == "https://api.github.com/repos/Lithium-16/OpenFork/commits/HEAD"
     g.latest_commit()
     assert asked.count("https://api.github.com/repos/Lithium-16/OpenFork") == 0, "checked once per start"
+
+
+def test_a_merged_branch_follows_the_default_branch(tmp_path):
+    events = []
+    status = {"v": "behind"}
+
+    def get(url, timeout=5, headers=None):
+        if url == "https://api.github.com/repos/Lithium-16/OpenFork":
+            return json.dumps({"full_name": "Lithium-16/OpenFork", "default_branch": "main"}).encode()
+        if "/compare/main...old-branch" in url:
+            return json.dumps({"status": status["v"]}).encode()
+        if url.endswith("/commits/old-branch"):
+            return b"o" * 40
+        if url.endswith("/commits/HEAD"):
+            return b"m" * 40
+        raise AssertionError(url)
+
+    g = OpenFork({"repo": "Lithium-16/OpenFork", "ref": "old-branch"}, tmp_path, get=get, emit=lambda kind, msg, **kw: events.append(kind))
+    assert g.latest_commit() == "m" * 40, "merged: the default branch"
+    assert g.latest_commit() == "m" * 40 and events == ["game.branch_merged"], "said once"
+    assert g.settings["ref"] == "old-branch", "kept, so new commits on it are followed again"
+    status["v"] = "ahead"
+    assert g.latest_commit() == "o" * 40, "new work on the branch: follow it"
