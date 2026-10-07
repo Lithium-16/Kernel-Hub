@@ -116,7 +116,7 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
 
     let prefs = prefs::Prefs::load(&prefs::Prefs::path(&cfg));
     let mut manifests = Vec::new();
-    for found in manifest::discover(&cfg.modules_dir) {
+    for found in manifest::discover_all(&cfg.module_dirs()) {
         match found {
             Ok(m) if m.id == builtin::ID => {
                 tracing::error!(dir = %m.dir.display(), "module id 'node' is reserved for the node itself")
@@ -126,7 +126,12 @@ pub async fn start(cfg: Config) -> anyhow::Result<Running> {
             Err(e) => tracing::error!(error = %e, "invalid module manifest"),
         }
     }
-    tracing::info!(count = manifests.len(), dir = %cfg.modules_dir.display(), "modules discovered");
+    let dirs: Vec<String> = cfg
+        .module_dirs()
+        .iter()
+        .map(|d| d.display().to_string())
+        .collect();
+    tracing::info!(count = manifests.len(), dirs = ?dirs, "modules discovered");
 
     let (shutdown, shutdown_rx) = watch::channel(false);
     let (supervisor, mut tasks) =
