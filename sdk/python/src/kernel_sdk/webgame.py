@@ -105,7 +105,105 @@ def sharing_from(serve_status: dict[str, Any], dns_name: str, https_port: int, g
     return "public" if (serve_status.get("AllowFunnel") or {}).get(key) else "tailnet"
 
 
-class WebGame:
+class TailscaleShare:
+    """Sharing a server on 127.0.0.1:`port` through Tailscale: Funnel ("anyone with the link") or
+    Serve ("my tailnet"). Used by WebGame and by modules that run their own server (Party Games)."""
+
+    def __init__(
+        self,
+        title: str,
+        settings: dict[str, Any],
+        port: int,
+        emit: Callable[..., None] | None = None,
+        log: logging.Logger | None = None,
+        run: Callable[..., Ran] = run_command,
+    ) -> None:
+        self.title = title
+        self.settings = settings
+        self.port = port
+        self.emit = emit or (lambda *a, **k: None)
+        self.log = log or logging.getLogger(f"webgame.{title}")
+        self.run = run
+        self.sharing = "unknown"
+        self.link = ""
+
+    # -- Tailscale ------------------------------------------------------------------------
+
+    def _tailscale(self) -> str:
+        configured = str(self.settings.get("tailscale", "tailscale"))
+        found = shutil.which(configured)
+        if found:
+            return found
+        default = Path(r"C:\Program Files\Tailscale\tailscale.exe")
+        return str(default) if default.is_file() else configured
+
+    def _https_port(self) -> int:
+        port = int(self.settings.get("share_port", 443))
+        if port not in FUNNEL_PORTS:
+            raise ActionError("invalid_params", f"share_port must be one of {FUNNEL_PORTS}")
+        return port
+
+    def dns_name(self) -> str:
+        r = self.run([self._tailscale(), "status", "--json"], timeout=20)
+        if r.code != 0:
+            raise ActionError("offline", f"Tailscale isn't running: {tail(r.out, 3)}")
+        try:
+            return str(json.loads(r.out)["Self"]["DNSName"]).rstrip(".")
+        except (ValueError, KeyError, TypeError):
+            raise ActionError("module_failed", "couldn't read this PC's Tailscale name") from None
+
+    def refresh_sharing(self) -> None:
+        try:
+            dns = self.dns_name()
+            r = self.run([self._tailscale(), "serve", "status", "--json"], timeout=20)
+            status = json.loads(r.out) if r.code == 0 and r.out.strip().startswith("{") else {}
+            port = self._https_port()
+        except (ActionError, ValueError):
+            self.sharing, self.link = "unknown", ""
+            return
+        self.sharing = sharing_from(status, dns, port, self.port)
+        self.link = share_url(dns, port) if self.sharing != "off" else ""
+
+    async def share(self, who: str) -> dict[str, Any]:
+        kind = WHO.get(who)
+        if kind is None:
+            raise ActionError("invalid_params", f"who must be one of: {', '.join(WHO)}")
+        port = self._https_port()
+        ts = self._tailscale()
+        # Switch off the other kind first, so the two don't both claim the port.
+        await asyncio.to_thread(self.run, [ts, "funnel" if kind == "serve" else "serve", f"--https={port}", "off"], timeout=30)
+        cmd = [ts, kind, "--bg", "--yes", f"--https={port}", f"http://127.0.0.1:{self.port}"]
+        r = await asyncio.to_thread(self.run, cmd, timeout=40)
+        if r.code != 0 and "--yes" in r.out:  # an older Tailscale without --yes
+            cmd.remove("--yes")
+            r = await asyncio.to_thread(self.run, cmd, timeout=40)
+        link = re.search(r"https://login\.tailscale\.com/\S+", r.out)
+        if r.code != 0:
+            if link:
+                raise ActionError(
+                    "disabled",
+                    f"Tailscale needs your OK first: open {link[0]} (as the tailnet admin), "
+                    "allow it, then press Share again.",
+                )
+            raise ActionError("module_failed", f"tailscale {kind} failed:\n{tail(r.out, 6)}")
+        await asyncio.to_thread(self.refresh_sharing)
+        if self.sharing == "off":
+            raise ActionError("module_failed", f"Tailscale accepted it but isn't sharing the game:\n{tail(r.out, 6)}")
+        who_text = "anyone with the link" if self.sharing == "public" else "people on your tailnet"
+        self.emit("share.on", f"{self.title} is open to {who_text}: {self.link}", link=self.link)
+        return {"link": self.link, "who": who_text}
+
+    async def unshare(self) -> dict[str, Any]:
+        port = self._https_port()
+        ts = self._tailscale()
+        await asyncio.to_thread(self.run, [ts, "funnel", f"--https={port}", "off"], timeout=30)
+        await asyncio.to_thread(self.run, [ts, "serve", f"--https={port}", "off"], timeout=30)
+        await asyncio.to_thread(self.refresh_sharing)
+        self.emit("share.off", f"{self.title} is no longer shared")
+        return {"sharing": self.sharing}
+
+
+class WebGame(TailscaleShare):
     """One game: `title` for messages, `host_file` the module's Kernel host (kernel-host.ts)."""
 
     def __init__(
@@ -119,13 +217,10 @@ class WebGame:
         run: Callable[..., Ran] = run_command,
         get: Callable[..., bytes] = http_get,
     ) -> None:
-        self.title, self.host_file = title, host_file
-        self.settings = settings
+        super().__init__(title, settings, int(settings.get("port", 8095)), emit, log, run)
+        self.host_file = host_file
         self.data = data_dir
-        self.emit = emit or (lambda *a, **k: None)
-        self.log = log or logging.getLogger(f"webgame.{title}")
-        self.run, self.get = run, get
-        self.port = int(settings.get("port", 8095))
+        self.get = get
         self.process: subprocess.Popen[bytes] | None = None
         self.mode = ""  # "kernel" or "standalone"
         self.want_running = bool(settings.get("autostart", True))
@@ -137,8 +232,6 @@ class WebGame:
         self.retry_at = 0.0
         self.game: dict[str, Any] = {}
         self.matches_seen: int | None = None
-        self.sharing = "unknown"
-        self.link = ""
         self.latest = ""
         self.auto_failed = ""  # a commit that failed to install by itself; not retried
         self._moved_checked = False  # looked for a renamed repository since this start
@@ -566,81 +659,6 @@ class WebGame:
 
     def local_url(self) -> str:
         return f"http://127.0.0.1:{self.port}"
-
-    # -- Tailscale ------------------------------------------------------------------------
-
-    def _tailscale(self) -> str:
-        configured = str(self.settings.get("tailscale", "tailscale"))
-        found = shutil.which(configured)
-        if found:
-            return found
-        default = Path(r"C:\Program Files\Tailscale\tailscale.exe")
-        return str(default) if default.is_file() else configured
-
-    def _https_port(self) -> int:
-        port = int(self.settings.get("share_port", 443))
-        if port not in FUNNEL_PORTS:
-            raise ActionError("invalid_params", f"share_port must be one of {FUNNEL_PORTS}")
-        return port
-
-    def dns_name(self) -> str:
-        r = self.run([self._tailscale(), "status", "--json"], timeout=20)
-        if r.code != 0:
-            raise ActionError("offline", f"Tailscale isn't running: {tail(r.out, 3)}")
-        try:
-            return str(json.loads(r.out)["Self"]["DNSName"]).rstrip(".")
-        except (ValueError, KeyError, TypeError):
-            raise ActionError("module_failed", "couldn't read this PC's Tailscale name") from None
-
-    def refresh_sharing(self) -> None:
-        try:
-            dns = self.dns_name()
-            r = self.run([self._tailscale(), "serve", "status", "--json"], timeout=20)
-            status = json.loads(r.out) if r.code == 0 and r.out.strip().startswith("{") else {}
-            port = self._https_port()
-        except (ActionError, ValueError):
-            self.sharing, self.link = "unknown", ""
-            return
-        self.sharing = sharing_from(status, dns, port, self.port)
-        self.link = share_url(dns, port) if self.sharing != "off" else ""
-
-    async def share(self, who: str) -> dict[str, Any]:
-        kind = WHO.get(who)
-        if kind is None:
-            raise ActionError("invalid_params", f"who must be one of: {', '.join(WHO)}")
-        port = self._https_port()
-        ts = self._tailscale()
-        # Switch off the other kind first, so the two don't both claim the port.
-        await asyncio.to_thread(self.run, [ts, "funnel" if kind == "serve" else "serve", f"--https={port}", "off"], timeout=30)
-        cmd = [ts, kind, "--bg", "--yes", f"--https={port}", f"http://127.0.0.1:{self.port}"]
-        r = await asyncio.to_thread(self.run, cmd, timeout=40)
-        if r.code != 0 and "--yes" in r.out:  # an older Tailscale without --yes
-            cmd.remove("--yes")
-            r = await asyncio.to_thread(self.run, cmd, timeout=40)
-        link = re.search(r"https://login\.tailscale\.com/\S+", r.out)
-        if r.code != 0:
-            if link:
-                raise ActionError(
-                    "disabled",
-                    f"Tailscale needs your OK first: open {link[0]} (as the tailnet admin), "
-                    "allow it, then press Share again.",
-                )
-            raise ActionError("module_failed", f"tailscale {kind} failed:\n{tail(r.out, 6)}")
-        await asyncio.to_thread(self.refresh_sharing)
-        if self.sharing == "off":
-            raise ActionError("module_failed", f"Tailscale accepted it but isn't sharing the game:\n{tail(r.out, 6)}")
-        who_text = "anyone with the link" if self.sharing == "public" else "people on your tailnet"
-        self.emit("share.on", f"{self.title} is open to {who_text}: {self.link}", link=self.link)
-        return {"link": self.link, "who": who_text}
-
-    async def unshare(self) -> dict[str, Any]:
-        port = self._https_port()
-        ts = self._tailscale()
-        await asyncio.to_thread(self.run, [ts, "funnel", f"--https={port}", "off"], timeout=30)
-        await asyncio.to_thread(self.run, [ts, "serve", f"--https={port}", "off"], timeout=30)
-        await asyncio.to_thread(self.refresh_sharing)
-        self.emit("share.off", f"{self.title} is no longer shared")
-        return {"sharing": self.sharing}
 
     # -- watching -------------------------------------------------------------------------
 

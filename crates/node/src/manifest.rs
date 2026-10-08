@@ -326,6 +326,7 @@ mod tests {
                 "laya",
                 "minecraft",
                 "openfork",
+                "party",
                 "pc-monitor",
                 "roblox",
                 "vram"
