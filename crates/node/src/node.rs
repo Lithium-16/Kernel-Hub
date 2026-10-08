@@ -129,12 +129,12 @@ impl Node {
         Ok(())
     }
 
-    /// Every module in modules_dir, on or off, for the app's switches.
+    /// Every module in the module folders, on or off, for the app's switches.
     fn modules_list(&self) -> ActionResult {
         let running = self.catalog();
         let prefs = self.prefs.lock().expect("prefs").clone();
         let mut out = Vec::new();
-        for m in crate::manifest::discover(&self.cfg.modules_dir)
+        for m in crate::manifest::discover_all(&self.cfg.module_dirs())
             .into_iter()
             .flatten()
         {
@@ -164,7 +164,7 @@ impl Node {
             .get("enabled")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
-        let known = crate::manifest::discover(&self.cfg.modules_dir)
+        let known = crate::manifest::discover_all(&self.cfg.module_dirs())
             .into_iter()
             .flatten()
             .any(|m| m.id == id && m.id != builtin::ID);
