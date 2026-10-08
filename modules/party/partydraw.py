@@ -1,0 +1,73 @@
+"""Party Games: drawings made on phones, checked before anyone else sees them.
+
+A drawing is a list of strokes on a 400×400 grid (web/draw.js makes and draws them):
+
+- `{"c": color, "w": width, "p": [x0, y0, x1, y1, …]}`: a pen line. `color` is an index into
+  INK or a "#rrggbb" color; `width` is 1 to 40.
+- `{"e": true, "w": width, "p": […]}`: an eraser line.
+- `{"fill": color}`: paints the whole background.
+
+Anything else is refused, so a phone can't send a huge or broken drawing.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+
+class BadDrawing(ValueError):
+    """A drawing that can't be accepted; the text is shown on the player's phone."""
+
+
+SIZE = 400
+INK = ["#1a1230", "#ffffff", "#ff5a5f", "#ffb100", "#2ec27e", "#3d7bff", "#a259ff", "#ff7fb0"]
+SHIRTS = len(INK)  # shirts come in the same colors as the inks
+MIN_W, MAX_W = 1, 40
+MAX_STROKES = 300
+MAX_POINTS = 8000
+HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+BROKEN = "That drawing didn't come through. Try again."
+
+
+def _color(c: Any) -> int | str:
+    if _int(c, 0, len(INK) - 1):
+        return c
+    if isinstance(c, str) and HEX.match(c):
+        return c.lower()
+    raise BadDrawing(BROKEN)
+
+
+def check_drawing(strokes: Any) -> list[dict[str, Any]]:
+    """The drawing, cleaned, or BadDrawing with a reason a player can act on."""
+    if not isinstance(strokes, list) or not strokes:
+        raise BadDrawing("Draw something first.")
+    if len(strokes) > MAX_STROKES:
+        raise BadDrawing("That drawing has too many lines. Undo a few and send it again.")
+    out: list[dict[str, Any]] = []
+    points = 0
+    for s in strokes:
+        if not isinstance(s, dict):
+            raise BadDrawing(BROKEN)
+        if set(s) == {"fill"}:
+            out.append({"fill": _color(s["fill"])})
+            continue
+        w, p = s.get("w"), s.get("p")
+        eraser = s.get("e") is True
+        if set(s) - {"c", "w", "p", "e"} or (not eraser and "c" not in s) or ("e" in s and not eraser):
+            raise BadDrawing(BROKEN)
+        if not _int(w, MIN_W, MAX_W) or not isinstance(p, list):
+            raise BadDrawing(BROKEN)
+        if len(p) < 2 or len(p) % 2 or not all(_int(v, 0, SIZE) for v in p):
+            raise BadDrawing(BROKEN)
+        points += len(p) // 2
+        if points > MAX_POINTS:
+            raise BadDrawing("That drawing is too detailed. Undo a few lines and send it again.")
+        out.append({"e": True, "w": w, "p": list(p)} if eraser else {"c": _color(s["c"]), "w": w, "p": list(p)})
+    if all(s.get("e") for s in out):
+        raise BadDrawing("Draw something first.")
+    return out
+
+
+def _int(v: Any, lo: int, hi: int) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi

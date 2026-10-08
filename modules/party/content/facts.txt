@@ -1,0 +1,45 @@
+# Bluff Buffet facts, one per line, tab-separated:
+#   question (with ___ for the blank) <tab> the true answer <tab> other accepted spellings, |-separated
+#   <tab> house lies, |-separated: wrong answers the game adds when there are few players, and
+#   offers through "Lie for me". The last two columns may be empty. Lines starting with # are ignored.
+# Add your own in the module's data folder: content/facts.txt (same format).
+In 1932, Australia's army fought a war against ___, and lost.	emus	emu	kangaroos|rabbits|koalas|crocodiles
+A group of flamingos is called a ___.	flamboyance		fabulous|pinkness|parade|chorus
+The national animal of Scotland is the ___.	unicorn		haggis|red deer|golden eagle|loch ness monster
+Wombat poop is shaped like ___.	cubes	cube|squares|dice	stars|tiny pyramids|spirals|pellets
+Before it was called Google, the search engine was named ___.	BackRub	back rub	Googol|FindIt|Pagerank|Stanford Search
+Bubble wrap was first invented to be sold as ___.	wallpaper	textured wallpaper	a pillow|packing for eggs|a shower curtain|a toy
+The dot over a lowercase "i" is called a ___.	tittle		jot|speck|pip|dottle
+The plastic tip at the end of a shoelace is called an ___.	aglet		eyelet|endcap|ferrule|lacet
+An octopus has ___ hearts.	three	3	two|eight|four|zero
+In Japan, Pac-Man was originally called ___.	Puck Man	puckman|puck-man	Paku Paku|Gobble Man|Munch Man|Pizza Man
+The world's first webcam was pointed at a ___ at Cambridge University.	coffee pot	coffee machine	fish tank|parking lot|printer|lecture hall
+Nintendo was founded in 1889 as a company that made ___.	playing cards	cards|hanafuda|card games	instant noodles|bicycles|umbrellas|kites
+Play-Doh was first sold as a cleaner for ___.	wallpaper		shoes|chimneys|piano keys|windows
+A group of crows is called a ___.	murder		mob|gloom|cackle|court
+Sea otters hold ___ while they sleep so they don't drift apart.	hands	paws|each others hands	seaweed|their breath|tails|rocks
+The first item ever sold on eBay was a broken ___.	laser pointer		calculator|toaster|Furby|Game Boy
+In the 1830s, ketchup was sold as a ___.	medicine	cure|remedy	hair dye|shoe polish|love potion|paint
+The man who designed the Pringles can asked to be buried in ___.	a Pringles can	pringles can|pringles tube	a chip factory|a potato field|a lunchbox|a vending machine
+The "Q" in Q-tips stands for ___.	quality		quick|Queen|quiet|cue
+A day on Venus is longer than its ___.	year		night|winter|moon's orbit|summer
+Under its white fur, a polar bear's skin is ___.	black		pink|blue|white|see-through
+The Anglo-Zanzibar War of 1896 lasted about ___ minutes.	38	thirty eight|thirty-eight	9|90|240|15
+In Switzerland, it's illegal to own just one ___.	guinea pig		goldfish|cow|cuckoo clock|parrot
+Apple co-founder Ronald Wayne sold his 10% share of the company for $___.	800	eight hundred	50|10,000|1,500|3
+The mechanical shark in "Jaws" was nicknamed ___ by the crew.	Bruce		Steve|Chompy|Big Gus|Jeff
+In 1952, Mr. Potato Head became the first toy advertised on ___.	television	tv	a cereal box|the radio|a billboard|a blimp
+The tiny pocket in jeans was first made to hold ___.	pocket watches	watch|watches|pocket watch	matches|bullets|coins|tobacco
+The giant stone heads on Easter Island have ___.	bodies	body|torsos	hats|names|teeth|hollow insides
+The first video ever uploaded to YouTube was filmed at a ___.	zoo	the zoo	skate park|birthday party|cat show|bowling alley
+Cleopatra lived closer in time to the ___ than to the building of the Great Pyramid.	Moon landing	moon landing|apollo 11|first moon landing	invention of the internet|first iPhone|Titanic sinking|founding of Rome
+Oxford University is older than the ___ Empire.	Aztec		Roman|Persian|Byzantine|Egyptian
+A shrimp's heart is in its ___.	head		tail|legs|shell|antennae
+A sloth can hold its breath longer than a ___.	dolphin		sea turtle|whale|seal|crocodile
+Honey found in ancient Egyptian tombs was still ___.	edible	eatable|good to eat	warm|glowing|liquid|buzzing
+After he died, the ashes of disc golf's inventor were molded into ___.	frisbees	discs|frisbee|flying discs|memorial discs	a trophy|golf balls|a statue|a bowling ball
+Scotland has over 400 words for ___.	snow		rain|sheep|whisky|fog
+An Australian man once tried to sell New Zealand on ___.	eBay	ebay	Craigslist|Amazon|a billboard|TV
+The longest recorded flight of a chicken is ___ seconds.	13	thirteen	4|45|2|90
+Before alarm clocks, some people were paid to wake others by shooting dried peas at their ___.	windows	window	doors|chimneys|feet|roofs
+The original name of Bank of America was the Bank of ___.	Italy		California|Liberty|Gold|the West

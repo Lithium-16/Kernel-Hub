@@ -1,0 +1,62 @@
+# Shirt Showdown drawing ideas, one per line (just suggestions: players can draw anything).
+# Add your own in the module's data folder: content/doodle_ideas.txt (same format).
+A raccoon on vacation
+A very confident potato
+Your cat as a wrestler
+A haunted toaster
+A snail in a race car
+The world's tiniest dragon
+A pizza with feelings
+A shark at the dentist
+A cactus who needs a hug
+An astronaut frog
+A grumpy cloud
+Breakfast, but evil
+A dog who just won the lottery
+A banana in sunglasses
+A ghost doing laundry
+A penguin DJ
+A volcano on a diet
+A sloth doing parkour
+The moon eating cheese
+A heroic sandwich
+A cowboy octopus
+A mushroom wizard
+A goose with a knife (a butter knife)
+A pigeon in a business suit
+A robot learning to dance
+A sad spaghetti monster
+A hamster bodybuilder
+An owl reading the news
+A crab with a briefcase
+A dinosaur at a tea party
+A llama in a hot air balloon
+A rubber duck captain
+A skeleton at the beach
+A tired coffee cup
+A bear who loves jazz
+A worm with a mustache
+A unicorn with a mortgage
+A traffic cone superhero
+A sneaky cookie
+A fish riding a bicycle
+A dragon who's afraid of fire
+A ninja grandma
+A vampire at a blood drive
+A cat ruling the world
+A happy little tree
+A rocket made of cheese
+A knight fighting a toaster
+The last slice of pizza
+A beaver building a skyscraper
+A sock with big dreams
+An alien tourist
+A bee with a tiny hat
+A cool skeleton on a skateboard
+A sun wearing sunscreen
+A strawberry in armor
+A frog prince who prefers being a frog
+A melting snowman at the beach
+A turtle with a jetpack
+A cupcake volcano
+A wizard's messy desk
