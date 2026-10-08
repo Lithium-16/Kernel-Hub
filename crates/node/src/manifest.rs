@@ -199,6 +199,33 @@ pub fn discover(dir: &Path) -> Vec<Result<Manifest, ManifestError>> {
     paths.iter().map(|p| Manifest::load(p)).collect()
 }
 
+/// Modules in each folder, in order. A module id that turns up again in a later folder is an
+/// error naming both folders; the first one is kept.
+pub fn discover_all(dirs: &[&Path]) -> Vec<Result<Manifest, ManifestError>> {
+    let mut seen: std::collections::HashMap<String, PathBuf> = Default::default();
+    let mut out = Vec::new();
+    for dir in dirs {
+        for found in discover(dir) {
+            out.push(match found {
+                Ok(m) => match seen.get(&m.id) {
+                    Some(first) => Err(ManifestError::Invalid(format!(
+                        "module id '{}' in {} is already used by {}",
+                        m.id,
+                        m.dir.display(),
+                        first.display()
+                    ))),
+                    None => {
+                        seen.insert(m.id.clone(), m.dir.clone());
+                        Ok(m)
+                    }
+                },
+                Err(e) => Err(e),
+            });
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,6 +242,38 @@ mod tests {
 
     const HEAD: &str =
         "id='demo'\nname='Demo'\nicon='box'\nversion='1.0.0'\nruntime='python'\nentry='main.py'\n";
+
+    #[test]
+    fn discovers_modules_across_folders_and_rejects_duplicate_ids() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let module = |root: &Path, folder: &str, id: &str| {
+            let dir = root.join(folder);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("module.toml"),
+                HEAD.replace("'demo'", &format!("'{id}'")),
+            )
+            .unwrap();
+        };
+        module(a.path(), "one", "one");
+        module(b.path(), "two", "two");
+        module(b.path(), "copy", "one");
+
+        let found = discover_all(&[a.path(), b.path()]);
+        let ids: Vec<_> = found.iter().flatten().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["one", "two"]);
+        let err = found
+            .iter()
+            .find_map(|f| f.as_ref().err())
+            .unwrap()
+            .to_string();
+        assert!(err.contains("module id 'one'"), "{err}");
+        assert!(
+            err.contains(&a.path().join("one").display().to_string()),
+            "{err}"
+        );
+    }
 
     #[test]
     fn loads_hello_module() {

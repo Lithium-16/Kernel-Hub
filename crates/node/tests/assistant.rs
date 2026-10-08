@@ -126,6 +126,7 @@ async fn start_node(
         listen: "127.0.0.1:0".parse().unwrap(),
         token: TOKEN.into(),
         modules_dir,
+        extra_modules_dirs: vec![],
         data_dir: data.to_path_buf(),
         python: PathBuf::from(python).to_string_lossy().into_owned(),
         node: "node".into(),

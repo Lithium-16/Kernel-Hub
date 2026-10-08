@@ -18,6 +18,10 @@ pub struct Config {
     /// Shared secret clients send in `hello`. Replaced by pairing tokens later in phase 0.
     pub token: String,
     pub modules_dir: PathBuf,
+    /// More folders to load modules from, after `modules_dir`. Self-updates only replace
+    /// `modules_dir`, so modules kept here stay put.
+    #[serde(default)]
+    pub extra_modules_dirs: Vec<PathBuf>,
     pub data_dir: PathBuf,
     /// Python interpreter used for `runtime = "python"` modules (must have kernel_sdk installed).
     #[serde(default = "default_python")]
@@ -244,10 +248,20 @@ impl Config {
             toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
         let base = path.parent().unwrap_or(Path::new("."));
         cfg.modules_dir = absolutize(base, &cfg.modules_dir);
+        for dir in &mut cfg.extra_modules_dirs {
+            *dir = absolutize(base, dir);
+        }
         cfg.data_dir = absolutize(base, &cfg.data_dir);
         cfg.path = Some(path.clone());
         cfg.validate()?;
         Ok(cfg)
+    }
+
+    /// Every folder modules are loaded from: `modules_dir`, then `extra_modules_dirs`.
+    pub fn module_dirs(&self) -> Vec<&Path> {
+        std::iter::once(self.modules_dir.as_path())
+            .chain(self.extra_modules_dirs.iter().map(PathBuf::as_path))
+            .collect()
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -334,6 +348,32 @@ ping_interval_ms = 500
         assert_eq!(cfg.listen.port(), 47800);
         assert_eq!(cfg.supervisor.ping_interval_ms, 500);
         assert_eq!(cfg.supervisor.max_crashes, 5);
+    }
+
+    #[test]
+    fn extra_module_dirs_resolve_and_follow_modules_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("node.toml");
+        let abs = dir.path().join("abs");
+        std::fs::write(
+            &path,
+            format!(
+                "node_id='a'\nnode_name='A'\ntoken='long-enough'\nmodules_dir='m'\ndata_dir='d'\n\
+                 extra_modules_dirs=['more', {:?}]\n",
+                abs.to_string_lossy()
+            ),
+        )
+        .unwrap();
+        let cfg = Config::load(&path).unwrap();
+        let more = dir.path().join("more");
+        assert_eq!(
+            cfg.module_dirs(),
+            [
+                dir.path().join("m").as_path(),
+                more.as_path(),
+                abs.as_path()
+            ]
+        );
     }
 
     #[test]
