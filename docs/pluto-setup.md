@@ -182,6 +182,12 @@ The games (3 to 8 players; Bluff Buffet works with 2):
 - **Bluff Buffet**: write a believable lie for a weird true fact, then find the truth.
 - **Shirt Showdown**: draw designs, write slogans, make shirts and battle them.
 
+To try a game alone, move the mouse on the host screen and press **Add bot** (or ask the
+assistant to add bots). Bots answer, lie, draw and vote by themselves; with three bots the host
+screen's **Start** plays a whole game on its own. They stay out of the hall of fame, and
+**Remove bots** clears them. Friends on a laptop can join with the same link: on a big window the
+page spreads out, with the question on the left and a bigger drawing pad.
+
 It remembers who played: a profile per name (a new phone asks for the profile's 4-digit PIN),
 monthly seasons with a champion, a hall of fame, greatest hits and badges, shown between games.
 Only people in the room see it. It's saved in `data\module-data\party\party.db`; **Rename
