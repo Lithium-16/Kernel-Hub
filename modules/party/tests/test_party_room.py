@@ -605,3 +605,35 @@ async def test_picture_backgrounds_are_served_by_name_only():
             assert (await client.get(f"/bg/{bad}")).status == 404
     finally:
         await client.close()
+
+
+def test_how_to_play_card_before_a_new_game():
+    r, events = room(how_to_play=True)
+    for _ in range(3):
+        r.add_bot()
+    ann = connect(r, "Ann")
+    r.handle(ann.pid, {"type": "start", "game": "quip"})
+    view = r.room_view()
+    assert r.state == "playing" and r.game is None and view["intro"]["game"] == "quip"
+    assert 0 < view["intro"]["ends_in"] <= Room.INTRO_S
+    with pytest.raises(Invalid, match="how-to-play"):
+        r.handle(ann.pid, {"type": "answer", "text": "hi"})
+    r.clock.t += 5
+    assert not r.tick() and r.game is None  # bots don't cut the card short
+    r.clock.t += Room.INTRO_S
+    assert r.tick() and r.game is not None and r.room_view()["intro"] is None
+    r.end_game()
+    r.night_games.append("Quip Clash")  # played tonight: no card the second time
+    r.start("quip")
+    assert r.game is not None
+    r.end_game()
+    r.start("bluff")  # a new game gets its card; the VIP can skip it
+    assert r.game is None and r.intro
+    r.handle(ann.pid, {"type": "skip"})
+    assert r.game is not None and r.game.key == "bluff"
+    r.end_game()
+    r2, _ = room(how_to_play=False)
+    for _ in range(3):
+        r2.add_bot()
+    r2.start("quip")
+    assert r2.game is not None

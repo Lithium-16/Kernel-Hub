@@ -30,6 +30,8 @@ timer_scale = 1.0
 bluff_questions = 5
 # Rounds of Shirt Showdown before the final (1 to 3).
 shirt_rounds = 2
+# Show a short how-to-play card before each game (only the first time it's played in a night).
+how_to_play = true
 # Rounds of Drama Club (1 or 2; round 2 keeps the cast and picks a new theme).
 drama_rounds = 1
 # A Discord channel webhook (https://discord.com/api/webhooks/...) that gets tonight's recap

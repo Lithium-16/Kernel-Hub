@@ -44,6 +44,8 @@ STATIC = {
     "host.js": "text/javascript",
     "draw.js": "text/javascript",
     "scenes.js": "text/javascript",
+    "howto.js": "text/javascript",
+    "sound.js": "text/javascript",
 }
 # The host page for a room that has closed (or a wrong link): a way back, never a dead end.
 GONE_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -112,6 +114,7 @@ class Room:
         self.state = "lobby"  # lobby, playing or results
         self.choice = "quip"
         self.results: dict[str, Any] | None = None
+        self.intro: dict[str, Any] | None = None  # {"game", "until"}: the how-to-play card before a game
         self.night: dict[str, int] = {}  # points tonight, across games
         self.night_wins: dict[str, int] = {}
         self.night_hits: list[dict[str, Any]] = []
@@ -253,12 +256,36 @@ class Room:
 
     # -- playing --------------------------------------------------------------------------
 
+    INTRO_S = 12.0
+
     def start(self, key: Any) -> None:
+        """Starts a game, after a how-to-play card the first time it's played tonight."""
         cls = GAMES.get(key) if isinstance(key, str) else None
         if cls is None:
             raise Invalid("Pick a game first.")
         if self.state == "playing":
             raise Invalid("A game is already on.")
+        here = sum(1 for s in self.seats.values() if s.connected)
+        if here < cls.min_players:
+            raise Invalid(f"{cls.title} needs at least {cls.min_players} players.")
+        if self.settings.get("how_to_play", False) and cls.title not in self.night_games:
+            scale = float(self.settings.get("timer_scale", 1.0))
+            self.intro = {"game": key, "until": self.clock() + self.INTRO_S * max(1.0, scale)}
+            self.choice, self.state, self.results = key, "playing", None
+            return
+        self._begin(key)
+
+    def _end_intro(self) -> None:
+        intro, self.intro = self.intro, None
+        assert intro is not None
+        self.state = "lobby"
+        try:
+            self._begin(intro["game"])
+        except Invalid:
+            pass  # someone left during the card: back to the lobby
+
+    def _begin(self, key: str) -> None:
+        cls = GAMES[key]
         pids = [p for p, s in self.seats.items() if s.connected]
         if len(pids) < cls.min_players:
             raise Invalid(f"{cls.title} needs at least {cls.min_players} players.")
@@ -278,7 +305,7 @@ class Room:
         self.emit("game.started", f"{cls.title} started with {', '.join(names[p] for p in pids)}", game=cls.title)
 
     def end_game(self) -> None:
-        self.game, self.state = None, "lobby"
+        self.game, self.state, self.intro = None, "lobby", None
 
     def to_lobby(self) -> None:
         if self.state == "playing":
@@ -376,6 +403,11 @@ class Room:
         self._cards.pop(seat.profile, None)
 
     def tick(self) -> bool:
+        if self.intro is not None:
+            if self.clock() >= self.intro["until"]:
+                self._end_intro()
+                return True
+            return False
         if self.game is None:
             return False
         moved = self._bots_play(self.clock())
@@ -386,6 +418,9 @@ class Room:
         return changed
 
     def skip(self) -> None:
+        if self.intro is not None:
+            self._end_intro()
+            return
         if self.game is None:
             raise Invalid("No game is on.")
         self.game.skip(self.clock())
@@ -410,6 +445,8 @@ class Room:
             self.to_lobby()
         elif kind in ("choose", "start", "skip", "lobby"):
             raise Invalid("Only the VIP can do that.")
+        elif self.intro is not None:
+            raise Invalid("Hang on: the game starts right after the how-to-play card.")
         elif self.game is not None and pid in self.game.pids:
             self.game.handle(pid, msg, self.clock())
             if self.game.tick(self.clock()) and self.game.done:
@@ -451,6 +488,8 @@ class Room:
             "choice": self.choice,
             "vip": self.vip,
             "guest": self.guest,
+            "intro": {"game": self.intro["game"], "ends_in": max(0.0, round(self.intro["until"] - self.clock(), 1))}
+            if self.intro else None,
             "max_players": self.max_players,
             "players": [
                 {"pid": p, "name": s.name, "color": s.color, "connected": s.connected, "bot": s.bot,
@@ -907,9 +946,9 @@ class Party(TailscaleShare):
         return {"room_code": self.room.code, "link": self.join_link()}
 
     async def end_game(self) -> dict[str, Any]:
-        if self.room.game is None:
+        if self.room.game is None and self.room.intro is None:
             raise ActionError("disabled", "no game is being played")
-        title = self.room.game.title
+        title = self.room.game.title if self.room.game else GAMES[self.room.intro["game"]].title
         self.room.end_game()
         await self.server.broadcast()
         return {"ended": title}

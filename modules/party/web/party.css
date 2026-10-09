@@ -2493,3 +2493,131 @@ body.play {
   flex: 0 0 34%;
   scroll-snap-align: start;
 }
+
+/* how-to-play card */
+.howto {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  display: grid;
+  gap: 10px;
+}
+.howto li {
+  counter-increment: step;
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 12px;
+  align-items: start;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.howto li::before {
+  content: counter(step);
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--acc);
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 20px;
+}
+.howto.big-steps {
+  gap: 22px;
+  max-width: 1000px;
+}
+.howto.big-steps li {
+  grid-template-columns: 64px 1fr;
+  gap: 22px;
+  font-size: 32px;
+  align-items: center;
+}
+.howto.big-steps li::before {
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  font-size: 36px;
+}
+.howscore {
+  font-size: 22px;
+  max-width: 1000px;
+}
+.soundchip {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 20;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  font-weight: 800;
+  font-size: 14px;
+  opacity: 0.85;
+}
+.hostctl button[aria-pressed="false"] {
+  opacity: 0.6;
+}
+.hostctl button:focus-visible {
+  outline: 3px solid var(--acc);
+  outline-offset: 2px;
+}
+
+/* accessibility */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.ptitle:focus,
+.wait h2:focus {
+  outline: none;
+}
+.phmain,
+.phfoot {
+  zoom: var(--z, 1);
+}
+.phtop .leave,
+.phtop .aa {
+  min-height: 44px;
+  min-width: 44px;
+  flex: none;
+}
+.phtop .leave {
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+.phtop .leave svg {
+  width: 20px;
+  height: 20px;
+}
+.phtop .aa {
+  margin-left: auto;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 2px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 900;
+  font-size: 15px;
+}
+.phtop .aa + .leave {
+  margin-left: 0;
+}
+.moods button,
+.dline .who button {
+  min-height: 44px;
+}
+.dline .x {
+  min-height: 48px;
+}
