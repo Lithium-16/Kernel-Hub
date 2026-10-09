@@ -591,3 +591,17 @@ async def test_leaving_a_room_and_a_closed_room_page():
         await ws.close()
     finally:
         await client.close()
+
+
+async def test_picture_backgrounds_are_served_by_name_only():
+    r, _ = room()
+    server, client = await client_for(r)
+    try:
+        for name in ("classroom_day.webp", "onsen.thumb.webp"):
+            resp = await client.get(f"/bg/{name}")
+            assert resp.status == 200 and resp.headers["Content-Type"] == "image/webp"
+            assert (await resp.read())[8:12] == b"WEBP"
+        for bad in ("nope.webp", "classroom_day.png", "CREDITS.md", "..%2Fplay.js", "classroom.webp"):
+            assert (await client.get(f"/bg/{bad}")).status == 404
+    finally:
+        await client.close()

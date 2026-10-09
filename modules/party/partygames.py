@@ -1236,8 +1236,10 @@ class ShirtShowdown(Game):
 
 EMOTIONS = ("neutral", "flustered", "sad", "angry")
 # The preset visual-novel backgrounds (drawn by web/scenes.js); a stage picks one.
-BACKGROUNDS = ("classroom", "rooftop", "cafe", "bedroom", "park", "beach", "street", "train",
-               "festival", "castle", "spaceship", "haunted")
+PHOTO_BACKGROUNDS = ("classroom_day", "school_hallway", "bedroom_day", "livingroom_night", "kitchen_day",
+                     "restaurant", "city_afternoon", "spring_street", "train_beach", "onsen")  # web/bg/*.webp
+BACKGROUNDS = PHOTO_BACKGROUNDS + ("classroom", "rooftop", "cafe", "bedroom", "park", "beach", "street", "train",
+                                   "festival", "castle", "spaceship", "haunted")
 NARRATOR = 2  # a script line's speaker: 0 and 1 are the scene's two characters
 MAX_LINE, MAX_NAME_C, MAX_BIO, MAX_THEME, MAX_PREMISE = 60, 18, 50, 50, 70
 FALLBACK_NAMES = ["Mystery Guest", "The New Kid", "Someone Shady", "A Stranger", "The Understudy",

@@ -519,7 +519,7 @@
           key: base,
           main: `<span class="kicker">${esc(tag)} · set the stage</span><h2 class="ptitle">Where does this scene happen?</h2>
             ${castCards(job.cast)}
-            <div class="bgpick">${v.backgrounds.map((b) => `<button type="button" data-bg="${b}" aria-pressed="${b === dBg}" aria-label="${esc(S.LABELS[b])}">${S.svg(b)}<span>${esc(S.LABELS[b])}</span></button>`).join('')}</div>
+            <div class="bgpick">${v.backgrounds.map((b) => `<button type="button" data-bg="${b}" aria-pressed="${b === dBg}" aria-label="${esc(S.LABELS[b])}">${S.svg(b, '', true)}<span>${esc(S.LABELS[b])}</span></button>`).join('')}</div>
             <div class="field"><label for="f-premise">What's happening? (one line)</label><input id="f-premise" maxlength="70" autocomplete="off" placeholder="Locked in the bakery at midnight with one cupcake left"></div>`,
           foot: '<button class="big-btn" type="button" data-act="stage">Set the stage</button>',
           input: true,
@@ -537,7 +537,7 @@
         key: lkey,
         main: `<span class="kicker">${esc(tag)} · ${twist ? 'write the twist' : 'write the scene'}</span>
           <h2 class="ptitle">${twist ? 'How does it end?' : esc(job.premise)}</h2>
-          <div class="dstage">${S.svg(job.bg)}<span>${esc(S.LABELS[job.bg] || '')}</span></div>
+          <div class="dstage">${S.svg(job.bg, '', true)}<span>${esc(S.LABELS[job.bg] || '')}</span></div>
           ${twist ? `<p class="pnote">${esc(job.premise)}</p>${sofar}` : castCards(job.cast)}
           <div id="dlines">${lineRows(job, v.max_lines)}</div>`,
         foot: `<button class="big-btn" type="button" data-act="${twist ? 'sendtwist' : 'sendscript'}">${twist ? 'Send the twist' : 'Send the script'}</button>`,
@@ -570,7 +570,7 @@
         key: `${base}:${vs.scene}:${vs.character}`,
         main: `<span class="kicker">Drama Club · vote</span><h2 class="ptitle">Best scene and best character</h2>
           <h3 class="dhead">Best scene</h3>
-          ${v.scenes.map((sc) => `<button class="choice" type="button" aria-pressed="${vs.scene === sc.index}" data-send='${esc(JSON.stringify({ type: 'vote', scene: sc.index }))}'><span class="dthumb">${S.svg(sc.bg)}</span>${esc(sc.premise)}<small>${esc(sc.cast.join(' & '))}</small></button>`).join('')}
+          ${v.scenes.map((sc) => `<button class="choice" type="button" aria-pressed="${vs.scene === sc.index}" data-send='${esc(JSON.stringify({ type: 'vote', scene: sc.index }))}'><span class="dthumb">${S.svg(sc.bg, '', true)}</span>${esc(sc.premise)}<small>${esc(sc.cast.join(' & '))}</small></button>`).join('')}
           <h3 class="dhead">Best character</h3>
           <div class="dgallery">${v.characters.map((c) => `<button type="button" aria-pressed="${vs.character === c.pid}" data-send='${esc(JSON.stringify({ type: 'vote', character: c.pid }))}'>${D.artCanvas(c.face, '')}<span>${esc(c.name)}</span></button>`).join('')}</div>`,
         input: true,

@@ -27,7 +27,7 @@ from typing import Any
 from aiohttp import WSMsgType, web
 from kernel_sdk import ActionError
 from kernel_sdk.webgame import TailscaleShare, run_command
-from partygames import GAMES, Content, Game, Invalid, clean
+from partygames import GAMES, PHOTO_BACKGROUNDS, Content, Game, Invalid, clean
 from partystore import PinNeeded, PinWrong, Store
 
 HERE = Path(__file__).resolve().parent
@@ -549,6 +549,7 @@ class PartyServer:
         app.router.add_post("/host/new", self._new_room)
         app.router.add_get("/health", self._health)
         app.router.add_get("/static/{name}", self._static)
+        app.router.add_get("/bg/{name}", self._background)
         app.router.add_get("/ws", self._ws)
         app.on_startup.append(self._start_ticker)
         app.on_cleanup.append(self._stop_ticker)
@@ -651,6 +652,15 @@ class PartyServer:
         if name not in STATIC:
             raise web.HTTPNotFound()
         return web.FileResponse(WEB / name, headers={"Content-Type": f"{STATIC[name]}; charset=utf-8"})
+
+    async def _background(self, request: web.Request) -> web.StreamResponse:
+        """Drama Club's picture backgrounds (and their thumbnails), by name only."""
+        name = request.match_info["name"]
+        key = name.removesuffix(".webp").removesuffix(".thumb")
+        if key not in PHOTO_BACKGROUNDS or name not in (f"{key}.webp", f"{key}.thumb.webp"):
+            raise web.HTTPNotFound()
+        return web.FileResponse(WEB / "bg" / name, headers={"Content-Type": "image/webp",
+                                                             "Cache-Control": "max-age=86400"})
 
     # -- sockets --------------------------------------------------------------------------
 
