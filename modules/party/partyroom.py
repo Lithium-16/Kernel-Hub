@@ -35,6 +35,8 @@ WEB = HERE / "web"
 CODE_LETTERS = "BCDFGHJKLMNPQRSTVWXZ"  # no vowels: codes never spell words
 COLORS = 8
 MAX_NAME = 16
+# Test players the host can add from the host screen (or Kernel), so a game can be tried alone.
+BOT_NAMES = ["Botley", "Robo Rita", "Unit 7", "Chip", "Sprocket", "Gizmo", "Bleep", "Widget"]
 TICK_S = 0.25
 STATIC = {
     "party.css": "text/css",
@@ -58,10 +60,11 @@ class Seat:
     profile: int | None = None  # in the hall of fame
     device: str = ""  # the phone's profile token, so it signs in by itself next time
     sockets: set[web.WebSocketResponse] = field(default_factory=set)
+    bot: bool = False  # a test player the host added; plays by itself
 
     @property
     def connected(self) -> bool:
-        return bool(self.sockets)
+        return self.bot or bool(self.sockets)
 
 
 class Room:
@@ -102,6 +105,7 @@ class Room:
         self.night_hits: list[dict[str, Any]] = []
         self.night_games: list[str] = []
         self.banned: set[str] = set()  # tokens of kicked players
+        self.bot_due: dict[str, float] = {}  # when each bot makes its next move
         self.content = Content.load(*self.content_dirs)
 
     @property
@@ -114,8 +118,8 @@ class Room:
 
     @property
     def vip(self) -> str | None:
-        """The first player in who's still connected picks the game."""
-        return next((p for p, s in self.seats.items() if s.connected), None)
+        """The first player in who's still connected picks the game (never a bot)."""
+        return next((p for p, s in self.seats.items() if s.connected and not s.bot), None)
 
     def join(self, code: Any, name: Any, token: Any, device: Any = None, pin: Any = None) -> Seat:
         if not isinstance(code, str) or code.strip().upper() != self.code:
@@ -163,9 +167,62 @@ class Room:
         if seat is None:
             raise Invalid(f"Nobody here is called {name}.")
         del self.seats[seat.pid]
-        self.banned.add(seat.token)
+        if not seat.bot:
+            self.banned.add(seat.token)
         self.connections_changed()
         return seat
+
+    def add_bot(self) -> Seat:
+        """A test player that answers and votes by itself (between games only)."""
+        if self.state == "playing":
+            raise Invalid("Add bots between games.")
+        if len(self.seats) >= self.max_players:
+            raise Invalid(f"The room is full ({self.max_players} players).")
+        taken = {s.name.lower() for s in self.seats.values()}
+        name = next((n for n in BOT_NAMES if n.lower() not in taken), None)
+        k = 2
+        while name is None:
+            name = next((f"{n} {k}" for n in BOT_NAMES if f"{n} {k}".lower() not in taken), None)
+            k += 1
+        used = {s.color for s in self.seats.values()}
+        color = next((c for c in range(COLORS) if c not in used), 0)
+        seat = Seat(secrets.token_hex(4), name, secrets.token_urlsafe(18), color, bot=True)
+        self.seats[seat.pid] = seat
+        self.night.setdefault(seat.pid, 0)
+        return seat
+
+    def remove_bots(self) -> int:
+        if self.state == "playing":
+            raise Invalid("Remove bots between games.")
+        bots = [p for p, s in self.seats.items() if s.bot]
+        for p in bots:
+            del self.seats[p]
+        return len(bots)
+
+    def _bots_play(self, now: float) -> bool:
+        """Bots the game is waiting on make their move a few seconds after the phase starts."""
+        g = self.game
+        assert g is not None
+        waiting = g.waiting_on() or set()
+        bots = {p for p in g.pids if p in self.seats and self.seats[p].bot and p in waiting}
+        for p in list(self.bot_due):
+            if p not in bots:
+                del self.bot_due[p]
+        moved = False
+        for p in bots:
+            if p not in self.bot_due:
+                quick = g.phase in ("vote", "final_vote", "pick")
+                self.bot_due[p] = now + self.rng.uniform(1.5, 4) if quick else now + self.rng.uniform(2, 7)
+            elif now >= self.bot_due[p]:
+                del self.bot_due[p]
+                msg = g.bot_move(p)
+                if msg is not None:
+                    try:
+                        g.handle(p, msg, now)
+                        moved = True
+                    except Invalid:
+                        pass
+        return moved
 
     def connections_changed(self) -> None:
         if self.game is not None:
@@ -230,6 +287,9 @@ class Room:
         belong to) and announces them, and a new season champion, as events."""
         if self.store is None:
             return []
+        bots = {p for p, s in self.seats.items() if s.bot}
+        standings = [s for s in standings if s["pid"] not in bots]
+        hits = [h for h in hits if h["pid"] not in bots]
         prof = {p: s.profile for p, s in self.seats.items() if s.profile is not None}
         seat_of = {v: k for k, v in prof.items()}
         out = self.store.record(
@@ -284,7 +344,8 @@ class Room:
     def tick(self) -> bool:
         if self.game is None:
             return False
-        changed = self.game.tick(self.clock())
+        moved = self._bots_play(self.clock())
+        changed = self.game.tick(self.clock()) or moved
         if self.game.done:
             self._finish()
             return True
@@ -338,6 +399,10 @@ class Room:
             self.kick(self.seats[msg["pid"]].name)
         elif kind == "end":
             self.end_game()
+        elif kind == "add_bot":
+            self.add_bot()
+        elif kind == "remove_bots":
+            self.remove_bots()
         else:
             raise Invalid("Unknown command.")
 
@@ -353,7 +418,7 @@ class Room:
             "vip": self.vip,
             "max_players": self.max_players,
             "players": [
-                {"pid": p, "name": s.name, "color": s.color, "connected": s.connected,
+                {"pid": p, "name": s.name, "color": s.color, "connected": s.connected, "bot": s.bot,
                  "score": scores.get(p, 0), "night": self.night.get(p, 0),
                  "playing": self.game is None or p in self.game.pids,
                  "champ": champ is not None and s.profile == champ}
@@ -681,6 +746,25 @@ class Party(TailscaleShare):
         await self.server.kick_sockets(seat)
         await self.server.broadcast()
         return {"kicked": seat.name}
+
+    async def add_bots(self, count: int = 1) -> dict[str, Any]:
+        added = []
+        try:
+            for _ in range(max(1, min(int(count), 8))):
+                added.append(self.room.add_bot().name)
+        except Invalid as e:
+            if not added:
+                raise ActionError("invalid_params", str(e)) from None
+        await self.server.broadcast()
+        return {"added": added, "players": len(self.room.seats)}
+
+    async def remove_bots(self) -> dict[str, Any]:
+        try:
+            n = self.room.remove_bots()
+        except Invalid as e:
+            raise ActionError("invalid_params", str(e)) from None
+        await self.server.broadcast()
+        return {"removed": n}
 
     # -- the hall of fame -----------------------------------------------------------------
 
