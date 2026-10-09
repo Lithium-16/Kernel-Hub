@@ -3,7 +3,9 @@
 // A drawing is a list of strokes on a 400x400 grid:
 //   {c: color, w: width, p: [x0, y0, x1, y1, ...]}   a pen line (c: ink index or "#rrggbb", w: 1-40)
 //   {e: true, w: width, p: [...]}                     an eraser line
-//   {fill: color}                                     paints the whole background
+//   {fill: color}                                     paints the whole background (older drawings)
+//   {ff: color, x, y}                                 a paint-bucket fill from that point
+//   a line with s: true                               straight segments (the line and box tools)
 // partydraw.py checks every drawing on the server with the same rules.
 (() => {
   'use strict';
@@ -43,8 +45,71 @@
 
   // -- drawing strokes ---------------------------------------------------------------------
 
+  const rgb = (c) => {
+    const h = colorOf(c);
+    return [1, 3, 5].map((i) => Number.parseInt(h.slice(i, i + 2), 16));
+  };
+  /**
+   * Paint-bucket fill: colors the area around (x, y) that looks like the pixel there, stopping
+   * at lines. Anti-aliased line edges count as part of the area, so no pale halo is left.
+   */
+  function floodFill(ctx, s, k) {
+    const { width: w, height: h } = ctx.canvas;
+    const x0 = Math.min(w - 1, Math.max(0, Math.floor(s.x * k)));
+    const y0 = Math.min(h - 1, Math.max(0, Math.floor(s.y * k)));
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data;
+    const at = (y0 * w + x0) * 4;
+    const t = [d[at], d[at + 1], d[at + 2], d[at + 3]];
+    const [r, g, b] = rgb(s.ff);
+    if (t[3] === 255 && Math.abs(t[0] - r) + Math.abs(t[1] - g) + Math.abs(t[2] - b) < 8) return;
+    const same = (i) =>
+      t[3] < 8
+        ? d[i + 3] < 140 // an empty spot: fill everything mostly empty
+        : Math.abs(d[i] - t[0]) +
+            Math.abs(d[i + 1] - t[1]) +
+            Math.abs(d[i + 2] - t[2]) +
+            Math.abs(d[i + 3] - t[3]) <
+          90;
+    const seen = new Uint8Array(w * h);
+    const stack = [x0, y0];
+    while (stack.length) {
+      const y = stack.pop();
+      let x = stack.pop();
+      while (x > 0 && !seen[y * w + x - 1] && same((y * w + x - 1) * 4)) x--;
+      let up = false;
+      let down = false;
+      for (; x < w; x++) {
+        const p = y * w + x;
+        if (seen[p] || !same(p * 4)) break;
+        seen[p] = 1;
+        d[p * 4] = r;
+        d[p * 4 + 1] = g;
+        d[p * 4 + 2] = b;
+        d[p * 4 + 3] = 255;
+        if (y > 0) {
+          const q = p - w;
+          const ok = !seen[q] && same(q * 4);
+          if (ok && !up) stack.push(x, y - 1);
+          up = ok;
+        }
+        if (y < h - 1) {
+          const q = p + w;
+          const ok = !seen[q] && same(q * 4);
+          if (ok && !down) stack.push(x, y + 1);
+          down = ok;
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
   /** One stroke, smoothed: a quadratic curve through the midpoints between samples. */
   function drawStroke(ctx, s, k) {
+    if (s.ff !== undefined) {
+      floodFill(ctx, s, k);
+      return;
+    }
     if (s.fill !== undefined) {
       ctx.globalCompositeOperation = 'source-over';
       ctx.fillStyle = colorOf(s.fill);
@@ -70,6 +135,11 @@
     }
     ctx.beginPath();
     ctx.moveTo(p[0] * k, p[1] * k);
+    if (s.s) {
+      for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i] * k, p[i + 1] * k);
+      ctx.stroke();
+      return;
+    }
     for (let i = 2; i < p.length - 2; i += 2) {
       const mx = ((p[i] + p[i + 2]) / 2) * k;
       const my = ((p[i + 1] + p[i + 3]) / 2) * k;
@@ -114,10 +184,22 @@
 
   // -- the drawing studio --------------------------------------------------------------------
 
+  /** A stroke as plain data, in the shape the server accepts. */
+  function plain(s) {
+    if (s.fill !== undefined) return { fill: s.fill };
+    if (s.ff !== undefined) return { ff: s.ff, x: s.x, y: s.y };
+    const out = s.e ? { e: true, w: s.w, p: s.p.slice() } : { c: s.c, w: s.w, p: s.p.slice() };
+    if (s.s) out.s = true;
+    return out;
+  }
+
   const ICONS = {
     pen: '<path d="M4 20l4-1 11-11-3-3L5 16l-1 4z"/><path d="M14 6l3 3"/>',
     eraser: '<path d="M8 20h12"/><path d="M5 15l9-9 5 5-9 9H8l-3-3z"/><path d="M9 11l5 5"/>',
     fill: '<path d="M5 12l7-7 7 7-7 7-7-7z"/><path d="M5 12h14"/><path d="M20 16s2 2.5 2 4a2 2 0 0 1-4 0c0-1.5 2-4 2-4z"/>',
+    line: '<path d="M5 19L19 5"/>',
+    box: '<rect x="4.5" y="6.5" width="15" height="11" rx="1"/>',
+    circle: '<circle cx="12" cy="12" r="7.5"/>',
     undo: '<path d="M9 7L4 12l5 5"/><path d="M4 12h10a6 6 0 0 1 0 12h-2"/>',
     redo: '<path d="M15 7l5 5-5 5"/><path d="M20 12H10a6 6 0 0 0 0 12h2"/>',
     clear: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
@@ -164,7 +246,10 @@
       <div class="tbar" role="toolbar" aria-label="Drawing tools">
         <button type="button" data-tool="pen" aria-pressed="true" aria-label="Pen">${icon('pen')}<span>Pen</span></button>
         <button type="button" data-tool="eraser" aria-pressed="false" aria-label="Eraser">${icon('eraser')}<span>Eraser</span></button>
-        ${opts.sprite ? '' : `<button type="button" data-do="fill" aria-label="Fill the background with this color">${icon('fill')}<span>Fill</span></button>`}
+        <button type="button" data-tool="fill" aria-pressed="false" aria-label="Fill: tap an area to color it">${icon('fill')}<span>Fill</span></button>
+        <button type="button" data-tool="line" aria-pressed="false" aria-label="Straight line">${icon('line')}<span>Line</span></button>
+        <button type="button" data-tool="box" aria-pressed="false" aria-label="Box">${icon('box')}<span>Box</span></button>
+        <button type="button" data-tool="circle" aria-pressed="false" aria-label="Circle">${icon('circle')}<span>Circle</span></button>
         <button type="button" data-do="undo" aria-label="Undo">${icon('undo')}<span>Undo</span></button>
         <button type="button" data-do="redo" aria-label="Redo">${icon('redo')}<span>Redo</span></button>
         <button type="button" data-do="clear" aria-label="Clear the drawing">${icon('clear')}<span>Clear</span></button>
@@ -180,7 +265,6 @@
     const cctx = cache.getContext('2d');
     const range = root.querySelector('input[type=range]');
     const guide = opts.guide && opts.guide.length ? document.createElement('canvas') : null;
-    if (opts.sprite) root.querySelector('.tbar').classList.add('five');
 
     const live = () => {
       let from = 0;
@@ -238,7 +322,10 @@
       for (const b of root.querySelectorAll('[data-tool]'))
         b.setAttribute('aria-pressed', String(b.dataset.tool === tool));
       for (const b of root.querySelectorAll('[data-color]'))
-        b.setAttribute('aria-pressed', String(tool === 'pen' && String(color) === b.dataset.color));
+        b.setAttribute(
+          'aria-pressed',
+          String(tool !== 'eraser' && String(color) === b.dataset.color),
+        );
       root.querySelector('[data-do="undo"]').disabled = !history.length;
       root.querySelector('[data-do="redo"]').disabled = !undone.length;
       root.querySelector('[data-do="clear"]').disabled = !live().length;
@@ -265,16 +352,51 @@
       const y = Math.round(((e.clientY - r.top) / r.height) * SIZE);
       return [Math.max(0, Math.min(SIZE, x)), Math.max(0, Math.min(SIZE, y))];
     };
+    // Shapes: drag from one corner to the other; the stroke is rebuilt on every move.
+    let origin = null;
+    function shape(x, y) {
+      const [x0, y0] = origin;
+      if (tool === 'line') return [x0, y0, x, y];
+      if (tool === 'box') return [x0, y0, x, y0, x, y, x0, y, x0, y0];
+      const cx = (x0 + x) / 2;
+      const cy = (y0 + y) / 2;
+      const rx = Math.abs(x - x0) / 2;
+      const ry = Math.abs(y - y0) / 2;
+      const out = [];
+      for (let i = 0; i <= 48; i++) {
+        const a = (i / 48) * Math.PI * 2;
+        out.push(Math.round(cx + rx * Math.cos(a)), Math.round(cy + ry * Math.sin(a)));
+      }
+      return out.map((v) => Math.max(0, Math.min(SIZE, v)));
+    }
     canvas.addEventListener('pointerdown', (e) => {
       if (current || points() >= MAX_POINTS) return;
       e.preventDefault();
+      if (tool === 'fill') {
+        const [x, y] = at(e);
+        history.push({ ff: color, x, y });
+        undone.length = 0;
+        drawStroke(cctx, history[history.length - 1], k());
+        frame();
+        syncTools();
+        return;
+      }
       canvas.setPointerCapture(e.pointerId);
-      current =
-        tool === 'eraser' ? { e: true, w: size, p: at(e) } : { c: color, w: size, p: at(e) };
+      if (tool === 'line' || tool === 'box' || tool === 'circle') {
+        origin = at(e);
+        current = { c: color, w: size, p: [...origin, ...origin] };
+        if (tool !== 'circle') current.s = true;
+      } else
+        current =
+          tool === 'eraser' ? { e: true, w: size, p: at(e) } : { c: color, w: size, p: at(e) };
       later();
     });
     canvas.addEventListener('pointermove', (e) => {
       if (!current) return;
+      if (origin) {
+        current.p = shape(...at(e));
+        return later();
+      }
       const samples = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
       for (const s of samples.length ? samples : [e]) {
         const [x, y] = at(s);
@@ -287,6 +409,7 @@
     });
     const end = () => {
       if (!current) return;
+      origin = null;
       history.push(current);
       undone.length = 0;
       drawStroke(cctx, current, k());
@@ -304,10 +427,6 @@
       else if (what === 'clear' && live().length) {
         history.push({ clear: true });
         undone.length = 0;
-      } else if (what === 'fill') {
-        history.push({ fill: color });
-        undone.length = 0;
-        tool = 'pen';
       } else return;
       rebuild();
       syncTools();
@@ -320,7 +439,7 @@
       else if (b.dataset.color) {
         const c = b.dataset.color;
         color = /^\d+$/.test(c) ? Number(c) : c;
-        tool = 'pen';
+        if (tool === 'eraser') tool = 'pen';
       }
       syncTools();
     });
@@ -330,7 +449,7 @@
         syncTools();
       } else if (e.target.type === 'color') {
         color = e.target.value.toLowerCase();
-        tool = 'pen';
+        if (tool === 'eraser') tool = 'pen';
         syncTools();
       }
     });
@@ -353,14 +472,7 @@
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
     colorsRow();
-    const copy = (list) =>
-      (list || []).map((s) =>
-        s.fill !== undefined
-          ? { fill: s.fill }
-          : s.e
-            ? { e: true, w: s.w, p: s.p.slice() }
-            : { c: s.c, w: s.w, p: s.p.slice() },
-      );
+    const copy = (list) => (list || []).map(plain);
     if (opts.start && opts.start.length) history.push(...copy(opts.start));
     resize();
 
@@ -374,14 +486,7 @@
         syncTools();
       },
       /** What gets sent: everything since the last clear, as plain data. */
-      strokes: () =>
-        live().map((s) =>
-          s.fill !== undefined
-            ? { fill: s.fill }
-            : s.e
-              ? { e: true, w: s.w, p: s.p.slice() }
-              : { c: s.c, w: s.w, p: s.p.slice() },
-        ),
+      strokes: () => live().map(plain),
       empty: () => live().every((s) => s.e),
       destroy() {
         ro.disconnect();

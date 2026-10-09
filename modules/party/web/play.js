@@ -409,7 +409,7 @@
                   )
                   .join('')}</div>`
           }
-          <div class="row"><input data-ltext="${i}" maxlength="60" autocomplete="off" placeholder="${ln.who === 2 ? 'What happens…' : 'What they say…'}" value="${esc(ln.text)}">${dLines.lines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line">×</button>` : ''}</div>
+          <div class="row"><input data-ltext="${i}" maxlength="80" autocomplete="off" placeholder="${ln.who === 2 ? 'What happens…' : 'What they say…'}" value="${esc(ln.text)}">${dLines.lines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line">×</button>` : ''}</div>
         </div>`,
       )
       .join('')}
@@ -502,7 +502,7 @@
         input: true,
       };
     }
-    if (v.phase === 'stage' || v.phase === 'script' || v.phase === 'twist') {
+    if (v.phase === 'script' || v.phase === 'twist') {
       const job = v.job;
       if (!job || job.done)
         return {
@@ -513,18 +513,6 @@
           ),
           foot: skipBtn(),
         };
-      if (v.phase === 'stage') {
-        if (!dBg) dBg = v.backgrounds[0];
-        return {
-          key: base,
-          main: `<span class="kicker">${esc(tag)} · set the stage</span><h2 class="ptitle">Where does this scene happen?</h2>
-            ${castCards(job.cast)}
-            <div class="bgpick">${v.backgrounds.map((b) => `<button type="button" data-bg="${b}" aria-pressed="${b === dBg}" aria-label="${esc(S.LABELS[b])}">${S.svg(b, '', true)}<span>${esc(S.LABELS[b])}</span></button>`).join('')}</div>
-            <div class="field"><label for="f-premise">What's happening? (one line)</label><input id="f-premise" maxlength="70" autocomplete="off" placeholder="Locked in the bakery at midnight with one cupcake left"></div>`,
-          foot: '<button class="big-btn" type="button" data-act="stage">Set the stage</button>',
-          input: true,
-        };
-      }
       const twist = v.phase === 'twist';
       const lkey = `${base}:${job.premise}`;
       if (!dLines || dLines.key !== lkey)
@@ -533,12 +521,22 @@
       const sofar = twist
         ? `<div class="card dsofar">${job.lines.map((ln) => `<p><b>${esc(names[ln.who])}</b>${ln.who === 2 ? '' : ` <i>(${MOODS[ln.emotion].toLowerCase()})</i>`}: ${esc(ln.text)}</p>`).join('')}</div>`
         : '';
+      if (!twist && !v.backgrounds.includes(dBg)) dBg = v.backgrounds[0];
+      const head = twist
+        ? `<h2 class="ptitle">How does it end?</h2>
+          <div class="dstage">${S.svg(job.bg, '', true)}<span>${esc(S.LABELS[job.bg] || '')}</span></div>
+          <p class="pnote">${esc(job.premise)}</p>${sofar}`
+        : `<h2 class="ptitle">Write the scene</h2>
+          <p class="pnote">You only know these two by name and bio. ${v.has_twist ? 'Set it up and build the drama, then <b>stop on a cliffhanger</b>: someone else writes the ending.' : 'Give it a beginning, a middle and an end.'}</p>
+          ${castCards(job.cast)}
+          <h3 class="dhead">Where?</h3>
+          <div class="bgpick row">${v.backgrounds.map((b) => `<button type="button" data-bg="${b}" aria-pressed="${b === dBg}" aria-label="${esc(S.LABELS[b])}">${S.svg(b, '', true)}<span>${esc(S.LABELS[b])}</span></button>`).join('')}</div>
+          <div class="field"><label for="f-premise">What's happening? (the scene's title)</label><input id="f-premise" maxlength="70" autocomplete="off" placeholder="Locked in the bakery at midnight with one cupcake left"></div>
+          <h3 class="dhead">The script</h3>`;
       return {
         key: lkey,
         main: `<span class="kicker">${esc(tag)} · ${twist ? 'write the twist' : 'write the scene'}</span>
-          <h2 class="ptitle">${twist ? 'How does it end?' : esc(job.premise)}</h2>
-          <div class="dstage">${S.svg(job.bg, '', true)}<span>${esc(S.LABELS[job.bg] || '')}</span></div>
-          ${twist ? `<p class="pnote">${esc(job.premise)}</p>${sofar}` : castCards(job.cast)}
+          ${head}
           <div id="dlines">${lineRows(job, v.max_lines)}</div>`,
         foot: `<button class="big-btn" type="button" data-act="${twist ? 'sendtwist' : 'sendscript'}">${twist ? 'Send the twist' : 'Send the script'}</button>`,
         after: () => {
@@ -911,11 +909,6 @@
       lastKey = '';
       return render();
     }
-    if (a === 'stage') {
-      const premise = ($('f-premise').value || '').trim();
-      if (!premise) return showErr("Write what's happening in one line.");
-      return send({ type: 'stage', bg: dBg, premise });
-    }
     if (a === 'addline' && dLines && dJob) {
       const last = dLines.lines[dLines.lines.length - 1];
       dLines.lines.push({ who: last.who === 0 ? 1 : 0, emotion: 'neutral', text: '' });
@@ -925,7 +918,10 @@
       const lines = dLines.lines.map((ln) => ({ ...ln, text: ln.text.trim() }));
       if (lines.some((ln) => !ln.text))
         return showErr('A line is empty: write something or remove it.');
-      return send({ type: a === 'sendtwist' ? 'twist' : 'script', lines });
+      if (a === 'sendtwist') return send({ type: 'twist', lines });
+      const premise = ($('f-premise').value || '').trim();
+      if (!premise) return showErr("Give the scene a title: what's happening, in one line.");
+      return send({ type: 'script', bg: dBg, premise, lines });
     }
     if (a === 'join') return join();
     if (a === 'leave') {

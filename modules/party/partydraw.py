@@ -5,7 +5,9 @@ A drawing is a list of strokes on a 400×400 grid (web/draw.js makes and draws t
 - `{"c": color, "w": width, "p": [x0, y0, x1, y1, …]}`: a pen line. `color` is an index into
   INK or a "#rrggbb" color; `width` is 1 to 40.
 - `{"e": true, "w": width, "p": […]}`: an eraser line.
-- `{"fill": color}`: paints the whole background.
+- `{"fill": color}`: paints the whole background (older drawings).
+- `{"ff": color, "x": x, "y": y}`: a paint-bucket fill from that point (only the area it's in).
+- a pen or eraser line with `"s": true` has straight segments (the line and box tools).
 
 Anything else is refused, so a phone can't send a huge or broken drawing.
 """
@@ -52,6 +54,11 @@ def check_drawing(strokes: Any, sprite: bool = False) -> list[dict[str, Any]]:
     for s in strokes:
         if not isinstance(s, dict):
             raise BadDrawing(BROKEN)
+        if set(s) == {"ff", "x", "y"}:  # a paint-bucket fill from a point (fills that area only)
+            if not _int(s["x"], 0, SIZE) or not _int(s["y"], 0, SIZE):
+                raise BadDrawing(BROKEN)
+            out.append({"ff": _color(s["ff"]), "x": s["x"], "y": s["y"]})
+            continue
         if set(s) == {"fill"}:
             if sprite:
                 raise BadDrawing("Characters can't have a background fill: the scene goes behind them.")
@@ -59,7 +66,10 @@ def check_drawing(strokes: Any, sprite: bool = False) -> list[dict[str, Any]]:
             continue
         w, p = s.get("w"), s.get("p")
         eraser = s.get("e") is True
-        if set(s) - {"c", "w", "p", "e"} or (not eraser and "c" not in s) or ("e" in s and not eraser):
+        straight = s.get("s") is True  # straight segments (lines and boxes), not smoothed
+        if set(s) - {"c", "w", "p", "e", "s"} or (not eraser and "c" not in s) or ("e" in s and not eraser):
+            raise BadDrawing(BROKEN)
+        if "s" in s and not straight:
             raise BadDrawing(BROKEN)
         if not _int(w, MIN_W, MAX_W) or not isinstance(p, list):
             raise BadDrawing(BROKEN)
@@ -68,7 +78,10 @@ def check_drawing(strokes: Any, sprite: bool = False) -> list[dict[str, Any]]:
         points += len(p) // 2
         if points > MAX_POINTS:
             raise BadDrawing("That drawing is too detailed. Undo a few lines and send it again.")
-        out.append({"e": True, "w": w, "p": list(p)} if eraser else {"c": _color(s["c"]), "w": w, "p": list(p)})
+        line: dict[str, Any] = {"e": True, "w": w, "p": list(p)} if eraser else {"c": _color(s["c"]), "w": w, "p": list(p)}
+        if straight:
+            line["s"] = True
+        out.append(line)
     if all(s.get("e") for s in out):
         raise BadDrawing("Draw something first.")
     return out

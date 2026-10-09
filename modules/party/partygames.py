@@ -1235,13 +1235,13 @@ class ShirtShowdown(Game):
 # -- Drama Club ----------------------------------------------------------------------------
 
 EMOTIONS = ("neutral", "flustered", "sad", "angry")
-# The preset visual-novel backgrounds (drawn by web/scenes.js); a stage picks one.
+# The preset visual-novel backgrounds (web/bg pictures and web/scenes.js drawings); the scene writer picks one.
 PHOTO_BACKGROUNDS = ("classroom_day", "school_hallway", "bedroom_day", "livingroom_night", "kitchen_day",
                      "restaurant", "city_afternoon", "spring_street", "train_beach", "onsen")  # web/bg/*.webp
 BACKGROUNDS = PHOTO_BACKGROUNDS + ("classroom", "rooftop", "cafe", "bedroom", "park", "beach", "street", "train",
                                    "festival", "castle", "spaceship", "haunted")
 NARRATOR = 2  # a script line's speaker: 0 and 1 are the scene's two characters
-MAX_LINE, MAX_NAME_C, MAX_BIO, MAX_THEME, MAX_PREMISE = 60, 18, 50, 50, 70
+MAX_LINE, MAX_NAME_C, MAX_BIO, MAX_THEME, MAX_PREMISE = 80, 18, 50, 50, 70
 FALLBACK_NAMES = ["Mystery Guest", "The New Kid", "Someone Shady", "A Stranger", "The Understudy",
                   "Background Extra", "Plot Device", "Extra #4"]  # each fits MAX_NAME_C
 
@@ -1264,7 +1264,6 @@ class Character:
 @dataclass
 class Story:
     cast: tuple[str, str]  # whose characters (= their artists)
-    stage_by: str
     script_by: str
     twist_by: str | None
     bg: str = ""
@@ -1273,21 +1272,21 @@ class Story:
     twist: list[dict[str, Any]] = field(default_factory=list)
 
     def writers(self) -> set[str]:
-        return {self.stage_by, self.script_by} | ({self.twist_by} if self.twist_by else set())
+        return {self.script_by} | ({self.twist_by} if self.twist_by else set())
 
 
 class DramaClub(Game):
     """A visual novel made Gartic style. Everyone pitches a theme and the room picks one; everyone
-    draws a character in four moods; then each scene passes along: one player picks the stage
-    and premise for two characters they've only read about, another writes the script, a third
-    writes the twist. Nobody sees the characters until the big screen plays every scene. Then
+    draws a character in four moods; then each scene passes along: one player gets two characters
+    they've only read about, picks the background, names the situation and writes the scene;
+    another writes the twist ending. Nobody sees the characters until the big screen plays every scene. Then
     everyone votes for the best scene and the best character."""
 
     key = "drama"
     title = "Drama Club"
-    PITCH_S, PITCH_VOTE_S, CAST_S, STAGE_S, SCRIPT_S, TWIST_S, VOTE_S, SCORES_S = 40, 20, 180, 45, 150, 60, 30, 8
-    MAX_LINES, MAX_TWIST = 6, 2
-    SCENE_PTS = {"script": 400, "twist": 250, "stage": 200, "art": 75}  # per scene vote (1000)
+    PITCH_S, PITCH_VOTE_S, CAST_S, SCRIPT_S, TWIST_S, VOTE_S, SCORES_S = 40, 20, 240, 210, 75, 30, 8
+    MAX_LINES, MAX_TWIST = 8, 3
+    SCENE_PTS = {"script": 550, "twist": 300, "art": 75}  # per scene vote (1000)
     CHARACTER_PTS, THEME_PTS = 500, 250
 
     def __init__(self, pids, content, rng, now, timer_scale=1.0, names=None, rounds: int = 1, used=None):
@@ -1317,17 +1316,15 @@ class DramaClub(Game):
 
     def _deal_stories(self) -> None:
         """Story s stars the characters of order[s] and order[s+1+k] (k = round - 1, so round 2
-        pairs differently). Stage, script and twist go to fixed offsets along the order that
-        aren't the cast's, so in every step each player has exactly one job and never works on
-        their own character. With 3 players the stage player also writes the script (no twist);
-        with 4 the stage player writes the twist (they haven't read the script)."""
+        pairs differently). The writer and the twist writer sit at fixed offsets along the order
+        that aren't the cast's, so in every step each player has exactly one job and never works
+        on their own character. With 3 players there is no twist."""
         o, n, k = self.order, len(self.order), self.round - 1
         free = [d for d in range(1, n) if d != 1 + k]
-        stage_d = free[0]
-        script_d = free[1] if len(free) > 1 else stage_d
-        twist_d = free[2] if len(free) > 2 else (stage_d if self.has_twist() else None)
+        script_d = free[0]
+        twist_d = free[1] if len(free) > 1 and self.has_twist() else None
         self.stories = [
-            Story((o[s], o[(s + 1 + k) % n]), o[(s + stage_d) % n], o[(s + script_d) % n],
+            Story((o[s], o[(s + 1 + k) % n]), o[(s + script_d) % n],
                   o[(s + twist_d) % n] if twist_d is not None else None)
             for s in range(n)
         ]
@@ -1337,7 +1334,7 @@ class DramaClub(Game):
 
     def job(self, pid: str) -> Story | None:
         """The story this player works on in the current step."""
-        role = {"stage": "stage_by", "script": "script_by", "twist": "twist_by"}.get(self.phase)
+        role = {"script": "script_by", "twist": "twist_by"}.get(self.phase)
         if role is None:
             return None
         return next((st for st in self.stories if getattr(st, role) == pid), None)
@@ -1352,8 +1349,6 @@ class DramaClub(Game):
             return {p for p in self.pids if p not in self.theme_votes and self._theme_choices(p)}
         if ph == "cast":
             return {p for p, c in self.characters.items() if not c.name or set(EMOTIONS) - set(c.faces)}
-        if ph == "stage":
-            return {st.stage_by for st in self.stories if not st.bg}
         if ph == "script":
             return {st.script_by for st in self.stories if not st.lines}
         if ph == "twist":
@@ -1382,16 +1377,13 @@ class DramaClub(Game):
         elif ph == "cast":
             self._fill_cast()
             self._deal_stories()
-            self._go("stage", now, self.STAGE_S)
-        elif ph == "stage":
+            self._go("script", now, self.SCRIPT_S)
+        elif ph == "script":
             for st in self.stories:
                 if not st.bg:
                     st.bg = self.rng.choice(BACKGROUNDS)
                 if not st.premise:
                     st.premise = self._idea(self.content.drama_premises) or "Two strangers, one awkward afternoon."
-            self._go("script", now, self.SCRIPT_S)
-        elif ph == "script":
-            for st in self.stories:
                 if not st.lines:
                     st.lines = [self._bot_script_line(i % 2) for i in range(3)]
             if self.has_twist():
@@ -1438,7 +1430,7 @@ class DramaClub(Game):
             self._go("cast", now, self.CAST_S)
         else:  # round 2 keeps the cast
             self._deal_stories()
-            self._go("stage", now, self.STAGE_S)
+            self._go("script", now, self.SCRIPT_S)
 
     def _fill_cast(self) -> None:
         names = [n for n in FALLBACK_NAMES if n not in {c.name for c in self.characters.values()}]
@@ -1451,7 +1443,13 @@ class DramaClub(Game):
 
     def _show_s(self) -> float:
         st = self.stories[self.showing]
-        return 4 + 3.2 * (len(st.lines) + len(st.twist)) + 4
+        return 4.5 + sum(self.line_s(x["text"]) for x in st.lines + st.twist) + 5
+
+    @staticmethod
+    def line_s(text: str) -> float:
+        """How long the big screen shows a line: time to type it out and to read it (the host
+        page uses the same formula)."""
+        return 1.6 + 0.045 * len(text)
 
     def _start_show(self, now: float) -> None:
         self.showing = 0
@@ -1504,21 +1502,17 @@ class DramaClub(Game):
                 self.characters[pid].faces[emotion] = check_drawing(msg.get("strokes"), sprite=True)
             except BadDrawing as e:
                 raise Invalid(str(e)) from None
-        elif ph == "stage" and kind == "stage":
-            st = self.job(pid)
-            if st is None:
-                raise Invalid("Not now: look at the big screen.")
-            bg, premise = msg.get("bg"), clean(msg.get("premise"), MAX_PREMISE)
-            if bg not in BACKGROUNDS:
-                raise Invalid("Pick a background.")
-            if not premise:
-                raise Invalid("Write what's happening in one line.")
-            st.bg, st.premise = bg, premise
         elif ph == "script" and kind == "script":
             st = self.job(pid)
             if st is None:
                 raise Invalid("Not now: look at the big screen.")
-            st.lines = self._lines(msg.get("lines"), self.MAX_LINES)
+            bg, premise = msg.get("bg"), clean(msg.get("premise") or "", MAX_PREMISE)
+            if bg not in BACKGROUNDS:
+                raise Invalid("Pick a background.")
+            if not premise:
+                raise Invalid("Give the scene a title: what's happening, in one line.")
+            lines = self._lines(msg.get("lines"), self.MAX_LINES)
+            st.bg, st.premise, st.lines = bg, premise, lines
         elif ph == "twist" and kind == "twist":
             st = self.job(pid)
             if st is None:
@@ -1555,7 +1549,6 @@ class DramaClub(Game):
             twist_to = st.twist_by or st.script_by
             self._award(st.script_by, self.SCENE_PTS["script"] * n)
             self._award(twist_to, self.SCENE_PTS["twist"] * n)
-            self._award(st.stage_by, self.SCENE_PTS["stage"] * n)
             for a in st.cast:
                 self._award(a, self.SCENE_PTS["art"] * n)
         chars: dict[str, int] = {}
@@ -1603,11 +1596,10 @@ class DramaClub(Game):
             if missing:
                 return {"type": "face", "emotion": missing[0], "strokes": doodle(self.rng, sprite=True)}
             return None
-        if ph == "stage" and (st := self.job(pid)) and not st.bg:
-            return {"type": "stage", "bg": self.rng.choice(BACKGROUNDS),
-                    "premise": (self._idea(self.content.drama_premises) or self._bot_line())[:MAX_PREMISE]}
         if ph == "script" and (st := self.job(pid)) and not st.lines:
-            return {"type": "script", "lines": [self._bot_script_line(i % 2) for i in range(self.rng.randint(3, 5))]}
+            return {"type": "script", "bg": self.rng.choice(BACKGROUNDS),
+                    "premise": (self._idea(self.content.drama_premises) or self._bot_line())[:MAX_PREMISE],
+                    "lines": [self._bot_script_line(i % 2) for i in range(self.rng.randint(3, 6))]}
         if ph == "twist" and (st := self.job(pid)) and not st.twist:
             return {"type": "twist", "lines": [self._bot_script_line(NARRATOR if self.rng.random() < 0.3 else 0)]}
         if ph == "vote":
@@ -1630,7 +1622,7 @@ class DramaClub(Game):
         st = self.stories[i]
         return {"index": i, "cast": [self.characters[a].full() for a in st.cast], "bg": st.bg,
                 "premise": st.premise, "lines": st.lines, "twist": st.twist,
-                "credits": {"cast": list(st.cast), "stage": st.stage_by, "script": st.script_by, "twist": st.twist_by}}
+                "credits": {"cast": list(st.cast), "script": st.script_by, "twist": st.twist_by}}
 
     def _common(self, now: float) -> dict[str, Any]:
         return self.base_view(now) | {"round": self.round, "rounds": self.rounds, "theme": self.theme,
@@ -1639,7 +1631,7 @@ class DramaClub(Game):
     def host_view(self, now: float) -> dict[str, Any]:
         v = self._common(now)
         ph = self.phase
-        if ph in ("pitch", "pitch_vote", "cast", "stage", "script", "twist", "vote"):
+        if ph in ("pitch", "pitch_vote", "cast", "script", "twist", "vote"):
             v["waiting"] = sorted(self.waiting_on() or set())
         if ph == "pitch_vote":
             v["themes"] = [{"pid": p, "text": t} for p, t in self.themes.items()]
@@ -1669,14 +1661,13 @@ class DramaClub(Game):
         elif ph == "cast":
             c = self.characters[pid]
             v["character"] = {"name": c.name, "bio": c.bio, "faces": c.faces}  # only your own art
-        elif ph in ("stage", "script", "twist"):
+        elif ph in ("script", "twist"):
             st = self.job(pid)
             v["job"] = None
             if st is not None:
                 job = self._story_cards(st)
-                done = {"stage": bool(st.bg), "script": bool(st.lines), "twist": pid in self._twisted}[ph]
-                if ph in ("script", "twist"):
-                    job["lines"] = st.lines if ph == "twist" else []
+                done = bool(st.lines) if ph == "script" else pid in self._twisted
+                job["lines"] = st.lines if ph == "twist" else []
                 job["done"] = done
                 v["job"] = job
             v["backgrounds"] = list(BACKGROUNDS)
