@@ -1,0 +1,147 @@
+id = "party"
+name = "Party Games"
+icon = "party-popper"
+version = "0.1.0"
+runtime = "python"
+entry = "main.py"
+
+# Jackbox-style party games hosted on this PC. Open the host link (in this module's status) on
+# the big screen or your stream; friends open the share link on their phones and type the room
+# code. Games: Quip Clash (funny answers, head-to-head votes), Bluff Buffet (fake answers to
+# weird true facts) and Shirt Showdown (draw, write slogans, make shirts, battle them).
+# It only listens on this PC. Share makes it reachable through Tailscale: "anyone with the link"
+# (Tailscale Funnel, a public https address for the game only) or "my tailnet".
+[settings]
+port = 8097
+# The https port of the share link: 443, 8443 or 10000 (Flow Race uses 443, OpenFork 8443).
+share_port = 10000
+# Players in a room at most (2 to 8).
+max_players = 8
+# Multiplies the answering and voting timers (2.0 = twice as long, for a relaxed night).
+timer_scale = 1.0
+# Questions in a Bluff Buffet game (points grow: x1, then x1.5, and x2 on the final question).
+bluff_questions = 5
+# Rounds of Shirt Showdown before the final (1 to 3).
+shirt_rounds = 2
+# A Discord channel webhook (https://discord.com/api/webhooks/...) that gets tonight's recap
+# (standings and best moments) when the room closes. Empty: no recap. Game events also go to
+# Kernel's own Discord alerts if you add "party.*" to [notify] include in node.toml.
+discord_webhook = ""
+# Open connections at most (each browser tab is one).
+max_connections = 64
+# Start the server with the module, and restart it if it stops.
+autostart = true
+tailscale = "tailscale"
+poll_s = 5.0
+
+[[actions]]
+id = "server.start"
+label = "Start server"
+icon = "play"
+description = "Starts the party server so the host screen and phones can connect."
+ai = "safe"
+timeout_s = 30
+
+[[actions]]
+id = "server.stop"
+label = "Stop server"
+icon = "square"
+description = "Stops the party server; anyone playing is disconnected."
+ai = "confirm"
+timeout_s = 30
+
+[[actions]]
+id = "room.new"
+label = "New room"
+icon = "refresh-cw"
+description = "Opens a fresh room with a new code. Everyone in the current room is sent back to the join screen."
+ai = "confirm"
+timeout_s = 30
+
+[[actions]]
+id = "game.end"
+label = "End game"
+icon = "circle-stop"
+description = "Stops the game being played and goes back to the lobby without scores."
+ai = "confirm"
+timeout_s = 30
+
+[[actions]]
+id = "player.kick"
+label = "Kick player"
+icon = "user-x"
+description = "Removes a player from the room; they can't rejoin it from the same phone."
+ai = "confirm"
+timeout_s = 30
+params.name = { type = "string", description = "The player's name, as shown in the room" }
+
+[[actions]]
+id = "share.start"
+label = "Share"
+icon = "share-2"
+description = "Makes the party reachable through Tailscale: by anyone with the link (Funnel, public internet), or only your tailnet."
+ai = "never"
+timeout_s = 120
+params.who = { type = "enum", options = ["anyone with the link", "my tailnet"], default = "anyone with the link" }
+
+[[actions]]
+id = "share.stop"
+label = "Stop sharing"
+icon = "lock"
+description = "Takes the share link down; the party keeps running on this PC."
+ai = "safe"
+timeout_s = 90
+
+[[actions]]
+id = "content.reload"
+label = "Reload prompts"
+icon = "refresh-ccw"
+description = "Reloads prompts, facts and ideas, including your own files in the module's data folder (content/*.txt)."
+ai = "safe"
+timeout_s = 30
+
+[[actions]]
+id = "recap.send"
+label = "Post recap"
+icon = "send"
+description = "Posts tonight's standings and best moments to the Discord webhook in the settings. It's also posted by itself when the room closes."
+ai = "confirm"
+timeout_s = 30
+
+[[actions]]
+id = "hits.remove"
+label = "Remove greatest hit"
+icon = "trash-2"
+description = "Removes one entry from the greatest hits (the ids are in this module's status)."
+ai = "confirm"
+timeout_s = 30
+params.id = { type = "int", description = "The greatest hit's id", min = 1 }
+
+[[actions]]
+id = "player.rename"
+label = "Rename player"
+icon = "pencil"
+description = "Renames a player's profile; their points, badges and rivalries keep going."
+ai = "confirm"
+timeout_s = 30
+params.name = { type = "string", description = "The player's current name" }
+params.new_name = { type = "string", description = "The new name" }
+
+[[actions]]
+id = "player.set_pin"
+label = "Set player PIN"
+icon = "key-round"
+description = "Sets a player's 4-digit PIN (for a friend who forgot theirs). They need it to play as themselves on a new phone."
+ai = "never"
+timeout_s = 30
+params.name = { type = "string", description = "The player's name" }
+params.pin = { type = "string", description = "4 digits" }
+
+[[actions]]
+id = "player.forget"
+label = "Forget player"
+icon = "user-minus"
+description = "Deletes a player's profile: their points, badges, rivalries and greatest hits. Can't be undone."
+ai = "never"
+timeout_s = 30
+params.name = { type = "string", description = "The player's name" }

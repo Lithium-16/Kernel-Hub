@@ -1,0 +1,101 @@
+# Quip Clash prompts, one per line. Lines starting with # are ignored.
+# Add your own in the module's data folder: content/quips.txt (same format).
+A terrible name for a Wi-Fi network at a haunted house
+The real reason the cat knocked it off the table
+The worst thing to find inside a fortune cookie
+A rejected flavor of energy drink
+What your houseplant would put on its LinkedIn
+The least comforting thing a pilot can say over the intercom
+A new Olympic sport nobody asked for
+The worst possible name for a pet goldfish
+What the Roomba is secretly plotting
+A bad slogan for a dentist
+The worst thing to hear from the next toilet stall
+A rejected name for a superhero
+What aliens would review Earth as, in one sentence
+The first thing you'd do if you woke up as a dog
+A bad thing to write in a birthday card for your boss
+The most useless superpower
+Something you shouldn't microwave, but people do anyway
+The worst theme for a wedding
+What the fridge light does when the door is closed
+A rejected Pokémon type
+The worst possible thing to yell during a magic trick
+An honest name for a gym
+A terrible fortune for a fortune teller to give
+What's actually at the bottom of the ocean
+The worst ice cream topping
+Something you'd never want to hear from your barber
+A bad name for a retirement home
+The real reason dinosaurs went extinct
+A strange thing to bring to a job interview
+The most awkward thing to say on a first date
+What the "S" in "IoT" stands for
+A rejected Monopoly property
+The worst motivational poster
+What your phone's autocorrect thinks you meant to say
+A bad name for a pirate ship
+The last thing you want to see in your rearview mirror
+A terrible idea for a reality TV show
+Something you'd find in a wizard's junk drawer
+The worst thing to say right after "I do"
+A rejected emoji
+What a pigeon is thinking right now
+The worst mascot for a hospital
+A bad name for a hair salon
+Something you should never say to a cop
+The worst flavor of chewing gum
+A surprising thing to find in a library book
+What you'd name a band made of grandmas
+The most disappointing prize at the bottom of a cereal box
+A bad excuse for being late to your own wedding
+The worst job at the North Pole
+A rejected title for a Fast and Furious movie
+The worst thing to hear your surgeon hum
+What ghosts do for fun on weekdays
+A new law that would make the world slightly worse
+The worst text to get from your mom
+Something a squirrel would buy with money
+A terrible name for a mattress store
+The worst thing to accidentally reply-all to
+The most unhelpful thing a GPS could say
+A rejected crayon color
+What the Moon complains about
+The worst sound a car can make
+A strange thing for a dog to bring back
+What's really in the secret sauce
+A bad name for a theme park ride
+The worst thing to be famous for
+A rejected board game
+Something you shouldn't say during a eulogy
+The worst way to start a speech
+What the toaster dreams about
+A bad thing to name your Wi-Fi when your neighbors can see it
+The real reason the chicken crossed the road
+A terrible thing to put on a pizza
+The worst gift for a vampire
+A fun fact that's not fun at all
+What your cat does while you're at work
+A rejected Hogwarts house
+The worst thing to whisper to a stranger in an elevator
+A terrible tagline for a funeral home
+The least intimidating name for a gang
+Something you'd hear at a cooking class for robots
+The worst possible name for a cruise ship
+What your past self would say if they saw you now
+A rejected Girl Scout cookie
+The worst thing to find in a hotel room
+An inappropriate time to start a slow clap
+A useless app idea
+The most boring conspiracy theory
+What the bread is thinking in the toaster
+A bad name for a sports team from the moon
+Something you'd say to a genie to waste a wish
+The worst subject for a podcast
+A weird thing to collect
+What {player} is secretly really good at
+The real reason {player} was late today
+What {player} would be famous for in 10 years
+{player}'s most likely search history entry
+What {player} would bring to a desert island
+The title of {player}'s autobiography

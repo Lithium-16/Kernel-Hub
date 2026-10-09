@@ -25,7 +25,7 @@ param(
   [string]$Root = (Join-Path $env:LOCALAPPDATA 'Kernel\node'),
   [int]$Port = 47800,
   # Modules to run. hello is only for tests.
-  [string[]]$Modules = @('minecraft', 'pc-monitor', 'roblox', 'comfyui', 'vram', 'laya', 'flowrace', 'openfork'),
+  [string[]]$Modules = @('minecraft', 'pc-monitor', 'roblox', 'comfyui', 'vram', 'laya', 'flowrace', 'openfork', 'party'),
   [switch]$NoFirewall
 )
 
