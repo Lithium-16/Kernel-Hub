@@ -52,16 +52,27 @@ def test_theme_pitch_and_vote():
     assert g.phase == "pitch" and g.player_view("p0", 1.0)["idea"]
     assert g.player_view("p0", 1.0)["step"] == 1
     for p in pids:
-        g.handle(p, {"type": "theme", "text": f"theme {p}"}, 1.0)
+        g.handle(p, {"type": "theme", "text": f"theme {p}", "problem": f"problem {p}"}, 1.0)
     g.tick(1.0)
     assert g.phase == "pitch_vote"
+    assert {"pid": "p1", "text": "theme p1", "problem": "problem p1"} in g.player_view("p0", 1.0)["themes"]
     with pytest.raises(Invalid, match="someone else"):
         g.handle("p0", {"type": "vote", "choice": "p0"}, 1.0)
     for p in ("p0", "p2", "p3"):
         g.handle(p, {"type": "vote", "choice": "p1"}, 1.0)
     g.handle("p1", {"type": "vote", "choice": "p0"}, 1.0)
     g.tick(1.0)
-    assert g.theme == "theme p1" and g.phase == "create" and g.scores["p1"] == DramaClub.THEME_PTS
+    assert g.theme == "theme p1" and g.problem == "problem p1"
+    assert g.phase == "create" and g.scores["p1"] == DramaClub.THEME_PTS
+    assert g.player_view("p2", 1.0)["problem"] == "problem p1"
+
+
+def test_a_pitch_without_a_problem_gets_one():
+    pids, g = drama(3)
+    g.handle("p0", {"type": "theme", "text": "Space prom"}, 1.0)
+    g.tick(1000.0)
+    g.tick(2000.0)
+    assert g.phase == "create" and g.problem
 
 
 @pytest.mark.parametrize("n", range(3, 9))
@@ -105,6 +116,26 @@ def test_no_peeking_before_the_show():
     assert g.host_view(1.0)["chapter"]["cast"][0]["faces"]
 
 
+def test_headlines_hand_off_between_chapters():
+    pids, g = drama(4)
+    play_to(g, "headline")
+    v = g.player_view("p0", 1.0)
+    assert v["step"] == 4 and v["chapter"]["part"] == g.part(g.chapter_of("p0")) and not v["chapter"]["done"]
+    with pytest.raises(Invalid, match="one sentence"):
+        g.handle("p0", {"type": "headline", "text": " "}, 1.0)
+    for p in pids:
+        g.handle(p, {"type": "headline", "text": f"{p} happens"}, 1.0)
+    g.tick(1.0)
+    assert g.phase == "write"
+    order = [ch.writer for ch in g.chapters]
+    first, mid, last = (g.player_view(order[k], 1.0)["chapter"] for k in (0, 1, 3))
+    assert first["before"] is None and first["after"] == f"{order[1]} happens"
+    assert mid["before"] == f"{order[0]} happens" and mid["headline"] == f"{order[1]} happens"
+    assert last["after"] is None
+    play_to(g, "show")
+    assert g.host_view(1.0)["chapter"]["headline"] == f"{order[0]} happens"
+
+
 def test_writing_a_chapter():
     pids, g = drama(3)
     play_to(g, "write")
@@ -130,13 +161,15 @@ def test_writing_a_chapter():
 
 def test_missing_work_gets_filled_in():
     pids, g = drama(4)
-    for _ in range(6):  # nobody does anything: every timer runs out
+    for _ in range(12):  # nobody does anything: every timer runs out
+        if g.phase == "show":
+            break
         g.tick(10_000.0 * (_ + 1))
     assert g.phase == "show"
     for c in g.characters.values():
         assert c.name and set(c.faces) == set(EMOTIONS)
     for ch in g.chapters:
-        assert ch.bg in BACKGROUNDS and 1 <= len(ch.cast) <= 2 and ch.lines
+        assert ch.headline and ch.bg in BACKGROUNDS and 1 <= len(ch.cast) <= 2 and ch.lines
 
 
 def test_the_show_plays_every_chapter_in_order_then_credits():

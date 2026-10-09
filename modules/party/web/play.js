@@ -459,8 +459,9 @@
       return {
         key: base,
         main: `${top}<h2 class="ptitle">What's tonight's story about?</h2>
-          <p class="pnote">Everyone pitches a theme, then the room votes. Idea: ${esc(v.idea || 'anything dramatic')}</p>
-          <div class="field"><label for="f-theme">Your theme</label><input id="f-theme" maxlength="50" enterkeyhint="send" autocomplete="off" placeholder="A haunted bakery"></div>`,
+          <p class="pnote">Pitch a theme and the problem the story is about. Then the room votes. Idea: ${esc(v.idea || 'anything dramatic')}</p>
+          <div class="field"><label for="f-theme">Your theme</label><input id="f-theme" maxlength="50" autocomplete="off" placeholder="A haunted bakery"></div>
+          <div class="field"><label for="f-problem">The problem: what goes wrong?</label><input id="f-problem" maxlength="70" autocomplete="off" placeholder="Someone stole every croissant"></div>`,
         foot: '<button class="big-btn" type="button" data-act="theme">Pitch it</button>',
         input: true,
       };
@@ -475,7 +476,7 @@
       return {
         key: base,
         main: `${top}<h2 class="ptitle">Which story should we tell?</h2>
-          ${v.themes.map((t) => `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'>${esc(t.text)}</button>`).join('')}`,
+          ${v.themes.map((t) => `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'><span>${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}</span></button>`).join('')}`,
         input: true,
       };
     }
@@ -542,6 +543,27 @@
         input: true,
       };
     }
+    if (v.phase === 'headline') {
+      const ch = v.chapter;
+      if (ch.done)
+        return {
+          key: base + ':done',
+          main:
+            top +
+            wait('Headline in!', 'Next you write the chapter, with the headlines around yours.'),
+          foot: skipBtn(),
+        };
+      const [label, hint] = PART[ch.part];
+      return {
+        key: base,
+        main: `${top}<h2 class="ptitle">What happens in chapter ${ch.number} of ${ch.of}?</h2>
+          <div class="card dpart"><span class="kicker">${esc(label)}</span><span>${esc(hint)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b>. The problem: <b>${esc(v.problem)}</b></span></div>
+          <p class="pnote">One sentence. The writers before and after you will see it, so the story connects. Starring ${v.cast.map((c) => `<b>${esc(c.name)}</b>`).join(', ')}.</p>
+          <div class="field"><label for="f-headline">Your chapter's headline</label><input id="f-headline" maxlength="80" enterkeyhint="send" autocomplete="off" placeholder="Vlad gets blamed for the missing croissants"></div>`,
+        foot: '<button class="big-btn" type="button" data-act="headline">Send headline</button>',
+        input: true,
+      };
+    }
     if (v.phase === 'write') {
       const ch = v.chapter;
       if (ch.done)
@@ -559,7 +581,9 @@
       return {
         key: base,
         main: `${top}<h2 class="ptitle">Write chapter ${ch.number} of ${ch.of}</h2>
-          <div class="card dpart"><span class="kicker">${esc(label)}</span><span>${esc(hint)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b></span></div>
+          <div class="card dpart"><span class="kicker">${esc(label)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b>. The problem: <b>${esc(v.problem)}</b></span>
+            <ol class="dheads">${ch.before ? `<li><small>Before you</small>${esc(ch.before)}</li>` : '<li><small>Before you</small>The story starts with you!</li>'}<li class="me"><small>Your chapter</small>${esc(ch.headline)}</li>${ch.after ? `<li><small>After you</small>${esc(ch.after)}</li>` : '<li><small>After you</small>The end. Wrap it all up!</li>'}</ol>
+            <span class="pnote">${esc(hint)} Get the story from the chapter before into the one after.</span></div>
           <h3 class="dhead">Who's in it? <small>(up to 2)</small></h3>
           <div class="dcastpick">${v.cast.map((c) => `<button type="button" data-dcast="${esc(c.pid)}" aria-pressed="${dCast.includes(c.pid)}"><b>${esc(c.name)}</b><span>${esc(c.look || '')}</span>${c.personality ? `<i>${esc(c.personality)}</i>` : ''}</button>`).join('')}</div>
           <h3 class="dhead">Where?</h3>
@@ -967,7 +991,12 @@
     if (a === 'theme') {
       const t = ($('f-theme').value || '').trim();
       if (!t) return showErr('Write a theme first.');
-      return send({ type: 'theme', text: t });
+      return send({ type: 'theme', text: t, problem: ($('f-problem').value || '').trim() });
+    }
+    if (a === 'headline') {
+      const t = ($('f-headline').value || '').trim();
+      if (!t) return showErr('Write what happens in your chapter, in one sentence.');
+      return send({ type: 'headline', text: t });
     }
     if (a === 'create') {
       const name = ($('f-cname').value || '').trim();
