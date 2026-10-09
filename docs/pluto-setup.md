@@ -161,6 +161,41 @@ Both follow the repository's default branch (`main`). To try a branch first, put
 default branch by itself and tells you. A renamed repository or GitHub username is followed too:
 the module switches to the new name and tells you, so you can save it in `repo`.
 
+## Party Games: Jackbox-style games on your big screen
+
+The **Party Games** module hosts party games on Pluto: the host screen goes on your TV, monitor
+or Discord stream, and friends play on their phones. Nothing to download or build; it's part of
+Kernel.
+
+1. Turn **Party Games** on in **Settings > Node updates and modules**.
+2. Its page shows a **host link**: open it on the big screen (it has a key, so only you can
+   open it; don't send it to anyone).
+3. Press **Share** (same choices as Flow Race, see "What sharing does and doesn't open"
+   above) and send friends the link. It uses port 10000
+   (`https://pluto.tailXXXX.ts.net:10000`), so all three games can be shared at the same time.
+   They open it on their phone, type their name and the room code from the big screen. The
+   first one in is the VIP: they pick the game and press start.
+
+The games (3 to 8 players; Bluff Buffet works with 2):
+
+- **Quip Clash**: answer silly prompts, then everyone votes between two answers.
+- **Bluff Buffet**: write a believable lie for a weird true fact, then find the truth.
+- **Shirt Showdown**: draw designs, write slogans, make shirts and battle them.
+
+It remembers who played: a profile per name (a new phone asks for the profile's 4-digit PIN),
+monthly seasons with a champion, a hall of fame, greatest hits and badges, shown between games.
+Only people in the room see it. It's saved in `data\module-data\party\party.db`; **Rename
+player**, **Set player PIN**, **Forget player** and **Remove greatest hit** fix things up.
+
+Your own prompts and facts (inside jokes welcome; `{player}` becomes a friend in the room) go in
+`data\module-data\party\content\` as `quips.txt`, `facts.txt`, `doodle_ideas.txt` or
+`slogan_ideas.txt`, same format as the built-in ones in `modules\party\content`. Press
+**Reload prompts** after editing.
+
+Games, winners, badges and season champions are events (`party.*` in `[notify] include` sends
+them to Discord). Put a webhook in the module's `discord_webhook` setting to also get a recap of
+the night when the room closes (or press **Post recap**).
+
 ## Discord alerts
 
 Kernel can post to a Discord channel when something happens: the Minecraft server crashes or

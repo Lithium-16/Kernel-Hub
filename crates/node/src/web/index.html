@@ -179,7 +179,7 @@ async function refresh(withModules = false) {
 
 const node = () => catalog.find((m) => m.id === "node");
 const has = (m, action) => !!m && m.actions.some((a) => a.id === action);
-const games = () => catalog.filter((m) => has(m, "game.update"));
+const games = () => catalog.filter((m) => has(m, "game.update") || has(m, "share.start"));
 
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
@@ -236,8 +236,10 @@ function render() {
       row.append(el("a", { className: "btn primary", href: gs.link, target: "_blank", rel: "noopener" }, "Open"),
         el("button", { disabled: busy, onclick: () => { navigator.clipboard?.writeText(gs.link); log(`copied ${gs.link}`); } }, "Copy link"));
     }
-    row.append(el("button", { disabled: busy, onclick: () => run(`Updating ${g.name}`,
-      () => invoke(g.id, "game.update", { force: false }, 1800000)) }, "Update game"));
+    if (has(g, "game.update")) {
+      row.append(el("button", { disabled: busy, onclick: () => run(`Updating ${g.name}`,
+        () => invoke(g.id, "game.update", { force: false }, 1800000)) }, "Update game"));
+    }
     if (gs.sharing === "public" || gs.sharing === "tailnet") {
       row.append(el("button", { disabled: busy, onclick: () => run(`Unsharing ${g.name}`, () => invoke(g.id, "share.stop")) }, "Stop sharing"));
     } else {
