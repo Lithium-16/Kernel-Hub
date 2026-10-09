@@ -203,70 +203,83 @@
   }
 
   // -- Drama Club ------------------------------------------------------------------------
-  const MOOD = { neutral: 'neutral', flustered: 'flustered', sad: 'sad', angry: 'angry' };
+  const PART = { beginning: 'The beginning', middle: '', ending: 'The ending' };
   function drama(v) {
     const D = window.PartyDraw;
     const S = window.PartyScenes;
     const T = 'Drama Club';
+    const step = `Step ${v.step} of ${v.steps.length} · ${v.steps[v.step - 1]}`;
     const head = (tag) =>
       `<div class="scene" data-game="drama">${bar(T, 'D')}<span class="tag">${tag}</span>`;
     const theme = v.theme ? `<span class="dtheme">${esc(v.theme)}</span>` : '';
-    const work = (tag, title, sub) =>
-      `${head(tag)}<h2 class="big" style="font-size:64px">${title}</h2>${theme}<p class="sub">${sub}</p>${doneRow(v.waiting)}${ring()}</div>`;
+    const work = (title, sub, extra = '') =>
+      `${head(step)}<h2 class="big" style="font-size:64px">${title}</h2>${theme}<p class="sub">${sub}</p>${extra}${doneRow(v.waiting)}${ring()}</div>`;
     if (v.phase === 'pitch')
       return work(
-        'Pitch a theme',
-        'What should the story be about?',
+        "What's tonight's story about?",
         'Write a theme on your phone. Then everyone votes.',
       );
     if (v.phase === 'pitch_vote')
-      return `${head('Pick the theme')}<div class="dthemes">${v.themes.map((t) => `<div class="opt">${esc(t.text)}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
-    if (v.phase === 'cast')
+      return `${head(step)}<div class="dthemes">${v.themes.map((t) => `<div class="opt">${esc(t.text)}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
+    if (v.phase === 'create')
       return work(
-        'Casting call',
-        'Everyone draws a character',
-        'Neutral, flustered, sad and angry. Nobody sees them until the show!',
+        'Everyone invents a character',
+        "Name, looks and personality. Don't draw them: someone else will!",
       );
-    if (v.phase === 'script')
+    if (v.phase === 'draw')
       return work(
-        'Write the script',
-        'Lights, camera, typing',
-        "You only know the characters' names. Pick a place, name the situation and write it line by line.",
+        "Draw someone else's character",
+        'Neutral, flustered, sad and angry. Nobody sees the drawings until the show!',
       );
-    if (v.phase === 'twist')
+    if (v.phase === 'write')
       return work(
-        'The twist',
-        'Someone else writes the ending',
-        'Read the scene, then add the last lines. Surprise them!',
+        'One story, one chapter each',
+        'Everyone writes their chapter at the same time. Nobody knows what the others wrote. Good luck!',
+        `<div class="dstarring">Starring ${(v.cast || []).map((c) => `<b>${esc(c.name)}</b>`).join(' · ')}</div>`,
       );
     if (v.phase === 'show') {
-      const story = v.story;
-      return `<div class="scene vn" data-game="drama"><div class="vnstage">${S.svg(story.bg, 'vnbg')}
-        <canvas class="sprite l" width="400" height="400" id="sp0"></canvas><canvas class="sprite r" width="400" height="400" id="sp1"></canvas>
+      const ch = v.chapter;
+      const one = ch.cast.length === 1;
+      const card =
+        ch.index === 0
+          ? `<span class="tag">Tonight's novel</span><h2 class="big">${esc(v.theme)}</h2><p class="sub dchap">Chapter 1 · The beginning</p>`
+          : `<span class="tag">${esc(v.theme)}</span><h2 class="big">Chapter ${ch.index + 1}</h2>${PART[ch.part] ? `<p class="sub dchap">${PART[ch.part]}</p>` : ''}`;
+      return `<div class="scene vn" data-game="drama"><div class="vnstage">${S.svg(ch.bg, 'vnbg')}
+        ${ch.cast.map((_, k) => `<canvas class="sprite ${one ? 'c' : k ? 'r' : 'l'}" width="400" height="400" id="sp${k}"></canvas>`).join('')}
         <div class="vnbox" id="vnbox" hidden><div class="plate" id="vnplate"></div><p id="vntext"></p></div>
-        <div class="vncard" id="vncard"><span class="tag">Scene ${story.index + 1} of ${v.of} · ${esc(v.theme)}</span><h2 class="big">${esc(story.premise)}</h2>
-          <p class="sub">Starring ${esc(story.cast[0].name)} &amp; ${esc(story.cast[1].name)}</p></div>
-        <div class="vncredits" id="vncredits" hidden>Cast by <b>${esc(nameOf(story.credits.cast[0]))}</b> &amp; <b>${esc(nameOf(story.credits.cast[1]))}</b> · Script by <b>${esc(nameOf(story.credits.script))}</b>${story.credits.twist ? ` · Twist by <b>${esc(nameOf(story.credits.twist))}</b>` : ''}</div>
+        <div class="vnchap" aria-hidden="true">Ch. ${ch.index + 1} of ${ch.of}</div>
+        <div class="vncard" id="vncard">${card}</div>
       </div></div>`;
     }
+    if (v.phase === 'credits') {
+      const cr = v.credits;
+      return `<div class="scene vn" data-game="drama"><div class="vncredroll"><div class="roll">
+        <span class="tag">The end</span><h2 class="big">${esc(v.theme)}</h2>
+        <h3>Starring</h3>
+        <div class="dcastwall">${cr.characters.map((c) => `<div>${D.artCanvas(c.face, '')}<b>${esc(c.name)}</b><small>invented by ${esc(nameOf(c.creator))}<br>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>
+        <h3>Written by</h3>
+        <p class="sub">${cr.writers.map((w, i) => `Chapter ${i + 1}: <b>${esc(nameOf(w))}</b>`).join(' · ')}</p>
+      </div></div></div>`;
+    }
     if (v.phase === 'vote')
-      return `${head('Vote on your phone')}<h2 class="big" style="font-size:52px">Best scene and best character</h2>
-        <div class="dcastwall">${(v.gallery || []).map((c) => `<div>${D.artCanvas(c.face, '')}<b>${esc(c.name)}</b><small>by ${esc(nameOf(c.pid))}</small></div>`).join('')}</div>${doneRow(v.waiting)}${ring()}</div>`;
+      return `${head(step)}<h2 class="big" style="font-size:52px">Vote: best chapter and best drawing</h2>
+        <div class="dcastwall">${(v.gallery || []).map((c) => `<div>${D.artCanvas(c.face, '')}<b>${esc(c.name)}</b><small>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>${doneRow(v.waiting)}${ring()}</div>`;
     return scores(v, T);
   }
 
-  // The visual-novel player: the cast walks on, each line types out, the speaker's sprite
-  // switches to the line's mood, then the credits roll.
+  // The visual-novel player for one chapter: its title card, then the cast walks on, each line
+  // types out and the speaker's sprite switches to the line's mood.
   let vnTimers = [];
   function stopVN() {
     for (const t of vnTimers) clearTimeout(t);
     vnTimers = [];
   }
-  function playVN(story) {
+  function playVN(ch) {
     const D = window.PartyDraw;
     const at = (ms, f) => vnTimers.push(setTimeout(f, ms));
-    const faces = story.cast.map((c) => c.faces || {});
-    const cur = ['neutral', 'neutral'];
+    const faces = ch.cast.map((c) => c.faces || {});
+    const names = ch.cast.map((c) => c.name);
+    const cur = ch.cast.map(() => 'neutral');
     const show = (k, want, speaking) => {
       const c = $(`sp${k}`);
       if (!c) return;
@@ -281,36 +294,32 @@
         c.classList.add('pop');
       }
     };
-    show(0, 'neutral');
-    show(1, 'neutral');
-    const lines = [...story.lines, ...story.twist];
-    const names = [story.cast[0].name, story.cast[1].name];
-    at(3800, () => {
+    ch.cast.forEach((_, k) => show(k, 'neutral'));
+    // the same pacing as DramaClub._show_s and line_s on the server
+    const title = ch.index === 0 ? 6500 : 3500;
+    at(title, () => {
       $('vncard')?.classList.add('gone');
-      $('sp0')?.classList.add('in');
-      $('sp1')?.classList.add('in');
+      ch.cast.forEach((_, k) => $(`sp${k}`)?.classList.add('in'));
     });
-    // the same pacing as DramaClub.line_s on the server: time to type a line out and to read it
     const lineMs = (ln) => 1600 + 45 * ln.text.length;
-    let when = 4500;
-    lines.forEach((ln) => {
+    let when = title + 700;
+    ch.lines.forEach((ln) => {
       const start = when;
       when += lineMs(ln);
       at(start, () => {
         const box = $('vnbox');
         if (!box) return;
         box.hidden = false;
-        box.classList.toggle('narrator', ln.who === 2);
-        $('vnplate').textContent = ln.who === 2 ? '' : names[ln.who];
-        if (ln.who !== 2) {
+        const narr = ln.who === 2;
+        box.classList.toggle('narrator', narr);
+        $('vnplate').textContent = narr ? '' : names[ln.who];
+        if (!narr) {
           show(ln.who, ln.emotion, true);
-          show(1 - ln.who, 'keep', false);
-        } else {
-          for (const k of [0, 1]) $(`sp${k}`)?.classList.remove('dim');
-        }
+          ch.cast.forEach((_, k) => k !== ln.who && show(k, 'keep', false));
+        } else ch.cast.forEach((_, k) => $(`sp${k}`)?.classList.remove('dim'));
         const text = $('vntext');
         let n = 0;
-        const voice = ln.who === 2 ? 1 : ln.who * 2;
+        const voice = narr ? 1 : ln.who * 2;
         const type = () => {
           if (!text.isConnected) return;
           n++;
@@ -321,10 +330,6 @@
         if (matchMedia('(prefers-reduced-motion: reduce)').matches) text.textContent = ln.text;
         else type();
       });
-    });
-    at(when, () => {
-      $('vnbox')?.setAttribute('hidden', '');
-      $('vncredits')?.removeAttribute('hidden');
     });
   }
 
@@ -431,7 +436,7 @@
     const hit = (v.hits || [])[0];
     return `<div class="scene" data-game="none">${bar('Party Night', '★')}
       <h2 class="big" style="font-size:60px;text-align:center">${winner ? `${esc(winner)} wins ${esc(v.title)}!` : `${esc(v.title)} is over`}</h2>
-      ${hit ? `<div class="hitline">${hit.kind === 'shirt' ? 'Winning shirt' : hit.kind === 'scene' ? 'Winning scene' : 'Best of the game'}: <q>${esc(hit.text)}</q> · ${esc(hit.name)}</div>` : ''}
+      ${hit ? `<div class="hitline">${hit.kind === 'shirt' ? 'Winning shirt' : hit.kind === 'scene' ? 'Winning chapter' : 'Best of the game'}: <q>${esc(hit.text)}</q> · ${esc(hit.name)}</div>` : ''}
       <div class="podium">${order.map((x, k) => (x ? `<div class="pod p${[2, 1, 3][k]}">${av(x.pid)}<div class="name">${esc(nameOf(x.pid))}</div><div class="blk">${fmt(x.score)}</div></div>` : '<div></div>')).join('')}</div>
       ${
         (v.badges || []).length
@@ -472,7 +477,7 @@
         v.number,
         v.matchup && v.matchup.number,
         v.battle && v.battle.shirts.map((x) => x.id).join(','),
-        v.story && v.story.index,
+        v.chapter && v.chapter.index,
       ].join(':');
     } else if (r.state === 'results' && v) {
       html = results(v);
@@ -508,7 +513,7 @@
       if (entering) sc.classList.add('enter');
       if (entering && scene === 'results') confetti();
       if (entering) stopVN();
-      if (entering && v && v.game === 'drama' && v.phase === 'show') playVN(v.story);
+      if (entering && v && v.game === 'drama' && v.phase === 'show') playVN(v.chapter);
       lastContent = content;
       lastScene = scene;
     }
