@@ -290,8 +290,30 @@
     spaceship: 'Spaceship bridge',
     haunted: 'Haunted house',
   };
-  /** The scene as an <svg> string (falls back to the classroom). */
-  const svg = (key, cls = '') =>
-    `<svg class="${cls}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${(SCENES[key] || SCENES.classroom)()}</svg>`;
-  window.PartyScenes = { svg, LABELS, KEYS: Object.keys(SCENES) };
+  // Picture backgrounds served from /bg/ (in web/bg; see web/bg/CREDITS.md), listed first.
+  const PHOTOS = {
+    classroom_day: 'Classroom (day)',
+    school_hallway: 'School courtyard',
+    bedroom_day: 'Bedroom (day)',
+    livingroom_night: 'Living room',
+    kitchen_day: 'Kitchen',
+    restaurant: 'Restaurant',
+    city_afternoon: 'City crossing',
+    spring_street: 'Spring evening street',
+    train_beach: 'Train by the sea',
+    onsen: 'Hot spring',
+  };
+  /** The scene as an <svg> string (falls back to the classroom). small: a thumbnail, for phones. */
+  const svg = (key, cls = '', small = false) => {
+    const inner =
+      key in PHOTOS
+        ? `<image href="/bg/${key}${small ? '.thumb' : ''}.webp" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>`
+        : (SCENES[key] || SCENES.classroom)();
+    return `<svg class="${cls}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${inner}</svg>`;
+  };
+  window.PartyScenes = {
+    svg,
+    LABELS: { ...PHOTOS, ...LABELS },
+    KEYS: [...Object.keys(PHOTOS), ...Object.keys(SCENES)],
+  };
 })();
