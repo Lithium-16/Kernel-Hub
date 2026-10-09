@@ -83,12 +83,15 @@ class Room:
         self.store = store
         self._fame: dict[str, Any] | None = None
         self._cards: dict[int, dict[str, Any] | None] = {}
+        self._seen = -1  # the store version the caches above were read at
         self.content_dirs = content_dirs
         self.emit = emit or (lambda *a, **k: None)
         self.clock = clock
         self.rng = rng or random.Random()
         self.used: dict[str, set[Any]] = {}
         self.games_played = 0
+        self.guest = False  # opened by someone on the share link (not Kernel's own room)
+        self.host_key = ""
         self.new_room()
 
     # -- the room -------------------------------------------------------------------------
@@ -316,9 +319,17 @@ class Room:
                       player=champ["name"], season=champ["season"], points=champ["points"])
         return badges
 
+    def _fresh(self) -> None:
+        """Other rooms share the store: drop cached views when anything changed in it."""
+        if self.store is not None and self.store.version != self._seen:
+            self._seen = self.store.version
+            self._fame = None
+            self._cards.clear()
+
     def fame(self) -> dict[str, Any] | None:
         if self.store is None:
             return None
+        self._fresh()
         if self._fame is None:
             self._fame = self.store.fame()
         return self._fame
@@ -327,6 +338,7 @@ class Room:
         seat = self.seats.get(pid)
         if self.store is None or seat is None or seat.profile is None:
             return None
+        self._fresh()
         if seat.profile not in self._cards:
             self._cards[seat.profile] = self.store.profile(seat.profile)
         return self._cards[seat.profile]
@@ -416,6 +428,7 @@ class Room:
             "state": self.state,
             "choice": self.choice,
             "vip": self.vip,
+            "guest": self.guest,
             "max_players": self.max_players,
             "players": [
                 {"pid": p, "name": s.name, "color": s.color, "connected": s.connected, "bot": s.bot,
@@ -474,25 +487,44 @@ class Room:
 
 
 class PartyServer:
-    """The pages and WebSockets for one Room, on 127.0.0.1:`port`."""
+    """The pages and WebSockets on 127.0.0.1:`port`. Kernel's own room (`room`) is always open;
+    with `make_room`, anyone on the share link can open more rooms ("Host a game"), each with
+    its own code and host key, up to `max_rooms`. A room someone else opened closes after
+    `idle_s` with nobody in it."""
+
+    NEW_ROOM_GAP_S = 5.0  # between two new rooms, so the link can't be used to spam rooms
 
     def __init__(self, room: Room, host_key: str, port: int, max_connections: int = 64,
-                 log: logging.Logger | None = None) -> None:
-        self.room = room
-        self.host_key = host_key
+                 log: logging.Logger | None = None, make_room: Callable[[], Room] | None = None,
+                 max_rooms: int = 4, idle_s: float = 30 * 60, clock: Callable[[], float] = time.monotonic) -> None:
+        room.host_key = host_key
+        self.room = room  # Kernel's own room
+        self.rooms: list[Room] = [room]
         self.port = port
         self.max_connections = max_connections
         self.log = log or logging.getLogger("party")
-        self.hosts: set[web.WebSocketResponse] = set()
+        self.make_room = make_room
+        self.max_rooms = max(0, int(max_rooms))
+        self.idle_s = idle_s
+        self.clock = clock
+        self.idle_since: dict[Room, float] = {}
+        self.last_new = -1e9
+        self.hosts: dict[Room, set[web.WebSocketResponse]] = {}
         self.sockets: set[web.WebSocketResponse] = set()
         self.runner: web.AppRunner | None = None
         self.link: Callable[[], str] = lambda: ""  # the share link, shown on the big screen
         self._ticker: asyncio.Task[None] | None = None
+        self._closing: set[asyncio.Task[Any]] = set()
+
+    @property
+    def host_key(self) -> str:
+        return self.room.host_key
 
     def app(self) -> web.Application:
         app = web.Application(client_max_size=64 * 1024, middlewares=[self._headers])
         app.router.add_get("/", self._page("play.html"))
         app.router.add_get("/host", self._host_page)
+        app.router.add_post("/host/new", self._new_room)
         app.router.add_get("/health", self._health)
         app.router.add_get("/static/{name}", self._static)
         app.router.add_get("/ws", self._ws)
@@ -518,12 +550,78 @@ class PartyServer:
     async def _health(self, request: web.Request) -> web.Response:
         return web.Response(text="ok")
 
-    def _is_host(self, request: web.Request) -> bool:
-        return hmac.compare_digest(request.query.get("key", ""), self.host_key)
+    # -- rooms ----------------------------------------------------------------------------
+
+    @property
+    def hosting_open(self) -> bool:
+        return self.make_room is not None and self.max_rooms > 0
+
+    def room_for_key(self, key: str) -> Room | None:
+        return next((r for r in self.rooms if key and hmac.compare_digest(key, r.host_key)), None)
+
+    def room_for_code(self, code: Any) -> Room | None:
+        if not isinstance(code, str):
+            return None
+        code = code.strip().upper()
+        return next((r for r in self.rooms if r.code == code), None)
+
+    def open_room(self) -> Room:
+        """A new room for someone on the share link; raises Invalid when hosting is off or full."""
+        if not self.hosting_open:
+            raise Invalid("Hosting is turned off here. Ask for a room code instead.")
+        guests = [r for r in self.rooms if r.guest]
+        if len(guests) >= self.max_rooms:
+            raise Invalid(f"All {self.max_rooms} rooms are in use. Join one with its code, or try again later.")
+        now = self.clock()
+        if now - self.last_new < self.NEW_ROOM_GAP_S:
+            raise Invalid("A room was just opened. Try again in a few seconds.")
+        assert self.make_room is not None
+        room = self.make_room()
+        while any(r.code == room.code for r in self.rooms):
+            room.code = "".join(room.rng.choice(CODE_LETTERS) for _ in range(4))
+        room.guest = True
+        room.host_key = secrets.token_urlsafe(18)
+        self.rooms.append(room)
+        self.last_new = now
+        self.idle_since[room] = now
+        return room
+
+    async def close_room(self, room: Room) -> None:
+        """Sends everyone in a guest room back to the join screen and forgets the room."""
+        if room is self.room or room not in self.rooms:
+            return
+        self.rooms.remove(room)
+        self.idle_since.pop(room, None)
+        sockets = list(self.hosts.pop(room, set())) + [ws for s in room.seats.values() for ws in s.sockets]
+        await asyncio.gather(*(self._send(ws, {"type": "closed"}) for ws in sockets))
+        for ws in sockets:
+            # in the background: one of these may be the socket whose message asked for this
+            task = asyncio.create_task(ws.close())
+            self._closing.add(task)
+            task.add_done_callback(self._closing.discard)
+
+    def _busy(self, room: Room) -> bool:
+        return bool(self.hosts.get(room)) or any(s.sockets for s in room.seats.values())
+
+    async def close_idle_rooms(self) -> None:
+        now = self.clock()
+        for room in [r for r in self.rooms if r.guest]:
+            if self._busy(room):
+                self.idle_since.pop(room, None)
+            elif now - self.idle_since.setdefault(room, now) >= self.idle_s:
+                await self.close_room(room)
+
+    async def _new_room(self, request: web.Request) -> web.Response:
+        try:
+            room = self.open_room()
+        except Invalid as e:
+            return web.json_response({"error": str(e)}, status=429 if self.hosting_open else 403)
+        self.log.info("room %s opened from the share link", room.code)
+        return web.json_response({"code": room.code, "url": f"/host?key={room.host_key}"})
 
     async def _host_page(self, request: web.Request) -> web.StreamResponse:
-        if not self._is_host(request):
-            return web.Response(status=403, text="This is the big-screen page. Open it from Kernel (Party Games → host link).")
+        if self.room_for_key(request.query.get("key", "")) is None:
+            return web.Response(status=403, text="This room has closed, or the link is wrong. Open the join page and press Host a game.")
         return web.FileResponse(WEB / "host.html", headers={"Content-Type": "text/html; charset=utf-8"})
 
     async def _static(self, request: web.Request) -> web.StreamResponse:
@@ -536,7 +634,8 @@ class PartyServer:
 
     async def _ws(self, request: web.Request) -> web.StreamResponse:
         host = request.query.get("role") == "host"
-        if host and not self._is_host(request):
+        room: Room | None = self.room_for_key(request.query.get("key", "")) if host else None
+        if host and room is None:
             raise web.HTTPForbidden()
         if len(self.sockets) >= self.max_connections:
             raise web.HTTPServiceUnavailable(text="too many connections")
@@ -545,10 +644,11 @@ class PartyServer:
         self.sockets.add(ws)
         seat: Seat | None = None
         if host:
-            self.hosts.add(ws)
-            await self._send(ws, self.host_state())
+            assert room is not None
+            self.hosts.setdefault(room, set()).add(ws)
+            await self._send(ws, self.host_state(room))
         else:
-            await self._send(ws, {"type": "hello", "code_hint": len(self.room.code)})
+            await self._send(ws, {"type": "hello", "code_hint": len(self.room.code), "hosting": self.hosting_open})
         budget, refilled = 20.0, time.monotonic()
         try:
             async for msg in ws:
@@ -568,36 +668,47 @@ class PartyServer:
                     continue
                 try:
                     if host:
-                        self.room.host_command(data)
-                    elif seat is None or seat.pid not in self.room.seats:
+                        assert room is not None
+                        if data.get("type") == "close" and room.guest:
+                            await self.close_room(room)
+                            break
+                        room.host_command(data)
+                    elif seat is None or room is None or room not in self.rooms or seat.pid not in room.seats:
                         if data.get("type") != "join":
                             await self._send(ws, {"type": "joined", "pid": None})
                             continue
-                        if seat is not None:
+                        if seat is not None and room is not None:
                             seat.sockets.discard(ws)
-                        seat = self.room.join(data.get("code"), data.get("name"), data.get("token"),
-                                              data.get("device"), data.get("pin"))
+                            room.connections_changed()
+                        target = self.room_for_code(data.get("code"))
+                        if target is None:
+                            raise Invalid("There's no room with that code. Check the big screen.")
+                        seat = target.join(data.get("code"), data.get("name"), data.get("token"),
+                                           data.get("device"), data.get("pin"))
+                        room = target
                         seat.sockets.add(ws)
-                        self.room.connections_changed()
+                        room.connections_changed()
                         await self._send(ws, {"type": "joined", "pid": seat.pid, "token": seat.token, "name": seat.name,
                                               "device": seat.device})
                     else:
-                        self.room.handle(seat.pid, data)
+                        room.handle(seat.pid, data)
                 except Invalid as e:
                     await self._send(ws, {"type": "error", "message": str(e), "code": e.code, "name": e.name})
                     continue
-                await self.broadcast()
+                if room is not None:
+                    await self.broadcast(room)
         finally:
             self.sockets.discard(ws)
-            self.hosts.discard(ws)
-            if seat is not None:
+            if host and room is not None:
+                self.hosts.get(room, set()).discard(ws)
+            if seat is not None and room is not None:
                 seat.sockets.discard(ws)
-                self.room.connections_changed()
-                await self.broadcast()
+                room.connections_changed()
+                await self.broadcast(room)
         return ws
 
-    def host_state(self) -> dict[str, Any]:
-        return self.room.host_state() | {"link": self.link()}
+    def host_state(self, room: Room | None = None) -> dict[str, Any]:
+        return (room or self.room).host_state() | {"link": self.link()}
 
     async def _send(self, ws: web.WebSocketResponse, data: dict[str, Any]) -> None:
         if ws.closed:
@@ -605,13 +716,21 @@ class PartyServer:
         with contextlib.suppress(ConnectionError, RuntimeError):
             await ws.send_str(json.dumps(data, separators=(",", ":")))
 
-    async def broadcast(self) -> None:
-        host = self.host_state()
-        sends = [self._send(ws, host) for ws in list(self.hosts)]
-        for seat in list(self.room.seats.values()):
-            state = self.room.player_state(seat.pid)
+    async def broadcast(self, room: Room | None = None) -> None:
+        """Sends the latest state to every screen in `room` (default: Kernel's room)."""
+        room = room or self.room
+        if room not in self.rooms:
+            return
+        host = self.host_state(room)
+        sends = [self._send(ws, host) for ws in list(self.hosts.get(room, ()))]
+        for seat in list(room.seats.values()):
+            state = room.player_state(seat.pid)
             sends += [self._send(ws, state) for ws in list(seat.sockets)]
         await asyncio.gather(*sends)
+
+    async def broadcast_all(self) -> None:
+        for room in list(self.rooms):
+            await self.broadcast(room)
 
     async def kick_sockets(self, seat: Seat) -> None:
         for ws in list(seat.sockets):
@@ -631,13 +750,21 @@ class PartyServer:
                 await ws.close()
 
     async def _tick_forever(self) -> None:
+        n = 0
         while True:
             await asyncio.sleep(TICK_S)
-            try:
-                if self.room.tick():
-                    await self.broadcast()
-            except Exception:
-                self.log.exception("tick failed")
+            n += 1
+            for room in list(self.rooms):
+                try:
+                    if room.tick():
+                        await self.broadcast(room)
+                except Exception:
+                    self.log.exception("tick failed in room %s", room.code)
+            if n % 40 == 0:  # about every 10 s
+                try:
+                    await self.close_idle_rooms()
+                except Exception:
+                    self.log.exception("closing idle rooms failed")
 
     async def start(self) -> None:
         self.runner = web.AppRunner(self.app(), access_log=None, handle_signals=False)
@@ -673,10 +800,23 @@ class Party(TailscaleShare):
         (data_dir / "content").mkdir(parents=True, exist_ok=True)
         self.store = Store(data_dir / "party.db")
         self.room = Room(settings, [HERE / "content", data_dir / "content"], emit=self.emit, store=self.store)
-        self.server = PartyServer(self.room, self._host_key(), self.port, int(settings.get("max_connections", 64)), self.log)
+        open_hosting = bool(settings.get("open_hosting", True))
+        self.server = PartyServer(self.room, self._host_key(), self.port, int(settings.get("max_connections", 64)), self.log,
+                                  make_room=self._guest_room if open_hosting else None,
+                                  max_rooms=int(settings.get("max_rooms", 4)))
         self.server.link = lambda: self.link
         self.want_running = bool(settings.get("autostart", True))
         self.error = ""
+
+    def _guest_room(self) -> Room:
+        """A room someone opened from the share link: same games, content and hall of fame, but
+        their joins don't go to Kernel's events (only finished games, badges and champions do)."""
+
+        def emit(kind: str, message: str, **data: Any) -> None:
+            if kind != "player.joined":
+                self.emit(kind, message, **data)
+
+        return Room(self.settings, [HERE / "content", self.data / "content"], emit=emit, store=self.store)
 
     def _host_key(self) -> str:
         path = self.data / "host_key.txt"
@@ -769,15 +909,14 @@ class Party(TailscaleShare):
     # -- the hall of fame -----------------------------------------------------------------
 
     async def reload_content(self) -> dict[str, Any]:
-        self.room.content = Content.load(*self.room.content_dirs)
+        for room in self.server.rooms:
+            room.content = Content.load(*room.content_dirs)
         c = self.room.content
         return {"quips": len(c.quips), "facts": len(c.facts), "doodle_ideas": len(c.doodle_ideas),
                 "slogan_ideas": len(c.slogan_ideas)}
 
     async def _changed(self) -> None:
-        self.room._fame = None
-        self.room._cards.clear()
-        await self.server.broadcast()
+        await self.server.broadcast_all()
 
     async def remove_hit(self, hit_id: int) -> dict[str, Any]:
         try:
@@ -795,7 +934,7 @@ class Party(TailscaleShare):
             self.store.rename(name, new_name)
         except ValueError as e:
             raise ActionError("invalid_params", str(e)) from None
-        for seat in self.room.seats.values():
+        for seat in (s for r in self.server.rooms for s in r.seats.values()):
             if seat.name.lower() == name.lower():
                 seat.name = new_name
         await self._changed()
@@ -807,7 +946,7 @@ class Party(TailscaleShare):
             self.store.forget(name)
         except ValueError as e:
             raise ActionError("invalid_params", str(e)) from None
-        for seat in self.room.seats.values():
+        for seat in (s for r in self.server.rooms for s in r.seats.values()):
             if p is not None and seat.profile == p["id"]:
                 seat.profile, seat.device = None, ""
         await self._changed()
@@ -898,4 +1037,10 @@ class Party(TailscaleShare):
             "local_url": f"http://127.0.0.1:{self.port}" if running else "",
             "sharing": self.sharing,
             "error": self.error,
+            "open_hosting": self.server.hosting_open,
+            "other_rooms": [
+                {"code": r.code, "players": [s.name for s in r.seats.values() if s.connected],
+                 "game": r.game.title if r.game else ""}
+                for r in self.server.rooms if r.guest
+            ],
         }

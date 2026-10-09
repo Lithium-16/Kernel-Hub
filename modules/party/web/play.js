@@ -46,6 +46,7 @@
   let st = null;
   let joinErr = '';
   let kicked = false;
+  let canHost = false; // anyone on this link may open a room of their own
   let lastKey = '';
   let deadline = null;
   let total = null;
@@ -138,13 +139,13 @@
       return { key: 'rejoin', main: wait('Reconnecting…', 'Getting you back into the room.') };
     const code = me.code && !urlCode ? me.code : urlCode;
     return {
-      key: 'join:' + joinErr + kicked,
+      key: 'join:' + joinErr + kicked + canHost,
       main: `<span class="kicker">Party Night</span><h2 class="ptitle">${kicked ? 'You were removed from the room' : 'Join the game'}</h2>
         ${kicked ? `<p class="pnote">Ask the host if that was a mistake.</p>` : ''}
         <div class="field"><label for="f-code">Room code</label><input id="f-code" class="codein" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="next" value="${esc(code)}"></div>
         <div class="field"><label for="f-name">Your name</label><input id="f-name" maxlength="16" autocomplete="nickname" enterkeyhint="go" value="${esc(me.name || '')}"></div>
         ${joinErr ? `<div class="err" role="alert">${esc(joinErr)}</div>` : `<p class="pnote">Your phone remembers you, so you can reconnect if it locks.</p>`}`,
-      foot: `<button class="big-btn" type="button" data-act="join">Join game</button>`,
+      foot: `<button class="big-btn" type="button" data-act="join">Join game</button>${canHost ? '<button class="ghost" type="button" data-act="host">Host a game on this screen</button>' : ''}`,
       input: true,
     };
   }
@@ -634,6 +635,20 @@
   }
 
   // -- actions ---------------------------------------------------------------------------
+  // Opens a room of our own and turns this screen into its big screen.
+  async function hostRoom() {
+    try {
+      const r = await fetch('/host/new', { method: 'POST' });
+      const out = await r.json();
+      if (!r.ok || !out.url) throw new Error(out.error || 'Hosting is not available right now.');
+      location.href = out.url;
+    } catch (e) {
+      joinErr = e.message || 'Hosting is not available right now.';
+      lastKey = '';
+      render();
+    }
+  }
+
   function join() {
     const code = ($('f-code').value || '').trim().toUpperCase();
     const name = ($('f-name').value || '').trim();
@@ -662,6 +677,7 @@
 
   function act(a) {
     if (a === 'join') return join();
+    if (a === 'host') return hostRoom();
     if (a === 'pinjoin') {
       pinErr = '';
       return send({ type: 'join', code: me.code, name: pinFor, device: me.device, pin: pinDigits });
@@ -860,6 +876,19 @@
           lastKey = '';
           render();
         }
+      } else if (msg.type === 'hello') {
+        if (canHost !== !!msg.hosting) {
+          canHost = !!msg.hosting;
+          if (!pid) render();
+        }
+      } else if (msg.type === 'closed') {
+        me = { name: me.name, device: me.device };
+        store.set(me);
+        pid = null;
+        st = null;
+        joinErr = 'That room has closed. Join another with its code, or host your own.';
+        lastKey = '';
+        render();
       } else if (msg.type === 'kicked') {
         me = { name: me.name, device: me.device };
         store.set(me);
