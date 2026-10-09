@@ -474,3 +474,94 @@ def test_bots_stay_out_of_the_hall_of_fame(tmp_path):
     names = {row["name"] for row in r.host_state()["fame"]["board"]}
     assert names <= {"Ann"}
     assert all(h["name"] == "Ann" for h in r.host_state()["fame"]["hits"])
+
+
+# -- rooms opened from the share link -----------------------------------------------------
+
+
+async def test_anyone_on_the_link_can_host_their_own_room(tmp_path):
+    from partystore import Store
+
+    store = Store(tmp_path / "party.db")
+    home = Room({}, CONTENT, clock=Clock(), rng=random.Random(5), store=store)
+    now = [0.0]
+    server = PartyServer(home, "k" * 24, 0, make_room=lambda: Room({}, CONTENT, rng=random.Random(5), store=store),
+                         max_rooms=2, idle_s=60, clock=lambda: now[0])
+    client = TestClient(TestServer(server.app()))
+    await client.start_server()
+    try:
+        ws = await client.ws_connect("/ws")
+        assert (await recv(ws, "hello"))["hosting"] is True
+        resp = await client.post("/host/new")
+        out = await resp.json()
+        assert resp.status == 200 and out["url"].startswith("/host?key=")
+        guest = server.room_for_code(out["code"])
+        assert guest is not None and guest.guest and guest.code != home.code  # codes never clash
+        key = out["url"].split("key=")[1]
+        assert (await client.get(out["url"])).status == 200
+        # too soon after the last one, then full
+        assert (await client.post("/host/new")).status == 429
+        now[0] += 10
+        assert (await client.post("/host/new")).status == 200
+        now[0] += 10
+        full = await client.post("/host/new")
+        assert full.status == 429 and "rooms are in use" in (await full.json())["error"]
+
+        # The new room's big screen only sees and runs its own room.
+        host = await client.ws_connect("/ws?role=host&key=" + key)
+        first = await recv(host)
+        assert first["room"]["code"] == guest.code and first["room"]["guest"] is True
+        for _ in range(3):
+            await host.send_json({"type": "add_bot"})
+        await host.send_json({"type": "start", "game": "quip"})
+        await recv(host, until=lambda m: m["room"]["state"] == "playing")
+        assert home.state == "lobby" and not home.seats
+
+        # A phone joins whichever room its code names.
+        await ws.send_json({"type": "join", "code": guest.code, "name": "Ann"})
+        assert (await recv(ws, "joined"))["pid"] in guest.seats
+        phone2 = await client.ws_connect("/ws")
+        await phone2.send_json({"type": "join", "code": home.code, "name": "Bo"})
+        await recv(phone2, "joined")
+        assert [s.name for s in home.seats.values()] == ["Bo"]
+
+        # Both rooms share the hall of fame.
+        guest.end_game()
+        guest.start("bluff")
+        while guest.state == "playing":
+            guest.skip()
+        assert home.fame()["games"] == 1
+
+        # The host closes it: everyone in it goes back to the join screen.
+        await host.send_json({"type": "close"})
+        assert (await recv(ws, "closed"))["type"] == "closed"
+        assert server.room_for_code(guest.code) is None and (await client.get(out["url"])).status == 403
+        with pytest.raises(Exception):
+            await client.ws_connect("/ws?role=host&key=" + key)
+
+        # A room nobody is in closes by itself; Kernel's own room never does.
+        left = [r for r in server.rooms if r.guest]
+        assert len(left) == 1
+        await server.close_idle_rooms()
+        now[0] += 61
+        await server.close_idle_rooms()
+        assert server.rooms == [home]
+        home_host = await client.ws_connect("/ws?role=host&key=" + "k" * 24)
+        await home_host.send_json({"type": "close"})  # not for Kernel's room
+        assert "Unknown" in (await recv(home_host, "error"))["message"]
+        for w in (ws, phone2, home_host):
+            await w.close()
+    finally:
+        await client.close()
+
+
+async def test_hosting_can_be_turned_off():
+    r, _ = room()
+    server, client = await client_for(r)  # no make_room: only Kernel's room
+    try:
+        ws = await client.ws_connect("/ws")
+        assert (await recv(ws, "hello"))["hosting"] is False
+        assert (await client.post("/host/new")).status == 403
+        await ws.close()
+    finally:
+        await client.close()

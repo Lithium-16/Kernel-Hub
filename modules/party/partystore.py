@@ -129,6 +129,7 @@ def valid_pin(pin: Any) -> bool:
 class Store:
     def __init__(self, path: Path | str, clock: Callable[[], float] = time.time) -> None:
         self.clock = clock
+        self.version = 0  # goes up on every change, so each room knows its cached views are stale
         self.db = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys = ON")
@@ -217,6 +218,7 @@ class Store:
         salt = secrets.token_hex(16)
         self.db.execute("UPDATE profiles SET pin_hash = ?, pin_salt = ?, failed = 0, locked_until = 0 WHERE id = ?",
                         (_hash(pin, salt), salt, profile_id))
+        self.version += 1
 
     def has_pin(self, profile_id: int) -> bool:
         row = self._one("SELECT pin_hash FROM profiles WHERE id = ?", profile_id)
@@ -230,6 +232,7 @@ class Store:
         if other is not None and other["id"] != p["id"]:
             raise ValueError(f"{new} is taken.")
         self.db.execute("UPDATE profiles SET name = ? WHERE id = ?", (new, p["id"]))
+        self.version += 1
         return new
 
     def forget(self, name: str) -> None:
@@ -237,6 +240,7 @@ class Store:
         if p is None:
             raise ValueError(f"No profile called {name}.")
         self.db.execute("DELETE FROM profiles WHERE id = ?", (p["id"],))
+        self.version += 1
 
     # -- recording games ------------------------------------------------------------------
 
@@ -258,6 +262,7 @@ class Store:
         prev_season = self.meta("season")
         new: list[dict[str, Any]] = []
         champion = None
+        self.version += 1
         with self.db:
             self.db.execute("BEGIN")
             if prev_season and prev_season != season:
@@ -312,6 +317,7 @@ class Store:
     def remove_hit(self, hit_id: int) -> None:
         if self.db.execute("DELETE FROM hits WHERE id = ?", (hit_id,)).rowcount == 0:
             raise ValueError(f"No greatest hit with id {hit_id}.")
+        self.version += 1
 
     # -- reading --------------------------------------------------------------------------
 

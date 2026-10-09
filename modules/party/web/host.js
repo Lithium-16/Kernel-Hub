@@ -43,7 +43,9 @@
     const players = st.room.players.filter((p) => p.playing);
     return `<div class="doneRow">${players.map((p) => av(p.pid, '', w.has(p.pid) ? '' : '<span class="tick"></span>', w.has(p.pid))).join('')}</div>`;
   };
-  const shortLink = () => (st.link || '').replace(/^https?:\/\//, '');
+  // A room opened from the share link shows the address it was opened at.
+  const link = () => st.link || (st.room.guest ? location.origin : '');
+  const shortLink = () => link().replace(/^https?:\/\//, '');
 
   // -- screens ---------------------------------------------------------------------------
   function lobby() {
@@ -64,7 +66,7 @@
       <div class="join">
         <div class="left">
           <h2 class="big" style="font-size:76px">Grab your phone and join!</h2>
-          ${st.link ? `<div class="url">${esc(shortLink())}</div>` : `<div class="url none">Press Share in Kernel to get a link for your friends.</div>`}
+          ${link() ? `<div class="url">${esc(shortLink())}</div>` : `<div class="url none">Press Share in Kernel to get a link for your friends.</div>`}
           <div class="tiles">${[...r.code].map((c) => `<span>${esc(c)}</span>`).join('')}</div>
           ${game ? `<div class="picking"><span class="sub">${vip ? `${esc(vip)} picks` : 'Up next · move the mouse for host controls'}</span><span class="gname" data-game="${esc(game.key)}">${esc(game.title)}</span></div><p class="sub" style="font-size:18px">${game.min}–${game.max} players${esc(need)}</p>` : ''}
         </div>
@@ -281,7 +283,7 @@
         <div class="panel"><h3>Greatest hits</h3>
           ${f.hits.length ? f.hits.slice(0, 3).map(hit).join('') : '<p class="sub" style="font-size:18px">The best answers and shirts end up here.</p>'}</div>
       </div>
-      <div class="credit" style="left:auto;right:24px">Join with room code ${esc(st.room.code)}${st.link ? ` at ${esc(shortLink())}` : ''}</div></div>`;
+      <div class="credit" style="left:auto;right:24px">Join with room code ${esc(st.room.code)}${link() ? ` at ${esc(shortLink())}` : ''}</div></div>`;
   }
 
   function results(v) {
@@ -439,6 +441,7 @@
       );
       if (r.state === 'results') rows.push(btn('Back to lobby', { type: 'lobby' }));
     }
+    if (r.guest) rows.push(btn('Close this room', { type: 'close' }, 'kick'));
     if (r.players.length)
       rows.push(
         r.players.map((p) => btn(`Kick ${p.name}`, { type: 'kick', pid: p.pid }, 'kick')).join(''),
@@ -463,6 +466,7 @@
   // -- connection ------------------------------------------------------------------------
   let ws = null;
   let backoff = 500;
+  let closed = false; // a room opened from the share link was closed: don't reconnect
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}/ws?role=host&key=${encodeURIComponent(KEY)}`);
@@ -480,6 +484,11 @@
       if (msg.type === 'state') {
         st = msg;
         render();
+      } else if (msg.type === 'closed') {
+        closed = true;
+        $('ctl').innerHTML = '';
+        $('tvc').innerHTML =
+          '<div class="scene" data-game="none"><div class="join"><div class="left"><h2 class="big" style="font-size:76px">This room has closed</h2><p class="sub">Open the join page again to host a new one.</p></div></div></div>';
       } else if (msg.type === 'error') {
         ctlMsg = msg.message;
         controls();
@@ -487,6 +496,7 @@
       }
     };
     ws.onclose = () => {
+      if (closed) return;
       $('offline').hidden = false;
       setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, 5000);
