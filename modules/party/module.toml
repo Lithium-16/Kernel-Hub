@@ -67,6 +67,23 @@ ai = "confirm"
 timeout_s = 30
 
 [[actions]]
+id = "bot.add"
+label = "Add bots"
+icon = "bot"
+description = "Adds test players that answer and vote by themselves, so you can try a game alone (Quip Clash needs 3 players). Only between games; they never go in the hall of fame."
+ai = "safe"
+timeout_s = 30
+params.count = { type = "int", description = "How many bots to add", default = 1, min = 1, max = 8 }
+
+[[actions]]
+id = "bot.remove"
+label = "Remove bots"
+icon = "user-minus"
+description = "Removes every bot from the room (only between games)."
+ai = "safe"
+timeout_s = 30
+
+[[actions]]
 id = "player.kick"
 label = "Kick player"
 icon = "user-x"

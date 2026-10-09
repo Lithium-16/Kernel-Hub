@@ -50,7 +50,7 @@
     const r = st.room;
     const slots = r.players.map(
       (p) =>
-        `<div class="slot ${p.connected ? '' : 'off'}">${av(p.pid, 'sm', p.champ ? CROWN : '')}<div>${esc(p.name)}<small>${p.champ ? 'Champion · ' : ''}${p.pid === r.vip ? 'VIP' : p.connected ? (p.night ? `${fmt(p.night)} tonight` : 'joined') : 'away'}</small></div></div>`,
+        `<div class="slot ${p.connected ? '' : 'off'}">${av(p.pid, 'sm', p.champ ? CROWN : '')}<div>${esc(p.name)}<small>${p.bot ? '<b class="bot">BOT</b> ' : ''}${p.champ ? 'Champion · ' : ''}${p.pid === r.vip ? 'VIP' : p.connected ? (p.night ? `${fmt(p.night)} tonight` : 'joined') : 'away'}</small></div></div>`,
     );
     for (let i = r.players.length; i < r.max_players; i++)
       slots.push(`<div class="slot empty">Open seat</div>`);
@@ -66,7 +66,7 @@
           <h2 class="big" style="font-size:76px">Grab your phone and join!</h2>
           ${st.link ? `<div class="url">${esc(shortLink())}</div>` : `<div class="url none">Press Share in Kernel to get a link for your friends.</div>`}
           <div class="tiles">${[...r.code].map((c) => `<span>${esc(c)}</span>`).join('')}</div>
-          ${game ? `<div class="picking"><span class="sub">${vip ? `${esc(vip)} picks` : 'Up next'}</span><span class="gname" data-game="${esc(game.key)}">${esc(game.title)}</span></div><p class="sub" style="font-size:18px">${game.min}–${game.max} players${esc(need)}</p>` : ''}
+          ${game ? `<div class="picking"><span class="sub">${vip ? `${esc(vip)} picks` : 'Up next · move the mouse for host controls'}</span><span class="gname" data-game="${esc(game.key)}">${esc(game.title)}</span></div><p class="sub" style="font-size:18px">${game.min}–${game.max} players${esc(need)}</p>` : ''}
         </div>
         <div class="slots">${slots.join('')}</div>
       </div>
@@ -431,6 +431,11 @@
             btn(g.title + (g.key === r.choice ? ' ✓' : ''), { type: 'choose', game: g.key }),
           )
           .join('') + btn('Start', { type: 'start', game: r.choice }),
+      );
+      const bots = r.players.filter((p) => p.bot).length;
+      rows.push(
+        (r.players.length < r.max_players ? btn('Add bot', { type: 'add_bot' }, 'bot') : '') +
+          (bots ? btn(`Remove bots (${bots})`, { type: 'remove_bots' }, 'kick') : ''),
       );
       if (r.state === 'results') rows.push(btn('Back to lobby', { type: 'lobby' }));
     }

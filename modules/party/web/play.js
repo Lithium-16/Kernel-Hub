@@ -154,7 +154,7 @@
     const chips = r.players
       .map(
         (p) =>
-          `<span class="chip ${p.connected ? '' : 'off'}">${av(p.pid, '')}${esc(p.name)}</span>`,
+          `<span class="chip ${p.connected ? '' : 'off'}">${av(p.pid, '')}${esc(p.name)}${p.bot ? '<b class="bot">BOT</b>' : ''}</span>`,
       )
       .join('');
     if (!isVip()) {
@@ -569,6 +569,7 @@
           ])
         : [];
       $('main').innerHTML = s.main;
+      split($('main'), !s.flow);
       for (const [id, value, focused] of typed) {
         const x = $(id);
         if (!x) continue;
@@ -592,6 +593,25 @@
     wakeLock(st && st.room.state === 'playing');
   }
 
+  // On a PC the screen is wide: the question (kicker, title, a note, the shirt preview) goes in
+  // a column on the left and everything to answer with on the right. On phones both wrappers
+  // are display: contents, so nothing moves.
+  function split(main, allowed) {
+    const kids = [...main.children];
+    let n = 0;
+    while (n < kids.length && kids[n].matches('.kicker, .ptitle, .pnote, .preview')) n++;
+    const ok = allowed && n > 0 && n < kids.length && kids[0].matches('.kicker, .ptitle');
+    main.classList.toggle('split', ok);
+    if (!ok) return;
+    const q = document.createElement('div');
+    const a = document.createElement('div');
+    q.className = 'phq';
+    a.className = 'pha';
+    q.append(...kids.slice(0, n));
+    a.append(...kids.slice(n));
+    main.append(q, a);
+  }
+
   function paintTimer() {
     const ring = $('ring');
     if (!ring || deadline === null) return;
@@ -607,7 +627,7 @@
       e = document.createElement('div');
       e.className = 'err';
       e.setAttribute('role', 'alert');
-      $('main').append(e);
+      ($('main').querySelector('.pha') || $('main')).append(e);
     }
     e.textContent = text;
     buzz();
