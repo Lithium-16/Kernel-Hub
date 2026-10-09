@@ -40,8 +40,9 @@ def _color(c: Any) -> int | str:
     raise BadDrawing(BROKEN)
 
 
-def check_drawing(strokes: Any) -> list[dict[str, Any]]:
-    """The drawing, cleaned, or BadDrawing with a reason a player can act on."""
+def check_drawing(strokes: Any, sprite: bool = False) -> list[dict[str, Any]]:
+    """The drawing, cleaned, or BadDrawing with a reason a player can act on. A sprite (a
+    character that stands on a background) can't have a background fill."""
     if not isinstance(strokes, list) or not strokes:
         raise BadDrawing("Draw something first.")
     if len(strokes) > MAX_STROKES:
@@ -52,6 +53,8 @@ def check_drawing(strokes: Any) -> list[dict[str, Any]]:
         if not isinstance(s, dict):
             raise BadDrawing(BROKEN)
         if set(s) == {"fill"}:
+            if sprite:
+                raise BadDrawing("Characters can't have a background fill: the scene goes behind them.")
             out.append({"fill": _color(s["fill"])})
             continue
         w, p = s.get("w"), s.get("p")
@@ -75,10 +78,10 @@ def _int(v: Any, lo: int, hi: int) -> bool:
     return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
 
 
-def doodle(rng: random.Random) -> list[dict[str, Any]]:
+def doodle(rng: random.Random, sprite: bool = False) -> list[dict[str, Any]]:
     """A random squiggly drawing (for bots): a few smooth loops and waves in the inks."""
     out: list[dict[str, Any]] = []
-    if rng.random() < 0.4:
+    if not sprite and rng.random() < 0.4:
         out.append({"fill": rng.randrange(2, len(INK))})
     for _ in range(rng.randint(3, 6)):
         cx, cy = rng.randint(80, SIZE - 80), rng.randint(80, SIZE - 80)
