@@ -17,6 +17,12 @@ port = 8097
 share_port = 10000
 # Players in a room at most (2 to 8).
 max_players = 8
+# Anyone with the share link can press "Host a game" to open a room of their own (with its own
+# code and big screen), so friends can play without Kernel. Off: only this PC's room.
+open_hosting = true
+# How many rooms people can open from the share link at once (this PC's room not counted). A
+# room nobody is in for 30 minutes closes by itself.
+max_rooms = 4
 # Multiplies the answering and voting timers (2.0 = twice as long, for a relaxed night).
 timer_scale = 1.0
 # Questions in a Bluff Buffet game (points grow: x1, then x1.5, and x2 on the final question).

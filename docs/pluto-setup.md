@@ -185,7 +185,11 @@ The games (3 to 8 players; Bluff Buffet works with 2):
 To try a game alone, move the mouse on the host screen and press **Add bot** (or ask the
 assistant to add bots). Bots answer, lie, draw and vote by themselves; with three bots the host
 screen's **Start** plays a whole game on its own. They stay out of the hall of fame, and
-**Remove bots** clears them. Friends on a laptop can join with the same link: on a big window the
+**Remove bots** clears them. Friends don't need Kernel to host either: on the share link's join page, **Host a game on
+this screen** opens a room of their own, with its own code and big screen, while yours keeps
+going. Up to `max_rooms` (4) can be open at once, a room closes after 30 minutes with nobody in
+it (or with **Close this room**), and every room records into the same hall of fame. Turn
+`open_hosting` off to allow only your room. Friends on a laptop can join with the same link: on a big window the
 page spreads out, with the question on the left and a bigger drawing pad.
 
 It remembers who played: a profile per name (a new phone asks for the profile's 4-digit PIN),
