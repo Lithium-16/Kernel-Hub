@@ -184,11 +184,14 @@ body.host {
   background: var(--frame);
 }
 .tvc {
-  position: relative;
+  /* centered by hand: a grid can't center a 1280px stage in a narrower window */
+  position: absolute;
+  left: 50%;
+  top: 50%;
   width: 1280px;
   height: 720px;
   flex: none;
-  transform: scale(var(--s, 1));
+  transform: translate(-50%, -50%) scale(var(--s, 1));
   overflow: hidden;
   font-size: 22px;
   background:
