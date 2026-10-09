@@ -211,7 +211,9 @@
     const step = `Step ${v.step} of ${v.steps.length} · ${v.steps[v.step - 1]}`;
     const head = (tag) =>
       `<div class="scene" data-game="drama">${bar(T, 'D')}<span class="tag">${tag}</span>`;
-    const theme = v.theme ? `<span class="dtheme">${esc(v.theme)}</span>` : '';
+    const theme = v.theme
+      ? `<span class="dtheme">${esc(v.theme)}</span>${v.problem ? `<p class="dproblem">The problem: <b>${esc(v.problem)}</b></p>` : ''}`
+      : '';
     const work = (title, sub, extra = '') =>
       `${head(step)}<h2 class="big" style="font-size:64px">${title}</h2>${theme}<p class="sub">${sub}</p>${extra}${doneRow(v.waiting)}${ring()}</div>`;
     if (v.phase === 'pitch')
@@ -220,7 +222,7 @@
         'Write a theme on your phone. Then everyone votes.',
       );
     if (v.phase === 'pitch_vote')
-      return `${head(step)}<div class="dthemes">${v.themes.map((t) => `<div class="opt">${esc(t.text)}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
+      return `${head(step)}<div class="dthemes">${v.themes.map((t) => `<div class="opt">${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
     if (v.phase === 'create')
       return work(
         'Everyone invents a character',
@@ -231,19 +233,25 @@
         "Draw someone else's character",
         'Neutral, flustered, sad and angry. Nobody sees the drawings until the show!',
       );
+    if (v.phase === 'headline')
+      return work(
+        'One sentence per chapter',
+        "Everyone writes what happens in their chapter. Next, you'll see the headlines before and after yours.",
+      );
     if (v.phase === 'write')
       return work(
         'One story, one chapter each',
-        'Everyone writes their chapter at the same time. Nobody knows what the others wrote. Good luck!',
+        'Everyone writes their chapter at the same time, bridging the headlines before and after theirs.',
         `<div class="dstarring">Starring ${(v.cast || []).map((c) => `<b>${esc(c.name)}</b>`).join(' · ')}</div>`,
       );
     if (v.phase === 'show') {
       const ch = v.chapter;
       const one = ch.cast.length === 1;
+      const hl = ch.headline ? `<p class="sub dhl">${esc(ch.headline)}</p>` : '';
       const card =
         ch.index === 0
-          ? `<span class="tag">Tonight's novel</span><h2 class="big">${esc(v.theme)}</h2><p class="sub dchap">Chapter 1 · The beginning</p>`
-          : `<span class="tag">${esc(v.theme)}</span><h2 class="big">Chapter ${ch.index + 1}</h2>${PART[ch.part] ? `<p class="sub dchap">${PART[ch.part]}</p>` : ''}`;
+          ? `<span class="tag">Tonight's novel</span><h2 class="big">${esc(v.theme)}</h2><p class="sub dchap">Chapter 1 · The beginning</p>${hl}`
+          : `<span class="tag">${esc(v.theme)}</span><h2 class="big">Chapter ${ch.index + 1}</h2>${PART[ch.part] ? `<p class="sub dchap">${PART[ch.part]}</p>` : ''}${hl}`;
       return `<div class="scene vn" data-game="drama"><div class="vnstage">${S.svg(ch.bg, 'vnbg')}
         ${ch.cast.map((_, k) => `<canvas class="sprite ${one ? 'c' : k ? 'r' : 'l'}" width="400" height="400" id="sp${k}"></canvas>`).join('')}
         <div class="vnbox" id="vnbox" hidden><div class="plate" id="vnplate"></div><p id="vntext"></p></div>

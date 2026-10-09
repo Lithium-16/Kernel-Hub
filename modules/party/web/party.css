@@ -2560,6 +2560,23 @@ body.play {
   }
 }
 
+.dproblem {
+  margin: 0 0 8px;
+  font-size: 24px;
+}
+.dthemes .opt small {
+  display: block;
+  margin-top: 6px;
+  font-size: 20px;
+  font-weight: 700;
+  opacity: 0.75;
+}
+.vncard .dhl {
+  margin-top: 14px;
+  font-size: 30px;
+  font-style: italic;
+}
+
 /* Drama Club phones: the step bar, cards and the cast picker */
 .dsteps {
   display: flex;
@@ -2592,6 +2609,30 @@ body.play {
 }
 .dpart .kicker {
   color: var(--acc);
+}
+.dheads {
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.dheads li {
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 2px dashed var(--line);
+  font-size: 14px;
+  font-weight: 700;
+}
+.dheads li.me {
+  border: 2px solid var(--acc);
+}
+.dheads small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 .dcastpick {
   display: grid;
