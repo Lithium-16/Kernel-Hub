@@ -38,7 +38,7 @@ BADGES: dict[str, tuple[str, str]] = {
     "unbeatable_tee": ("Unbeatable Tee", "A shirt you made part of survived 3 challenges"),
     "fashion_icon": ("Fashion Icon", "Made part of the winning shirt in a Shirt Showdown final"),
     "leading_role": ("Leading Role", "Drew the favorite character in Drama Club"),
-    "plot_twist": ("Plot Twist", "Wrote the twist of the winning Drama Club scene"),
+    "plot_twist": ("Plot Twist", "Wrote the favorite chapter of a Drama Club novel"),
     "season_champ": ("Season Champion", "Topped a monthly season"),
 }
 

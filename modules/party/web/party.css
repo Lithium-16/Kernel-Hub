@@ -2494,6 +2494,131 @@ body.play {
   scroll-snap-align: start;
 }
 
+.sprite.c {
+  left: calc(50% - 235px);
+  transform: translateY(60px);
+}
+.sprite.c.in {
+  transform: none;
+}
+.vnchap {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  padding: 6px 14px;
+  border-radius: 12px;
+  background: rgba(21, 14, 36, 0.72);
+  color: #fff;
+  font-weight: 800;
+  font-size: 20px;
+}
+.vncard .dchap {
+  font-family: var(--display);
+  font-size: 40px;
+  color: var(--acc);
+}
+.dstarring {
+  margin: 4px 0 14px;
+  font-size: 26px;
+}
+.vncredroll {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #150e24;
+  color: #fff;
+  text-align: center;
+}
+.vncredroll .roll {
+  padding: 60px 80px;
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+  animation: roll 10s linear both;
+}
+.vncredroll h3 {
+  margin: 18px 0 0;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 34px;
+  color: var(--acc);
+}
+@keyframes roll {
+  from {
+    transform: translateY(18%);
+  }
+  to {
+    transform: translateY(-12%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vncredroll .roll {
+    animation: none;
+  }
+}
+
+/* Drama Club phones: the step bar, cards and the cast picker */
+.dsteps {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.dsteps span {
+  height: 8px;
+  flex: 1;
+  border-radius: 99px;
+  background: var(--line);
+}
+.dsteps span.done {
+  background: color-mix(in srgb, var(--acc) 55%, var(--line));
+}
+.dsteps span.now {
+  flex: 4;
+  height: auto;
+  padding: 3px 10px;
+  background: var(--acc);
+  color: #150e24;
+  font-weight: 800;
+  font-size: 13px;
+  text-align: center;
+}
+.dchar,
+.dpart {
+  gap: 2px;
+}
+.dpart .kicker {
+  color: var(--acc);
+}
+.dcastpick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.dcastpick button {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+}
+.dcastpick button b {
+  font-size: 16px;
+}
+.dcastpick button i {
+  color: var(--muted);
+}
+.dcastpick button[aria-pressed="true"] {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 22%, var(--surface));
+}
+
 /* how-to-play card */
 .howto {
   margin: 0;

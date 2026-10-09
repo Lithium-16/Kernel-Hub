@@ -32,8 +32,6 @@ bluff_questions = 5
 shirt_rounds = 2
 # Show a short how-to-play card before each game (only the first time it's played in a night).
 how_to_play = true
-# Rounds of Drama Club (1 or 2; round 2 keeps the cast and picks a new theme).
-drama_rounds = 1
 # A Discord channel webhook (https://discord.com/api/webhooks/...) that gets tonight's recap
 # (standings and best moments) when the room closes. Empty: no recap. Game events also go to
 # Kernel's own Discord alerts if you add "party.*" to [notify] include in node.toml.
