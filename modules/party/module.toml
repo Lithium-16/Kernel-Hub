@@ -8,7 +8,8 @@ entry = "main.py"
 # Jackbox-style party games hosted on this PC. Open the host link (in this module's status) on
 # the big screen or your stream; friends open the share link on their phones and type the room
 # code. Games: Quip Clash (funny answers, head-to-head votes), Bluff Buffet (fake answers to
-# weird true facts) and Shirt Showdown (draw, write slogans, make shirts, battle them).
+# weird true facts) Shirt Showdown (draw, write slogans, make shirts, battle them)
+# and Drama Club (draw a cast, write visual-novel scenes, watch them play).
 # It only listens on this PC. Share makes it reachable through Tailscale: "anyone with the link"
 # (Tailscale Funnel, a public https address for the game only) or "my tailnet".
 [settings]
@@ -29,6 +30,8 @@ timer_scale = 1.0
 bluff_questions = 5
 # Rounds of Shirt Showdown before the final (1 to 3).
 shirt_rounds = 2
+# Rounds of Drama Club (1 or 2; round 2 keeps the cast and picks a new theme).
+drama_rounds = 1
 # A Discord channel webhook (https://discord.com/api/webhooks/...) that gets tonight's recap
 # (standings and best moments) when the room closes. Empty: no recap. Game events also go to
 # Kernel's own Discord alerts if you add "party.*" to [notify] include in node.toml.

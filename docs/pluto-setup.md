@@ -181,6 +181,10 @@ The games (3 to 8 players; Bluff Buffet works with 2):
 - **Quip Clash**: answer silly prompts, then everyone votes between two answers.
 - **Bluff Buffet**: write a believable lie for a weird true fact, then find the truth.
 - **Shirt Showdown**: draw designs, write slogans, make shirts and battle them.
+- **Drama Club**: pitch a theme, draw a character in four moods, then pass scenes along: the
+  writer gets two characters (names and bios only), picks the background and writes the scene,
+  and someone else writes the twist. Nobody sees the characters until the big screen plays
+  every scene as a visual novel.
 
 To try a game alone, move the mouse on the host screen and press **Add bot** (or ask the
 assistant to add bots). Bots answer, lie, draw and vote by themselves; with three bots the host

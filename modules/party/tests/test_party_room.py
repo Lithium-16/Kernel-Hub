@@ -402,7 +402,7 @@ def play_out(r, limit=4000):
     raise AssertionError(f"stuck in {r.game.phase}")
 
 
-@pytest.mark.parametrize("game", ["quip", "bluff", "shirt"])
+@pytest.mark.parametrize("game", ["quip", "bluff", "shirt", "drama"])
 def test_bots_play_a_whole_game_by_themselves(game):
     r, events = room()
     with pytest.raises(Invalid, match="at least"):
@@ -563,5 +563,45 @@ async def test_hosting_can_be_turned_off():
         assert (await recv(ws, "hello"))["hosting"] is False
         assert (await client.post("/host/new")).status == 403
         await ws.close()
+    finally:
+        await client.close()
+
+
+async def test_leaving_a_room_and_a_closed_room_page():
+    r, _ = room()
+    server, client = await client_for(r)
+    try:
+        ws = await client.ws_connect("/ws")
+        await ws.send_json({"type": "join", "code": r.code, "name": "Ann"})
+        await recv(ws, "joined")
+        await ws.send_json({"type": "leave"})
+        assert (await recv(ws, "left"))["type"] == "left"
+        assert not r.seats  # gone between games (not banned: can join again)
+        await ws.send_json({"type": "join", "code": r.code, "name": "Ann"})
+        pid = (await recv(ws, "joined"))["pid"]
+        for name in ("Bo", "Cy"):
+            r.add_bot()
+        r.start("quip")
+        await asyncio.sleep(0.12)
+        await ws.send_json({"type": "leave"})
+        await recv(ws, "left")
+        assert pid in r.seats and not r.seats[pid].connected  # mid-game: away, the game goes on
+        gone = await client.get("/host?key=nope")
+        assert gone.status == 403 and 'href="/"' in await gone.text()
+        await ws.close()
+    finally:
+        await client.close()
+
+
+async def test_picture_backgrounds_are_served_by_name_only():
+    r, _ = room()
+    server, client = await client_for(r)
+    try:
+        for name in ("classroom_day.webp", "onsen.thumb.webp"):
+            resp = await client.get(f"/bg/{name}")
+            assert resp.status == 200 and resp.headers["Content-Type"] == "image/webp"
+            assert (await resp.read())[8:12] == b"WEBP"
+        for bad in ("nope.webp", "classroom_day.png", "CREDITS.md", "..%2Fplay.js", "classroom.webp"):
+            assert (await client.get(f"/bg/{bad}")).status == 404
     finally:
         await client.close()

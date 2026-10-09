@@ -1671,7 +1671,7 @@ body.play {
 .padwrap {
   position: relative;
   /* as big as the phone allows while the tools, colors and buttons still fit on screen */
-  width: min(100%, max(240px, calc(100svh - 420px)));
+  width: min(100%, max(240px, calc(100svh - 480px)));
   justify-self: center;
 }
 .studio .pad {
@@ -2088,4 +2088,408 @@ body.play {
   .shirtvote .shirt.sm {
     max-width: 280px;
   }
+}
+
+/* leaving a room, and the way out of a closed one */
+.phtop .leave {
+  margin-left: auto;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 2px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+  font-size: 13px;
+}
+.phtop .leave + .pt {
+  margin-left: 0;
+}
+.gone {
+  display: flex;
+  gap: 16px;
+  margin-top: 28px;
+}
+.gone button {
+  min-height: 64px;
+  padding: 0 28px;
+  border-radius: 18px;
+  border: 3px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--display);
+  font-size: 26px;
+  cursor: pointer;
+}
+.gone button:first-child {
+  background: var(--gold);
+  border-color: transparent;
+  color: var(--ink);
+}
+
+/* ---------------- Drama Club ---------------- */
+[data-game="drama"] {
+  --acc: #b07cff;
+}
+.dcast {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.dcast .card {
+  gap: 2px;
+}
+.moods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.moods button,
+.dline .who button {
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  font-weight: 800;
+  font-size: 14px;
+}
+.moods button[aria-pressed="true"],
+.dline .who button[aria-pressed="true"] {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 22%, var(--surface));
+}
+.moods.tabs button {
+  flex: 1;
+}
+.dline {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+}
+.dline .who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dline .row {
+  display: flex;
+  gap: 8px;
+}
+.dline input {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 16px;
+}
+.dline .x {
+  width: 48px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 22px;
+}
+#dlines {
+  display: grid;
+  gap: 10px;
+}
+.bgpick {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.bgpick button {
+  padding: 0;
+  border-radius: 14px;
+  border: 3px solid var(--line);
+  background: var(--surface);
+  overflow: hidden;
+  display: grid;
+  font-size: 12px;
+  font-weight: 800;
+}
+.bgpick button svg {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: block;
+}
+.bgpick button span {
+  padding: 4px 2px 6px;
+}
+.bgpick button[aria-pressed="true"] {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 40%, transparent);
+}
+.dstage {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 2px solid var(--line);
+}
+.dstage svg {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: block;
+}
+.dstage span {
+  position: absolute;
+  left: 10px;
+  bottom: 8px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+.dsofar p {
+  margin: 0;
+}
+.dhead {
+  margin: 8px 0 0;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 22px;
+}
+.choice .dthumb {
+  width: 72px;
+  flex: none;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.choice .dthumb svg {
+  width: 72px;
+  height: 40px;
+  display: block;
+}
+.choice small {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.dgallery {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.dgallery button {
+  padding: 6px;
+  border-radius: 16px;
+  border: 3px solid var(--line);
+  background: #fff;
+  color: #1a1230;
+  display: grid;
+  gap: 4px;
+  font-weight: 800;
+  font-size: 13px;
+}
+.dgallery button canvas {
+  width: 100%;
+  aspect-ratio: 1;
+}
+.dgallery button[aria-pressed="true"] {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 40%, transparent);
+}
+
+/* host: work phases and the visual-novel player */
+.dtheme {
+  display: inline-block;
+  margin: 6px 0 10px;
+  padding: 6px 16px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--acc) 24%, transparent);
+  font-family: var(--display);
+  font-size: 30px;
+}
+.dthemes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 18px 0;
+}
+.scene.vn {
+  padding: 0;
+}
+.vnstage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.vnbg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.sprite {
+  position: absolute;
+  bottom: 40px;
+  width: 470px;
+  height: 470px;
+  opacity: 0;
+  transition:
+    opacity 0.6s,
+    transform 0.6s,
+    filter 0.3s;
+  filter: drop-shadow(0 8px 0 rgba(0, 0, 0, 0.18));
+}
+.sprite.l {
+  left: 110px;
+  transform: translateX(-80px);
+}
+.sprite.r {
+  right: 110px;
+  transform: translateX(80px);
+}
+.sprite.in {
+  opacity: 1;
+  transform: none;
+}
+.sprite.dim {
+  filter: brightness(0.6) drop-shadow(0 8px 0 rgba(0, 0, 0, 0.18));
+}
+.sprite.pop {
+  animation: hop 0.4s ease-out;
+}
+@keyframes hop {
+  40% {
+    translate: 0 -22px;
+  }
+}
+.vnbox {
+  position: absolute;
+  left: 60px;
+  right: 60px;
+  bottom: 28px;
+  min-height: 150px;
+  padding: 36px 34px 24px;
+  border-radius: 24px;
+  background: rgba(21, 14, 36, 0.86);
+  border: 3px solid color-mix(in srgb, var(--acc) 70%, #fff);
+  color: #fff;
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+.vnbox p {
+  margin: 0;
+}
+.vnbox .plate {
+  position: absolute;
+  top: -24px;
+  left: 30px;
+  padding: 6px 20px;
+  border-radius: 12px;
+  background: var(--acc);
+  color: #150e24;
+  font-family: var(--display);
+  font-size: 28px;
+}
+.vnbox.narrator {
+  font-style: italic;
+  text-align: center;
+}
+.vnbox.narrator .plate {
+  display: none;
+}
+.vncard {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  padding: 80px;
+  background: rgba(21, 14, 36, 0.78);
+  color: #fff;
+  transition: opacity 0.6s;
+}
+.vncard.gone {
+  opacity: 0;
+  pointer-events: none;
+}
+.vncard .big {
+  font-size: 64px;
+}
+.vncredits {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  transform: translateX(-50%);
+  padding: 16px 28px;
+  border-radius: 18px;
+  background: rgba(21, 14, 36, 0.86);
+  color: #fff;
+  font-size: 24px;
+  white-space: nowrap;
+}
+.dmini {
+  position: relative;
+  width: 160px;
+  height: 90px;
+  flex: none;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.dmini svg {
+  width: 100%;
+  height: 100%;
+}
+.dmini canvas {
+  position: absolute;
+  bottom: 0;
+  width: 70px;
+  height: 70px;
+}
+.dmini canvas:nth-of-type(1) {
+  left: 4px;
+}
+.dmini canvas:nth-of-type(2) {
+  right: 4px;
+}
+.dcastwall {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.dcastwall div {
+  width: 150px;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 8px;
+  border-radius: 18px;
+  background: #fff;
+  color: #1a1230;
+}
+.dcastwall canvas {
+  width: 130px;
+  height: 130px;
+}
+.dcastwall small {
+  color: #6b5f86;
+  font-weight: 700;
+}
+.bgpick.row {
+  display: flex;
+  overflow-x: auto;
+  gap: 8px;
+  padding-bottom: 6px;
+  scroll-snap-type: x mandatory;
+}
+.bgpick.row button {
+  flex: 0 0 34%;
+  scroll-snap-align: start;
 }
