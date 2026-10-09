@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const KEY = new URLSearchParams(location.search).get('key') || '';
-  const GLYPH = { quip: 'Q', bluff: 'B', shirt: 'T' };
+  const GLYPH = { quip: 'Q', bluff: 'B', shirt: 'T', drama: 'D' };
   const $ = (id) => document.getElementById(id);
   const esc = (s) =>
     String(s ?? '').replace(
@@ -192,6 +192,128 @@
     return scores(v, T);
   }
 
+  // -- Drama Club ------------------------------------------------------------------------
+  const MOOD = { neutral: 'neutral', flustered: 'flustered', sad: 'sad', angry: 'angry' };
+  function drama(v) {
+    const D = window.PartyDraw;
+    const S = window.PartyScenes;
+    const T = 'Drama Club';
+    const head = (tag) =>
+      `<div class="scene" data-game="drama">${bar(T, 'D')}<span class="tag">${tag}</span>`;
+    const theme = v.theme ? `<span class="dtheme">${esc(v.theme)}</span>` : '';
+    const work = (tag, title, sub) =>
+      `${head(tag)}<h2 class="big" style="font-size:64px">${title}</h2>${theme}<p class="sub">${sub}</p>${doneRow(v.waiting)}${ring()}</div>`;
+    if (v.phase === 'pitch')
+      return work(
+        'Pitch a theme',
+        'What should the story be about?',
+        'Write a theme on your phone. Then everyone votes.',
+      );
+    if (v.phase === 'pitch_vote')
+      return `${head('Pick the theme')}<div class="dthemes">${v.themes.map((t) => `<div class="opt">${esc(t.text)}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
+    if (v.phase === 'cast')
+      return work(
+        'Casting call',
+        'Everyone draws a character',
+        'Neutral, flustered, sad and angry. Nobody sees them until the show!',
+      );
+    if (v.phase === 'stage')
+      return work(
+        'Set the stage',
+        'Pick a place, start the scene',
+        "You only know the characters' names. Choose a background and say what's happening.",
+      );
+    if (v.phase === 'script')
+      return work(
+        'Write the script',
+        'Lights, camera, typing',
+        'Write the scene line by line, with a mood for every line.',
+      );
+    if (v.phase === 'twist')
+      return work(
+        'The twist',
+        'Someone else writes the ending',
+        'Read the scene, then add the last lines. Surprise them!',
+      );
+    if (v.phase === 'show') {
+      const story = v.story;
+      return `<div class="scene vn" data-game="drama"><div class="vnstage">${S.svg(story.bg, 'vnbg')}
+        <canvas class="sprite l" width="400" height="400" id="sp0"></canvas><canvas class="sprite r" width="400" height="400" id="sp1"></canvas>
+        <div class="vnbox" id="vnbox" hidden><div class="plate" id="vnplate"></div><p id="vntext"></p></div>
+        <div class="vncard" id="vncard"><span class="tag">Scene ${story.index + 1} of ${v.of} · ${esc(v.theme)}</span><h2 class="big">${esc(story.premise)}</h2>
+          <p class="sub">Starring ${esc(story.cast[0].name)} &amp; ${esc(story.cast[1].name)}</p></div>
+        <div class="vncredits" id="vncredits" hidden>Cast by <b>${esc(nameOf(story.credits.cast[0]))}</b> &amp; <b>${esc(nameOf(story.credits.cast[1]))}</b> · Stage by <b>${esc(nameOf(story.credits.stage))}</b> · Script by <b>${esc(nameOf(story.credits.script))}</b>${story.credits.twist ? ` · Twist by <b>${esc(nameOf(story.credits.twist))}</b>` : ''}</div>
+      </div></div>`;
+    }
+    if (v.phase === 'vote')
+      return `${head('Vote on your phone')}<h2 class="big" style="font-size:52px">Best scene and best character</h2>
+        <div class="dcastwall">${(v.gallery || []).map((c) => `<div>${D.artCanvas(c.face, '')}<b>${esc(c.name)}</b><small>by ${esc(nameOf(c.pid))}</small></div>`).join('')}</div>${doneRow(v.waiting)}${ring()}</div>`;
+    return scores(v, T);
+  }
+
+  // The visual-novel player: the cast walks on, each line types out, the speaker's sprite
+  // switches to the line's mood, then the credits roll.
+  let vnTimers = [];
+  function stopVN() {
+    for (const t of vnTimers) clearTimeout(t);
+    vnTimers = [];
+  }
+  function playVN(story) {
+    const D = window.PartyDraw;
+    const at = (ms, f) => vnTimers.push(setTimeout(f, ms));
+    const faces = story.cast.map((c) => c.faces || {});
+    const cur = ['neutral', 'neutral'];
+    const show = (k, want, speaking) => {
+      const c = $(`sp${k}`);
+      if (!c) return;
+      const mood = want === 'keep' ? cur[k] : want;
+      cur[k] = mood;
+      D.render(c, faces[k][mood] || faces[k].neutral || []);
+      c.classList.toggle('dim', speaking === false);
+      if (speaking) {
+        c.classList.remove('pop');
+        void c.offsetWidth;
+        c.classList.add('pop');
+      }
+    };
+    show(0, 'neutral');
+    show(1, 'neutral');
+    const lines = [...story.lines, ...story.twist];
+    const names = [story.cast[0].name, story.cast[1].name];
+    at(2600, () => {
+      $('vncard')?.classList.add('gone');
+      $('sp0')?.classList.add('in');
+      $('sp1')?.classList.add('in');
+    });
+    lines.forEach((ln, i) => {
+      at(3400 + i * 3200, () => {
+        const box = $('vnbox');
+        if (!box) return;
+        box.hidden = false;
+        box.classList.toggle('narrator', ln.who === 2);
+        $('vnplate').textContent = ln.who === 2 ? '' : names[ln.who];
+        if (ln.who !== 2) {
+          show(ln.who, ln.emotion, true);
+          show(1 - ln.who, 'keep', false);
+        } else {
+          for (const k of [0, 1]) $(`sp${k}`)?.classList.remove('dim');
+        }
+        const text = $('vntext');
+        let n = 0;
+        const type = () => {
+          if (!text.isConnected) return;
+          text.textContent = ln.text.slice(0, ++n);
+          if (n < ln.text.length) at(28, type);
+        };
+        type();
+      });
+    });
+    at(3400 + lines.length * 3200, () => {
+      $('vnbox')?.setAttribute('hidden', '');
+      $('vncredits')?.removeAttribute('hidden');
+    });
+  }
+
   function shirtGame(v) {
     const D = window.PartyDraw;
     const T = 'Shirt Showdown';
@@ -253,9 +375,11 @@
     const champName = f.champion ? f.champion.name : '';
     const board = f.board.length ? f.board : f.all_time;
     const hit = (h) =>
-      h.shirt
-        ? `<div class="fhit">${D.shirt(h.shirt, 'sm')}<div><b>Winning shirt</b><small>${esc(h.name)} · ${esc(h.title)}, ${esc(h.date)}</small></div></div>`
-        : `<div class="fhit"><div><q>${esc(h.text)}</q><small>${esc(h.name)} · ${h.kind === 'lie' ? `fooled ${h.votes}` : `${h.votes} of ${h.of} votes`} · ${esc(h.title)}, ${esc(h.date)}</small></div></div>`;
+      h.shirt && h.shirt.scene
+        ? `<div class="fhit"><div class="dmini">${window.PartyScenes.svg(h.shirt.scene.bg)}${h.shirt.scene.faces.map((f) => D.artCanvas(f, '')).join('')}</div><div><q>${esc(h.shirt.scene.line || h.text)}</q><small>${esc(h.name)} · ${esc(h.title)}, ${esc(h.date)}</small></div></div>`
+        : h.shirt
+          ? `<div class="fhit">${D.shirt(h.shirt, 'sm')}<div><b>Winning shirt</b><small>${esc(h.name)} · ${esc(h.title)}, ${esc(h.date)}</small></div></div>`
+          : `<div class="fhit"><div><q>${esc(h.text)}</q><small>${esc(h.name)} · ${h.kind === 'lie' ? `fooled ${h.votes}` : `${h.votes} of ${h.of} votes`} · ${esc(h.title)}, ${esc(h.date)}</small></div></div>`;
     return `<div class="scene" data-game="none">${bar('Hall of Fame', '★')}
       <div class="fame">
         <div class="panel"><h3>${f.board.length ? esc(f.season) : 'All time'} <small>${f.board.length ? 'this season' : ''}</small></h3>
@@ -293,7 +417,7 @@
     const hit = (v.hits || [])[0];
     return `<div class="scene" data-game="none">${bar('Party Night', '★')}
       <h2 class="big" style="font-size:60px;text-align:center">${winner ? `${esc(winner)} wins ${esc(v.title)}!` : `${esc(v.title)} is over`}</h2>
-      ${hit ? `<div class="hitline">${hit.kind === 'shirt' ? 'Winning shirt' : 'Best of the game'}: <q>${esc(hit.text)}</q> · ${esc(hit.name)}</div>` : ''}
+      ${hit ? `<div class="hitline">${hit.kind === 'shirt' ? 'Winning shirt' : hit.kind === 'scene' ? 'Winning scene' : 'Best of the game'}: <q>${esc(hit.text)}</q> · ${esc(hit.name)}</div>` : ''}
       <div class="podium">${order.map((x, k) => (x ? `<div class="pod p${[2, 1, 3][k]}">${av(x.pid)}<div class="name">${esc(nameOf(x.pid))}</div><div class="blk">${fmt(x.score)}</div></div>` : '<div></div>')).join('')}</div>
       ${
         (v.badges || []).length
@@ -316,7 +440,14 @@
     let html;
     let scene;
     if (r.state === 'playing' && v && v.game) {
-      html = v.game === 'shirt' ? shirtGame(v) : v.game === 'quip' ? quip(v) : bluff(v);
+      html =
+        v.game === 'drama'
+          ? drama(v)
+          : v.game === 'shirt'
+            ? shirtGame(v)
+            : v.game === 'quip'
+              ? quip(v)
+              : bluff(v);
       scene = [
         v.game,
         v.phase,
@@ -324,6 +455,7 @@
         v.number,
         v.matchup && v.matchup.number,
         v.battle && v.battle.shirts.map((x) => x.id).join(','),
+        v.story && v.story.index,
       ].join(':');
     } else if (r.state === 'results' && v) {
       html = results(v);
@@ -352,6 +484,8 @@
       $('tvc').dataset.game = sc.dataset.game || 'none';
       if (entering) sc.classList.add('enter');
       if (entering && scene === 'results') confetti();
+      if (entering) stopVN();
+      if (entering && v && v.game === 'drama' && v.phase === 'show') playVN(v.story);
       lastContent = content;
       lastScene = scene;
     }
@@ -456,6 +590,23 @@
     clearTimeout(hideT);
     hideT = setTimeout(() => $('ctl').classList.remove('show'), 3000);
   });
+  // The buttons on the closed screen: never leave the big screen at a dead end.
+  $('tvc').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-go]');
+    if (!b) return;
+    if (b.dataset.go === 'join') {
+      location.href = '/';
+      return;
+    }
+    try {
+      const r = await fetch('/host/new', { method: 'POST' });
+      const out = await r.json();
+      if (r.ok && out.url) location.href = out.url;
+      else b.textContent = out.error || 'Hosting is not available';
+    } catch {
+      b.textContent = 'Hosting is not available';
+    }
+  });
   $('ctl').addEventListener('click', (e) => {
     const b = e.target.closest('[data-cmd]');
     if (!b || !ws || ws.readyState !== 1) return;
@@ -488,7 +639,7 @@
         closed = true;
         $('ctl').innerHTML = '';
         $('tvc').innerHTML =
-          '<div class="scene" data-game="none"><div class="join"><div class="left"><h2 class="big" style="font-size:76px">This room has closed</h2><p class="sub">Open the join page again to host a new one.</p></div></div></div>';
+          '<div class="scene" data-game="none"><div class="join"><div class="left"><h2 class="big" style="font-size:76px">This room has closed</h2><p class="sub">Host a new one, or go back to the join page.</p><div class="gone"><button type="button" data-go="host">Host a new room</button><button type="button" data-go="join">Join a game</button></div></div></div></div>';
       } else if (msg.type === 'error') {
         ctlMsg = msg.message;
         controls();

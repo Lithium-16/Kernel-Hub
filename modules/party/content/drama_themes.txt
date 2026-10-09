@@ -1,0 +1,62 @@
+# Drama Club theme ideas, one per line (shown as "Idea:" hints and used when nobody pitches).
+# {player} is filled with someone in the room. Add your own in the data folder's content/drama_themes.txt.
+A haunted bakery
+Rival chefs fall in love
+The last day of summer camp
+A vampire's first day at school
+Detectives who are terrible at detecting
+Two knights, one dragon, zero plans
+A wedding where everything goes wrong
+Pirates on a budget
+The office holiday party
+A time traveler stuck in the wrong decade
+Roommates who can't stand each other
+A spaceship crew with one working toilet
+The world's most dramatic book club
+Magical girls on their day off
+A heist planned by toddlers
+Ghosts who want a quiet afterlife
+The school play is tonight and nobody learned their lines
+Two rival streamers forced to collab
+A cat café with a dark secret
+The robot uprising, but polite
+A royal ball with a missing crown
+Superheroes doing their taxes
+Love letters delivered to the wrong person
+The final round of a baking contest
+A mermaid tries to get a driver's license
+A haunted house that's actually lonely
+Two exes stuck in an elevator
+{player}'s birthday party, but cursed
+The villain just wants to be liked
+A camping trip with suspicious noises
+Space pirates versus space librarians
+The new kid is clearly an alien
+A fashion show for monsters
+Fake dating for a family dinner
+Summer festival fireworks confession
+The last train home
+A wizard school with terrible teachers
+A cozy murder mystery at grandma's house
+Two gamers meet in real life
+A zombie who just wants coffee
+The student council election
+A demon who works at a call center
+Two rival bands at the same gig
+A dating show on a pirate ship
+A runaway princess at a convenience store
+The cooking club fights the evil chess club
+A shy ghost writes a love song
+Lost in the mall after closing
+A secret identity at a costume party
+Two neighbors and one stolen package
+The cursed karaoke night
+A detective and the thief she can't catch
+The worst first date in history
+A dragon opens a flower shop
+Exam day at monster school
+A boy band made of knights
+The rooftop confession that goes very wrong
+A road trip with a talking car
+Pen pals who finally meet
+The great snack heist

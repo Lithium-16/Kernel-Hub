@@ -144,9 +144,12 @@
   /**
    * A drawing studio in `root`: the pad, tools (pen, eraser, fill, undo, redo, clear), quick
    * colors plus a full color picker and recent colors, a pen size slider with a live preview,
-   * and an ink meter. Returns {strokes(), empty(), destroy()}.
+   * and an ink meter. Returns {strokes(), empty(), load(strokes), destroy()}.
+   * opts.sprite: no background fill (a character that stands on a scene).
+   * opts.guide: strokes shown faded under the drawing (e.g. the neutral face) to trace over.
+   * opts.start: strokes to begin with (a drawing already sent, to redo it).
    */
-  function Studio(root) {
+  function Studio(root, opts = {}) {
     let tool = 'pen';
     let color = 0; // an ink index or "#rrggbb"
     let size = 8;
@@ -161,7 +164,7 @@
       <div class="tbar" role="toolbar" aria-label="Drawing tools">
         <button type="button" data-tool="pen" aria-pressed="true" aria-label="Pen">${icon('pen')}<span>Pen</span></button>
         <button type="button" data-tool="eraser" aria-pressed="false" aria-label="Eraser">${icon('eraser')}<span>Eraser</span></button>
-        <button type="button" data-do="fill" aria-label="Fill the background with this color">${icon('fill')}<span>Fill</span></button>
+        ${opts.sprite ? '' : `<button type="button" data-do="fill" aria-label="Fill the background with this color">${icon('fill')}<span>Fill</span></button>`}
         <button type="button" data-do="undo" aria-label="Undo">${icon('undo')}<span>Undo</span></button>
         <button type="button" data-do="redo" aria-label="Redo">${icon('redo')}<span>Redo</span></button>
         <button type="button" data-do="clear" aria-label="Clear the drawing">${icon('clear')}<span>Clear</span></button>
@@ -176,6 +179,8 @@
     const cache = document.createElement('canvas'); // everything already drawn
     const cctx = cache.getContext('2d');
     const range = root.querySelector('input[type=range]');
+    const guide = opts.guide && opts.guide.length ? document.createElement('canvas') : null;
+    if (opts.sprite) root.querySelector('.tbar').classList.add('five');
 
     const live = () => {
       let from = 0;
@@ -200,6 +205,11 @@
       queued = false;
       ctx.globalCompositeOperation = 'source-over';
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (guide) {
+        ctx.globalAlpha = 0.22;
+        ctx.drawImage(guide, 0, 0);
+        ctx.globalAlpha = 1;
+      }
       ctx.drawImage(cache, 0, 0);
       if (current) drawStroke(ctx, current, k());
       ctx.globalCompositeOperation = 'source-over';
@@ -216,6 +226,10 @@
       const px = Math.round(canvas.clientWidth * Math.min(2, window.devicePixelRatio || 1));
       if (!px || canvas.width === px) return;
       canvas.width = canvas.height = cache.width = cache.height = px;
+      if (guide) {
+        guide.width = guide.height = px;
+        render(guide, opts.guide);
+      }
       rebuild();
       syncTools();
     }
@@ -339,9 +353,26 @@
     const ro = new ResizeObserver(resize);
     ro.observe(canvas);
     colorsRow();
+    const copy = (list) =>
+      (list || []).map((s) =>
+        s.fill !== undefined
+          ? { fill: s.fill }
+          : s.e
+            ? { e: true, w: s.w, p: s.p.slice() }
+            : { c: s.c, w: s.w, p: s.p.slice() },
+      );
+    if (opts.start && opts.start.length) history.push(...copy(opts.start));
     resize();
 
     return {
+      /** Replaces the drawing with these strokes (undoable as one clear). */
+      load(list) {
+        if (live().length) history.push({ clear: true });
+        history.push(...copy(list));
+        undone.length = 0;
+        rebuild();
+        syncTools();
+      },
       /** What gets sent: everything since the last clear, as plain data. */
       strokes: () =>
         live().map((s) =>
