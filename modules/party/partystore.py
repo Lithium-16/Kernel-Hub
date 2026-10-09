@@ -37,6 +37,8 @@ BADGES: dict[str, tuple[str, str]] = {
     "truth_seeker": ("Truth Seeker", "Found the truth in every Bluff Buffet question"),
     "unbeatable_tee": ("Unbeatable Tee", "A shirt you made part of survived 3 challenges"),
     "fashion_icon": ("Fashion Icon", "Made part of the winning shirt in a Shirt Showdown final"),
+    "leading_role": ("Leading Role", "Drew the favorite character in Drama Club"),
+    "plot_twist": ("Plot Twist", "Wrote the twist of the winning Drama Club scene"),
     "season_champ": ("Season Champion", "Topped a monthly season"),
 }
 
@@ -277,7 +279,7 @@ class Store:
             for place, (pid, score) in enumerate(standings, start=1):
                 self.db.execute("INSERT INTO results VALUES (?, ?, ?, ?)", (gid, pid, score, place))
             for h in hits:
-                extra = json.dumps(h.get("shirt") or {})
+                extra = json.dumps(h.get("shirt") or ({"scene": h["scene"]} if h.get("scene") else {}))
                 self.db.execute(
                     "INSERT INTO hits (game_id, profile_id, kind, prompt, text, votes, of, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (gid, h.get("profile_id"), h["kind"], h.get("prompt", ""), h["text"], int(h["votes"]), int(h["of"]), extra),

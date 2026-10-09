@@ -86,6 +86,8 @@ class Content:
     facts: list[Fact] = field(default_factory=list)
     doodle_ideas: list[str] = field(default_factory=list)
     slogan_ideas: list[str] = field(default_factory=list)
+    drama_themes: list[str] = field(default_factory=list)
+    drama_premises: list[str] = field(default_factory=list)
 
     @staticmethod
     def _lines(paths: Iterable[Path]) -> list[str]:
@@ -124,7 +126,8 @@ class Content:
             decoys = parts[3].split("|") if len(parts) > 3 else []
             decoys = [d.strip()[:MAX_LIE] for d in decoys if d.strip() and not fact.is_truth(d)]
             facts.append(Fact(parts[0], parts[1], also, tuple(dict.fromkeys(decoys))))
-        return cls(quips, facts, plain("doodle_ideas.txt"), plain("slogan_ideas.txt"))
+        return cls(quips, facts, plain("doodle_ideas.txt"), plain("slogan_ideas.txt"),
+                   plain("drama_themes.txt"), plain("drama_premises.txt"))
 
 
 def deal(pool: list[Any], n: int, rng: random.Random, used: set[Any]) -> list[Any]:
@@ -1229,4 +1232,461 @@ class ShirtShowdown(Game):
         return v
 
 
-GAMES: dict[str, type[Game]] = {g.key: g for g in (QuipClash, BluffBuffet, ShirtShowdown)}
+# -- Drama Club ----------------------------------------------------------------------------
+
+EMOTIONS = ("neutral", "flustered", "sad", "angry")
+# The preset visual-novel backgrounds (web/bg pictures and web/scenes.js drawings); the scene writer picks one.
+PHOTO_BACKGROUNDS = ("classroom_day", "school_hallway", "bedroom_day", "livingroom_night", "kitchen_day",
+                     "restaurant", "city_afternoon", "spring_street", "train_beach", "onsen")  # web/bg/*.webp
+BACKGROUNDS = PHOTO_BACKGROUNDS + ("classroom", "rooftop", "cafe", "bedroom", "park", "beach", "street", "train",
+                                   "festival", "castle", "spaceship", "haunted")
+NARRATOR = 2  # a script line's speaker: 0 and 1 are the scene's two characters
+MAX_LINE, MAX_NAME_C, MAX_BIO, MAX_THEME, MAX_PREMISE = 80, 18, 50, 50, 70
+FALLBACK_NAMES = ["Mystery Guest", "The New Kid", "Someone Shady", "A Stranger", "The Understudy",
+                  "Background Extra", "Plot Device", "Extra #4"]  # each fits MAX_NAME_C
+
+
+@dataclass
+class Character:
+    by: str
+    name: str = ""
+    bio: str = ""
+    faces: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+
+    def card(self) -> dict[str, Any]:
+        """What other players may see before the show: no art."""
+        return {"name": self.name, "bio": self.bio}
+
+    def full(self) -> dict[str, Any]:
+        return self.card() | {"by": self.by, "faces": self.faces}
+
+
+@dataclass
+class Story:
+    cast: tuple[str, str]  # whose characters (= their artists)
+    script_by: str
+    twist_by: str | None
+    bg: str = ""
+    premise: str = ""
+    lines: list[dict[str, Any]] = field(default_factory=list)
+    twist: list[dict[str, Any]] = field(default_factory=list)
+
+    def writers(self) -> set[str]:
+        return {self.script_by} | ({self.twist_by} if self.twist_by else set())
+
+
+class DramaClub(Game):
+    """A visual novel made Gartic style. Everyone pitches a theme and the room picks one; everyone
+    draws a character in four moods; then each scene passes along: one player gets two characters
+    they've only read about, picks the background, names the situation and writes the scene;
+    another writes the twist ending. Nobody sees the characters until the big screen plays every scene. Then
+    everyone votes for the best scene and the best character."""
+
+    key = "drama"
+    title = "Drama Club"
+    PITCH_S, PITCH_VOTE_S, CAST_S, SCRIPT_S, TWIST_S, VOTE_S, SCORES_S = 40, 20, 240, 210, 75, 30, 8
+    MAX_LINES, MAX_TWIST = 8, 3
+    SCENE_PTS = {"script": 550, "twist": 300, "art": 75}  # per scene vote (1000)
+    CHARACTER_PTS, THEME_PTS = 500, 250
+
+    def __init__(self, pids, content, rng, now, timer_scale=1.0, names=None, rounds: int = 1, used=None):
+        super().__init__(pids, content, rng, now, timer_scale, names)
+        self.rounds = max(1, min(int(rounds), 2))
+        self.round = 0
+        self.order = self.pids[:]
+        rng.shuffle(self.order)
+        self.characters: dict[str, Character] = {p: Character(p) for p in self.pids}
+        self.used = used if used is not None else set()
+        self._start_round(now)
+
+    # -- rounds -----------------------------------------------------------------------------
+
+    def _start_round(self, now: float) -> None:
+        self.round += 1
+        self.themes: dict[str, str] = {}
+        self.theme_votes: dict[str, str] = {}
+        self.theme = ""
+        self.theme_by: str | None = None
+        self.stories: list[Story] = []
+        self.showing = 0
+        self.scene_votes: dict[str, int] = {}
+        self.char_votes: dict[str, str] = {}
+        self._twisted: set[str] = set()  # twist writers who are done (a twist can be 1 or 2 lines)
+        self._go("pitch", now, self.PITCH_S)
+
+    def _deal_stories(self) -> None:
+        """Story s stars the characters of order[s] and order[s+1+k] (k = round - 1, so round 2
+        pairs differently). The writer and the twist writer sit at fixed offsets along the order
+        that aren't the cast's, so in every step each player has exactly one job and never works
+        on their own character. With 3 players there is no twist."""
+        o, n, k = self.order, len(self.order), self.round - 1
+        free = [d for d in range(1, n) if d != 1 + k]
+        script_d = free[0]
+        twist_d = free[1] if len(free) > 1 and self.has_twist() else None
+        self.stories = [
+            Story((o[s], o[(s + 1 + k) % n]), o[(s + script_d) % n],
+                  o[(s + twist_d) % n] if twist_d is not None else None)
+            for s in range(n)
+        ]
+
+    def has_twist(self) -> bool:
+        return len(self.pids) >= 4
+
+    def job(self, pid: str) -> Story | None:
+        """The story this player works on in the current step."""
+        role = {"script": "script_by", "twist": "twist_by"}.get(self.phase)
+        if role is None:
+            return None
+        return next((st for st in self.stories if getattr(st, role) == pid), None)
+
+    # -- phases ----------------------------------------------------------------------------
+
+    def waiting_on(self) -> set[str] | None:
+        ph = self.phase
+        if ph == "pitch":
+            return {p for p in self.pids if p not in self.themes}
+        if ph == "pitch_vote":
+            return {p for p in self.pids if p not in self.theme_votes and self._theme_choices(p)}
+        if ph == "cast":
+            return {p for p, c in self.characters.items() if not c.name or set(EMOTIONS) - set(c.faces)}
+        if ph == "script":
+            return {st.script_by for st in self.stories if not st.lines}
+        if ph == "twist":
+            return {st.twist_by for st in self.stories if st.twist_by and not st.twist and st.twist_by not in self._twisted}
+        if ph == "vote":
+            return {p for p in self.pids if p not in self.scene_votes or p not in self.char_votes}
+        return None
+
+    def _theme_choices(self, pid: str) -> list[str]:
+        return [p for p in self.pids if p in self.themes and p != pid]
+
+    def advance(self, now: float) -> None:
+        ph = self.phase
+        if ph == "pitch":
+            for p in self.pids:  # a blank pitch gets an idea from the box
+                if p not in self.themes and self.content.drama_themes and self.rng.random() < 0.5:
+                    self.themes[p] = self._idea(self.content.drama_themes)
+            if len(self.themes) >= 2:
+                self._go("pitch_vote", now, self.PITCH_VOTE_S)
+            else:
+                self._pick_theme()
+                self._after_theme(now)
+        elif ph == "pitch_vote":
+            self._pick_theme()
+            self._after_theme(now)
+        elif ph == "cast":
+            self._fill_cast()
+            self._deal_stories()
+            self._go("script", now, self.SCRIPT_S)
+        elif ph == "script":
+            for st in self.stories:
+                if not st.bg:
+                    st.bg = self.rng.choice(BACKGROUNDS)
+                if not st.premise:
+                    st.premise = self._idea(self.content.drama_premises) or "Two strangers, one awkward afternoon."
+                if not st.lines:
+                    st.lines = [self._bot_script_line(i % 2) for i in range(3)]
+            if self.has_twist():
+                self._go("twist", now, self.TWIST_S)
+            else:
+                self._start_show(now)
+        elif ph == "twist":
+            self._start_show(now)
+        elif ph == "show":
+            if self.showing + 1 < len(self.stories):
+                self.showing += 1
+                self._go("show", now, self._show_s(), scaled=False)
+            else:
+                self._go("vote", now, self.VOTE_S)
+        elif ph == "vote":
+            self._score_votes()
+            self._go("scores", now, self.SCORES_S, scaled=False)
+        elif ph == "scores":
+            if self.round < self.rounds:
+                self._start_round(now)
+            else:
+                self.phase, self.deadline, self.done = "over", None, True
+
+    def _idea(self, ideas: list[str]) -> str:
+        return self.fill(self.rng.choice(ideas)) if ideas else ""
+
+    def _pick_theme(self) -> None:
+        counts: dict[str, int] = {}
+        for author in self.theme_votes.values():
+            counts[author] = counts.get(author, 0) + 1
+        if self.themes:
+            best = max(counts.values(), default=0)
+            top = [p for p in self.themes if counts.get(p, 0) == best]
+            self.theme_by = self.rng.choice(top)
+            self.theme = self.themes[self.theme_by]
+            if counts.get(self.theme_by):
+                self._award(self.theme_by, self.THEME_PTS)
+        else:
+            self.theme = self._idea(self.content.drama_themes) or "A very dramatic afternoon"
+            self.theme_by = None
+
+    def _after_theme(self, now: float) -> None:
+        if self.round == 1:
+            self._go("cast", now, self.CAST_S)
+        else:  # round 2 keeps the cast
+            self._deal_stories()
+            self._go("script", now, self.SCRIPT_S)
+
+    def _fill_cast(self) -> None:
+        names = [n for n in FALLBACK_NAMES if n not in {c.name for c in self.characters.values()}]
+        for c in self.characters.values():
+            if not c.name:
+                c.name = names.pop(0) if names else "Mystery Guest"
+            base = c.faces.get("neutral") or next(iter(c.faces.values()), None) or doodle(self.rng, sprite=True)
+            for e in EMOTIONS:
+                c.faces.setdefault(e, base)
+
+    def _show_s(self) -> float:
+        st = self.stories[self.showing]
+        return 4.5 + sum(self.line_s(x["text"]) for x in st.lines + st.twist) + 5
+
+    @staticmethod
+    def line_s(text: str) -> float:
+        """How long the big screen shows a line: time to type it out and to read it (the host
+        page uses the same formula)."""
+        return 1.6 + 0.045 * len(text)
+
+    def _start_show(self, now: float) -> None:
+        self.showing = 0
+        self._go("show", now, self._show_s(), scaled=False)
+
+    def _bot_script_line(self, who: int) -> dict[str, Any]:
+        return {"who": who, "emotion": self.rng.choice(EMOTIONS), "text": self._bot_line()[:MAX_LINE]}
+
+    # -- messages ----------------------------------------------------------------------------
+
+    def _lines(self, raw: Any, most: int) -> list[dict[str, Any]]:
+        if not isinstance(raw, list) or not raw:
+            raise Invalid("Write at least one line.")
+        if len(raw) > most:
+            raise Invalid(f"At most {most} lines.")
+        out = []
+        for x in raw:
+            if not isinstance(x, dict):
+                raise Invalid("That script didn't come through. Try again.")
+            who, emotion, text = x.get("who"), x.get("emotion"), clean(x.get("text"), MAX_LINE)
+            if who not in (0, 1, NARRATOR) or isinstance(who, bool) or emotion not in EMOTIONS:
+                raise Invalid("Pick who says each line and how they feel.")
+            if not text:
+                raise Invalid("A line is empty: write something or remove it.")
+            out.append({"who": who, "emotion": emotion, "text": text})
+        return out
+
+    def handle(self, pid: str, msg: dict[str, Any], now: float) -> None:
+        kind, ph = msg.get("type"), self.phase
+        if ph == "pitch" and kind == "theme":
+            text = clean(msg.get("text"), MAX_THEME)
+            if not text:
+                raise Invalid("Write a theme first.")
+            self.themes.setdefault(pid, text)
+        elif ph == "pitch_vote" and kind == "vote":
+            if msg.get("choice") not in self._theme_choices(pid):
+                raise Invalid("Vote for someone else's theme.")
+            self.theme_votes.setdefault(pid, msg["choice"])
+        elif ph == "cast" and kind == "character":
+            c = self.characters[pid]
+            name = clean(msg.get("name"), MAX_NAME_C)
+            if not name:
+                raise Invalid("Give your character a name.")
+            c.name, c.bio = name, clean(msg.get("bio") or "", MAX_BIO)
+        elif ph == "cast" and kind == "face":
+            emotion = msg.get("emotion")
+            if emotion not in EMOTIONS:
+                raise Invalid("Pick an emotion to draw.")
+            try:
+                self.characters[pid].faces[emotion] = check_drawing(msg.get("strokes"), sprite=True)
+            except BadDrawing as e:
+                raise Invalid(str(e)) from None
+        elif ph == "script" and kind == "script":
+            st = self.job(pid)
+            if st is None:
+                raise Invalid("Not now: look at the big screen.")
+            bg, premise = msg.get("bg"), clean(msg.get("premise") or "", MAX_PREMISE)
+            if bg not in BACKGROUNDS:
+                raise Invalid("Pick a background.")
+            if not premise:
+                raise Invalid("Give the scene a title: what's happening, in one line.")
+            lines = self._lines(msg.get("lines"), self.MAX_LINES)
+            st.bg, st.premise, st.lines = bg, premise, lines
+        elif ph == "twist" and kind == "twist":
+            st = self.job(pid)
+            if st is None:
+                raise Invalid("Not now: look at the big screen.")
+            st.twist = self._lines(msg.get("lines"), self.MAX_TWIST)
+            self._twisted.add(pid)
+        elif ph == "vote" and kind == "vote":
+            scene, char = msg.get("scene"), msg.get("character")
+            if scene is not None:
+                if scene not in self._scene_choices(pid):
+                    raise Invalid("Vote for a scene you didn't write.")
+                self.scene_votes[pid] = scene
+            if char is not None:
+                if char not in self._char_choices(pid):
+                    raise Invalid("Vote for someone else's character.")
+                self.char_votes[pid] = char
+        else:
+            raise Invalid("Not now: look at the big screen.")
+
+    def _scene_choices(self, pid: str) -> list[int]:
+        return [i for i, st in enumerate(self.stories) if pid not in st.writers()]
+
+    def _char_choices(self, pid: str) -> list[str]:
+        return [p for p in self.pids if p != pid]
+
+    def _score_votes(self) -> None:
+        self.gained = {}
+        counts = [0] * len(self.stories)
+        for i in self.scene_votes.values():
+            counts[i] += 1
+        for st, n in zip(self.stories, counts):
+            if not n:
+                continue
+            twist_to = st.twist_by or st.script_by
+            self._award(st.script_by, self.SCENE_PTS["script"] * n)
+            self._award(twist_to, self.SCENE_PTS["twist"] * n)
+            for a in st.cast:
+                self._award(a, self.SCENE_PTS["art"] * n)
+        chars: dict[str, int] = {}
+        for p in self.char_votes.values():
+            chars[p] = chars.get(p, 0) + 1
+        for p, n in chars.items():
+            self._award(p, self.CHARACTER_PTS * n)
+        self.counts = {"scenes": counts, "characters": chars}
+        voters = len(self.scene_votes)
+        if counts and max(counts) > 0:
+            best = max(range(len(counts)), key=lambda i: counts[i])
+            st = self.stories[best]
+            if max(counts) >= 2 and st.twist_by and counts.count(max(counts)) == 1:
+                self.feats.append((st.twist_by, "plot_twist"))
+            first = (st.lines + st.twist)[0]["text"] if st.lines else st.premise
+            self.hits.append({"kind": "scene", "prompt": self.theme, "text": st.premise or first,
+                              "pid": st.script_by, "votes": counts[best], "of": voters,
+                              "scene": {"bg": st.bg, "names": [self.characters[a].name for a in st.cast],
+                                        "faces": [self.characters[a].faces.get("neutral", []) for a in st.cast],
+                                        "line": first}})
+        if chars and max(chars.values()) >= 2:
+            top = max(chars, key=lambda p: chars[p])
+            if list(chars.values()).count(chars[top]) == 1:
+                self.feats.append((top, "leading_role"))
+        ranked = sorted(range(len(counts)), key=lambda i: -counts[i])
+        if len(ranked) >= 2 and counts[ranked[0]] > counts[ranked[1]]:
+            w, lo = self.stories[ranked[0]].script_by, self.stories[ranked[1]].script_by
+            if w != lo:
+                self.duels.append((w, lo, "drama"))
+
+    # -- bots --------------------------------------------------------------------------------
+
+    def bot_move(self, pid: str) -> dict[str, Any] | None:
+        ph = self.phase
+        if ph == "pitch":
+            return {"type": "theme", "text": self._idea(self.content.drama_themes) or self._bot_line()}
+        if ph == "pitch_vote" and (ch := self._theme_choices(pid)):
+            return {"type": "vote", "choice": self.rng.choice(ch)}
+        if ph == "cast":
+            c = self.characters[pid]
+            if not c.name:
+                names = [n for n in FALLBACK_NAMES if n not in {x.name for x in self.characters.values()}]
+                return {"type": "character", "name": self.rng.choice(names or FALLBACK_NAMES), "bio": self._bot_line()[:MAX_BIO]}
+            missing = [e for e in EMOTIONS if e not in c.faces]
+            if missing:
+                return {"type": "face", "emotion": missing[0], "strokes": doodle(self.rng, sprite=True)}
+            return None
+        if ph == "script" and (st := self.job(pid)) and not st.lines:
+            return {"type": "script", "bg": self.rng.choice(BACKGROUNDS),
+                    "premise": (self._idea(self.content.drama_premises) or self._bot_line())[:MAX_PREMISE],
+                    "lines": [self._bot_script_line(i % 2) for i in range(self.rng.randint(3, 6))]}
+        if ph == "twist" and (st := self.job(pid)) and not st.twist:
+            return {"type": "twist", "lines": [self._bot_script_line(NARRATOR if self.rng.random() < 0.3 else 0)]}
+        if ph == "vote":
+            out: dict[str, Any] = {"type": "vote"}
+            if pid not in self.scene_votes and (sc := self._scene_choices(pid)):
+                out["scene"] = self.rng.choice(sc)
+            if pid not in self.char_votes and (cc := self._char_choices(pid)):
+                out["character"] = self.rng.choice(cc)
+            return out if len(out) > 1 else None
+        return None
+
+    # -- views -------------------------------------------------------------------------------
+
+    def _story_cards(self, st: Story) -> dict[str, Any]:
+        """A story as the next writer sees it: names and bios, never the drawings."""
+        return {"cast": [self.characters[a].card() for a in st.cast], "bg": st.bg, "premise": st.premise,
+                "theme": self.theme}
+
+    def _story_full(self, i: int) -> dict[str, Any]:
+        st = self.stories[i]
+        return {"index": i, "cast": [self.characters[a].full() for a in st.cast], "bg": st.bg,
+                "premise": st.premise, "lines": st.lines, "twist": st.twist,
+                "credits": {"cast": list(st.cast), "script": st.script_by, "twist": st.twist_by}}
+
+    def _common(self, now: float) -> dict[str, Any]:
+        return self.base_view(now) | {"round": self.round, "rounds": self.rounds, "theme": self.theme,
+                                      "emotions": list(EMOTIONS), "has_twist": self.has_twist()}
+
+    def host_view(self, now: float) -> dict[str, Any]:
+        v = self._common(now)
+        ph = self.phase
+        if ph in ("pitch", "pitch_vote", "cast", "script", "twist", "vote"):
+            v["waiting"] = sorted(self.waiting_on() or set())
+        if ph == "pitch_vote":
+            v["themes"] = [{"pid": p, "text": t} for p, t in self.themes.items()]
+        if ph == "show":
+            v["story"] = self._story_full(self.showing)
+            v["of"] = len(self.stories)
+        elif ph == "vote":
+            v["count"] = len(self.stories)
+            v["gallery"] = [{"pid": p, "name": c.name, "face": c.faces.get("flustered", [])}
+                            for p, c in self.characters.items()]
+        elif ph in ("scores", "over"):
+            v["standings"] = self.standings()
+            v["results"] = getattr(self, "counts", None)
+            v["stories"] = [{"premise": st.premise, "bg": st.bg} for st in self.stories]
+            v["characters"] = {p: c.full() for p, c in self.characters.items()}
+        return v
+
+    def player_view(self, pid: str, now: float) -> dict[str, Any]:
+        v = self._common(now)
+        ph = self.phase
+        if ph == "pitch":
+            v["mine"] = self.themes.get(pid)
+            v["idea"] = self.content.drama_themes[(self.pids.index(pid) * 7 + self.round) % len(self.content.drama_themes)] if self.content.drama_themes else ""
+        elif ph == "pitch_vote":
+            v["themes"] = [{"pid": p, "text": self.themes[p]} for p in self._theme_choices(pid)]
+            v["voted"] = self.theme_votes.get(pid)
+        elif ph == "cast":
+            c = self.characters[pid]
+            v["character"] = {"name": c.name, "bio": c.bio, "faces": c.faces}  # only your own art
+        elif ph in ("script", "twist"):
+            st = self.job(pid)
+            v["job"] = None
+            if st is not None:
+                job = self._story_cards(st)
+                done = bool(st.lines) if ph == "script" else pid in self._twisted
+                job["lines"] = st.lines if ph == "twist" else []
+                job["done"] = done
+                v["job"] = job
+            v["backgrounds"] = list(BACKGROUNDS)
+            v["max_lines"] = self.MAX_TWIST if ph == "twist" else self.MAX_LINES
+        elif ph == "show":
+            st = self.stories[self.showing]
+            v["number"], v["of"] = self.showing + 1, len(self.stories)
+            v["premise"] = st.premise
+            v["yours"] = pid in st.writers() or pid in st.cast
+        elif ph == "vote":
+            v["scenes"] = [{"index": i, "premise": self.stories[i].premise, "bg": self.stories[i].bg,
+                            "cast": [self.characters[a].name for a in self.stories[i].cast]}
+                           for i in self._scene_choices(pid)]
+            v["characters"] = [{"pid": p, "name": self.characters[p].name, "face": self.characters[p].faces.get("flustered", [])}
+                               for p in self._char_choices(pid)]
+            v["voted"] = {"scene": self.scene_votes.get(pid), "character": self.char_votes.get(pid)}
+        elif ph in ("scores", "over"):
+            v["standings"] = self.standings()
+        return v
+
+
+GAMES: dict[str, type[Game]] = {g.key: g for g in (QuipClash, BluffBuffet, ShirtShowdown, DramaClub)}

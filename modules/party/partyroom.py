@@ -27,7 +27,7 @@ from typing import Any
 from aiohttp import WSMsgType, web
 from kernel_sdk import ActionError
 from kernel_sdk.webgame import TailscaleShare, run_command
-from partygames import GAMES, Content, Game, Invalid, clean
+from partygames import GAMES, PHOTO_BACKGROUNDS, Content, Game, Invalid, clean
 from partystore import PinNeeded, PinWrong, Store
 
 HERE = Path(__file__).resolve().parent
@@ -43,7 +43,16 @@ STATIC = {
     "play.js": "text/javascript",
     "host.js": "text/javascript",
     "draw.js": "text/javascript",
+    "scenes.js": "text/javascript",
 }
+# The host page for a room that has closed (or a wrong link): a way back, never a dead end.
+GONE_PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Party Night</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#150e24;color:#f4efff;
+font:18px/1.5 system-ui,sans-serif;text-align:center;padding:24px}a{display:inline-block;margin-top:18px;
+padding:14px 26px;border-radius:16px;background:#ffb100;color:#150e24;font-weight:800;text-decoration:none}</style>
+</head><body><main><h1>This room has closed</h1><p>The link is old, or the host closed the room.</p>
+<a href="/">Go to the join page</a></main></body></html>"""
 CSP = (
     "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src https://fonts.gstatic.com; script-src 'self'; connect-src 'self' ws: wss:; "
@@ -175,6 +184,17 @@ class Room:
         self.connections_changed()
         return seat
 
+    def leave(self, pid: str) -> None:
+        """A player pressed Leave: gone from the room, or (mid-game) away until it ends."""
+        seat = self.seats.get(pid)
+        if seat is None:
+            return
+        if self.game is not None and pid in self.game.pids:
+            seat.sockets.clear()
+        else:
+            del self.seats[pid]
+        self.connections_changed()
+
     def add_bot(self) -> Seat:
         """A test player that answers and votes by itself (between games only)."""
         if self.state == "playing":
@@ -251,6 +271,8 @@ class Room:
             options["questions"] = int(self.settings.get("bluff_questions", 5))
         elif cls.key == "shirt":
             options["rounds"] = int(self.settings.get("shirt_rounds", 2))
+        elif cls.key == "drama":
+            options["rounds"] = int(self.settings.get("drama_rounds", 1))
         self.game = cls(pids, self.content, self.rng, now, scale, names, **options)
         self.choice, self.state, self.results = key, "playing", None
         self.emit("game.started", f"{cls.title} started with {', '.join(names[p] for p in pids)}", game=cls.title)
@@ -527,6 +549,7 @@ class PartyServer:
         app.router.add_post("/host/new", self._new_room)
         app.router.add_get("/health", self._health)
         app.router.add_get("/static/{name}", self._static)
+        app.router.add_get("/bg/{name}", self._background)
         app.router.add_get("/ws", self._ws)
         app.on_startup.append(self._start_ticker)
         app.on_cleanup.append(self._stop_ticker)
@@ -621,7 +644,7 @@ class PartyServer:
 
     async def _host_page(self, request: web.Request) -> web.StreamResponse:
         if self.room_for_key(request.query.get("key", "")) is None:
-            return web.Response(status=403, text="This room has closed, or the link is wrong. Open the join page and press Host a game.")
+            return web.Response(status=403, content_type="text/html", text=GONE_PAGE)
         return web.FileResponse(WEB / "host.html", headers={"Content-Type": "text/html; charset=utf-8"})
 
     async def _static(self, request: web.Request) -> web.StreamResponse:
@@ -629,6 +652,15 @@ class PartyServer:
         if name not in STATIC:
             raise web.HTTPNotFound()
         return web.FileResponse(WEB / name, headers={"Content-Type": f"{STATIC[name]}; charset=utf-8"})
+
+    async def _background(self, request: web.Request) -> web.StreamResponse:
+        """Drama Club's picture backgrounds (and their thumbnails), by name only."""
+        name = request.match_info["name"]
+        key = name.removesuffix(".webp").removesuffix(".thumb")
+        if key not in PHOTO_BACKGROUNDS or name not in (f"{key}.webp", f"{key}.thumb.webp"):
+            raise web.HTTPNotFound()
+        return web.FileResponse(WEB / "bg" / name, headers={"Content-Type": "image/webp",
+                                                             "Cache-Control": "max-age=86400"})
 
     # -- sockets --------------------------------------------------------------------------
 
@@ -690,6 +722,10 @@ class PartyServer:
                         room.connections_changed()
                         await self._send(ws, {"type": "joined", "pid": seat.pid, "token": seat.token, "name": seat.name,
                                               "device": seat.device})
+                    elif data.get("type") == "leave":
+                        room.leave(seat.pid)
+                        seat = None
+                        await self._send(ws, {"type": "left"})
                     else:
                         room.handle(seat.pid, data)
                 except Invalid as e:

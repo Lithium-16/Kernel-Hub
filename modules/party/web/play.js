@@ -60,6 +60,12 @@
   let fmost = 3;
   let hand = null; // Shirt Showdown: the hand being assembled, and the picks
   let sel = null;
+  // Drama Club: the mood being drawn, the stage picked, and the script being written
+  let dEmo = null;
+  let dBg = null;
+  let dLines = null; // {key, lines: [{who, emotion, text}]}
+  let dJob = null;
+  let dMost = 6;
 
   $('ph').innerHTML =
     `<div id="top"></div><main class="phmain" id="main"></main><div class="phfoot" id="foot" hidden></div>`;
@@ -174,6 +180,7 @@
       quip: 'Funny answers, head-to-head votes',
       bluff: 'Fake answers, find the truth',
       shirt: 'Draw, write slogans, make shirts, battle',
+      drama: 'Draw a cast, write a scene, watch the drama',
     };
     return {
       key: 'lobby-vip:' + JSON.stringify([r.players, st.profile]) + r.choice,
@@ -195,12 +202,12 @@
       main: `<span class="kicker">${esc(v.title)} · final results</span>
         <h2 class="ptitle">${k === 0 && mine && mine.score > 0 ? (tied.length ? 'You tied for the win!' : 'You won!') : k >= 0 ? `You finished ${ORD[k]}${tied.length ? ' (tied)' : ''}` : 'Game over'}</h2>
         ${mine ? `<div class="card hot"><span class="pnote">Your points</span><span class="gain">${fmt(mine.score)}</span></div>` : ''}
-        ${myHit ? `<div class="card"><b>${myHit.kind === 'shirt' ? 'Your shirt won!' : 'Best of the game'}</b><span class="pnote">“${esc(myHit.text)}”${myHit.kind === 'shirt' ? '' : ` (${myHit.votes} of ${myHit.of})`}</span></div>` : ''}
+        ${myHit ? `<div class="card"><b>${myHit.kind === 'shirt' ? 'Your shirt won!' : myHit.kind === 'scene' ? 'Your scene won!' : 'Best of the game'}</b><span class="pnote">“${esc(myHit.text)}”${myHit.kind === 'shirt' ? '' : ` (${myHit.votes} of ${myHit.of})`}</span></div>` : ''}
         ${myBadges.map((b) => `<div class="card hot"><div class="prow2"><span class="badge">★</span><div><b>New badge: ${esc(b.title)}</b><span class="pnote">${esc(b.about)}</span></div></div></div>`).join('')}
         ${isVip() ? '' : `<p class="pnote">${esc(player(st.room.vip).name)} picks what's next.</p>`}`,
       foot: isVip()
         ? `<button class="big-btn" type="button" data-act="again">Play ${esc(v.title)} again</button><button class="ghost" type="button" data-send='{"type":"lobby"}'>Back to lobby</button>`
-        : '',
+        : '<button class="ghost" type="button" data-act="leave">Leave room</button>',
     };
   }
 
@@ -375,6 +382,201 @@
     return scoresScreen(v);
   }
 
+  // -- Drama Club ------------------------------------------------------------------------
+  const MOODS = { neutral: 'Neutral', flustered: 'Flustered', sad: 'Sad', angry: 'Angry' };
+  function castCards(cast) {
+    return `<div class="dcast">${cast
+      .map(
+        (c, k) =>
+          `<div class="card"><span class="kicker">${k ? 'Character B' : 'Character A'}</span><b>${esc(c.name)}</b><span class="pnote">${esc(c.bio || 'No bio: make something up!')}</span></div>`,
+      )
+      .join('')}</div>`;
+  }
+  /** The script editor: who says each line, how they feel, and what they say. */
+  function lineRows(job, most) {
+    const names = [job.cast[0].name, job.cast[1].name, 'Narrator'];
+    return `${dLines.lines
+      .map(
+        (ln, i) => `<div class="dline">
+          <div class="who">${names.map((n, w) => `<button type="button" data-lwho="${i}:${w}" aria-pressed="${ln.who === w}">${esc(n)}</button>`).join('')}</div>
+          ${
+            ln.who === 2
+              ? ''
+              : `<div class="moods">${Object.entries(MOODS)
+                  .map(
+                    ([k, label]) =>
+                      `<button type="button" data-lemo="${i}:${k}" aria-pressed="${ln.emotion === k}">${label}</button>`,
+                  )
+                  .join('')}</div>`
+          }
+          <div class="row"><input data-ltext="${i}" maxlength="80" autocomplete="off" placeholder="${ln.who === 2 ? 'What happens…' : 'What they say…'}" value="${esc(ln.text)}">${dLines.lines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line">×</button>` : ''}</div>
+        </div>`,
+      )
+      .join('')}
+      ${dLines.lines.length < most ? '<button class="ghost" type="button" data-act="addline">+ Add a line</button>' : ''}`;
+  }
+  function redrawLines(job, most) {
+    const box = $('dlines');
+    if (box) box.innerHTML = lineRows(job, most);
+  }
+  function dramaScreen(v) {
+    const D = window.PartyDraw;
+    const S = window.PartyScenes;
+    const base = `drama:${v.phase}:${v.round}`;
+    const tag = `Drama Club${v.theme ? ` · ${v.theme}` : ''}`;
+    if (v.phase === 'pitch') {
+      if (v.mine)
+        return {
+          key: base + ':done',
+          main: wait('Pitched!', `“${esc(v.mine)}”. Waiting for the others.`),
+          foot: skipBtn(),
+        };
+      return {
+        key: base,
+        main: `<span class="kicker">Drama Club · pitch a theme</span><h2 class="ptitle">What's today's story about?</h2>
+          <p class="pnote">Idea: ${esc(v.idea || 'anything dramatic')}</p>
+          <div class="field"><label for="f-theme">Your theme</label><input id="f-theme" maxlength="50" enterkeyhint="send" autocomplete="off" placeholder="A haunted bakery"></div>`,
+        foot: '<button class="big-btn" type="button" data-act="theme">Pitch it</button>',
+        input: true,
+      };
+    }
+    if (v.phase === 'pitch_vote') {
+      if (v.voted || !v.themes.length)
+        return {
+          key: base + ':voted',
+          main: wait('Vote in', 'Look at the big screen.'),
+          foot: skipBtn(),
+        };
+      return {
+        key: base,
+        main: `<span class="kicker">Drama Club · pick the theme</span><h2 class="ptitle">Which story should we tell?</h2>
+          ${v.themes.map((t) => `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'>${esc(t.text)}</button>`).join('')}`,
+        input: true,
+      };
+    }
+    if (v.phase === 'cast') {
+      const c = v.character;
+      if (!c.name)
+        return {
+          key: base + ':name',
+          main: `<span class="kicker">${esc(tag)}</span><h2 class="ptitle">Create a character</h2>
+            <p class="pnote">Only you will see what they look like until the show. Others only get the name and bio.</p>
+            <div class="field"><label for="f-cname">Name</label><input id="f-cname" maxlength="18" autocomplete="off" placeholder="Vlad"></div>
+            <div class="field"><label for="f-cbio">One-line bio</label><input id="f-cbio" maxlength="50" autocomplete="off" placeholder="a nervous vampire who runs the bakery"></div>`,
+          foot: '<button class="big-btn" type="button" data-act="castname">Next: draw them</button>',
+          input: true,
+        };
+      const sent = Object.keys(c.faces);
+      const all = Object.keys(MOODS).every((k) => sent.includes(k));
+      // dEmo: the mood being drawn, or '__done' once all four are in and the player is happy
+      if (dEmo === '__done' && !all) dEmo = null;
+      if (dEmo !== '__done' && !(dEmo in MOODS))
+        dEmo = Object.keys(MOODS).find((k) => !sent.includes(k)) || 'neutral';
+      const tabs = `<div class="moods tabs">${Object.entries(MOODS)
+        .map(
+          ([k, label]) =>
+            `<button type="button" data-dtab="${k}" aria-pressed="${k === dEmo}">${sent.includes(k) ? '✓ ' : ''}${label}</button>`,
+        )
+        .join('')}</div>`;
+      if (all && dEmo === '__done')
+        return {
+          key: base + ':all',
+          main: wait('Your cast is ready!', 'Nobody has seen them yet. Wait for the show!'),
+          foot: skipBtn(),
+        };
+      const neutral = c.faces.neutral;
+      return {
+        key: `${base}:${dEmo}:${sent.join(',')}`,
+        main: `<span class="kicker">${esc(c.name)} · draw them ${MOODS[dEmo].toLowerCase()}</span>${tabs}
+          <p class="pnote">${dEmo === 'neutral' ? `Full character, standing. No background: ${esc(v.theme || 'the scene')} goes behind them.` : 'The neutral drawing is faded underneath: tap Start from neutral, then change the face.'}</p>
+          <div id="studio"></div>`,
+        flow: true,
+        foot: `<div class="footrow"><button class="big-btn" type="button" data-act="face">${all ? 'Save' : `Save ${MOODS[dEmo].toLowerCase()}`}</button>${dEmo !== 'neutral' && neutral ? '<button class="ghost" type="button" data-act="fromneutral">Start from neutral</button>' : all ? '<button class="ghost" type="button" data-act="castdone">Done</button>' : ''}</div>`,
+        after: () => {
+          pad = D.Studio($('studio'), {
+            sprite: true,
+            guide: dEmo !== 'neutral' ? neutral : null,
+            start: c.faces[dEmo],
+          });
+        },
+        input: true,
+      };
+    }
+    if (v.phase === 'script' || v.phase === 'twist') {
+      const job = v.job;
+      if (!job || job.done)
+        return {
+          key: base + ':done',
+          main: wait(
+            job ? 'Sent!' : 'Sit tight',
+            'Waiting for the others. No peeking at the big screen yet!',
+          ),
+          foot: skipBtn(),
+        };
+      const twist = v.phase === 'twist';
+      const lkey = `${base}:${job.premise}`;
+      if (!dLines || dLines.key !== lkey)
+        dLines = { key: lkey, lines: [{ who: twist ? 2 : 0, emotion: 'neutral', text: '' }] };
+      const names = [job.cast[0].name, job.cast[1].name, 'Narrator'];
+      const sofar = twist
+        ? `<div class="card dsofar">${job.lines.map((ln) => `<p><b>${esc(names[ln.who])}</b>${ln.who === 2 ? '' : ` <i>(${MOODS[ln.emotion].toLowerCase()})</i>`}: ${esc(ln.text)}</p>`).join('')}</div>`
+        : '';
+      if (!twist && !v.backgrounds.includes(dBg)) dBg = v.backgrounds[0];
+      const head = twist
+        ? `<h2 class="ptitle">How does it end?</h2>
+          <div class="dstage">${S.svg(job.bg, '', true)}<span>${esc(S.LABELS[job.bg] || '')}</span></div>
+          <p class="pnote">${esc(job.premise)}</p>${sofar}`
+        : `<h2 class="ptitle">Write the scene</h2>
+          <p class="pnote">You only know these two by name and bio. ${v.has_twist ? 'Set it up and build the drama, then <b>stop on a cliffhanger</b>: someone else writes the ending.' : 'Give it a beginning, a middle and an end.'}</p>
+          ${castCards(job.cast)}
+          <h3 class="dhead">Where?</h3>
+          <div class="bgpick row">${v.backgrounds.map((b) => `<button type="button" data-bg="${b}" aria-pressed="${b === dBg}" aria-label="${esc(S.LABELS[b])}">${S.svg(b, '', true)}<span>${esc(S.LABELS[b])}</span></button>`).join('')}</div>
+          <div class="field"><label for="f-premise">What's happening? (the scene's title)</label><input id="f-premise" maxlength="70" autocomplete="off" placeholder="Locked in the bakery at midnight with one cupcake left"></div>
+          <h3 class="dhead">The script</h3>`;
+      return {
+        key: lkey,
+        main: `<span class="kicker">${esc(tag)} · ${twist ? 'write the twist' : 'write the scene'}</span>
+          ${head}
+          <div id="dlines">${lineRows(job, v.max_lines)}</div>`,
+        foot: `<button class="big-btn" type="button" data-act="${twist ? 'sendtwist' : 'sendscript'}">${twist ? 'Send the twist' : 'Send the script'}</button>`,
+        after: () => {
+          dJob = job;
+          dMost = v.max_lines;
+        },
+        keep: true,
+        input: true,
+      };
+    }
+    if (v.phase === 'show')
+      return {
+        key: `${base}:show:${v.number}`,
+        main: wait(
+          `Scene ${v.number} of ${v.of}`,
+          `${esc(v.premise)}${v.yours ? '<br>You helped make this one!' : ''}`,
+        ),
+        foot: skipBtn(),
+      };
+    if (v.phase === 'vote') {
+      const vs = v.voted || {};
+      if (vs.scene !== null && vs.scene !== undefined && vs.character)
+        return {
+          key: base + ':voted',
+          main: wait('Votes in!', 'Look at the big screen.'),
+          foot: skipBtn(),
+        };
+      return {
+        key: `${base}:${vs.scene}:${vs.character}`,
+        main: `<span class="kicker">Drama Club · vote</span><h2 class="ptitle">Best scene and best character</h2>
+          <h3 class="dhead">Best scene</h3>
+          ${v.scenes.map((sc) => `<button class="choice" type="button" aria-pressed="${vs.scene === sc.index}" data-send='${esc(JSON.stringify({ type: 'vote', scene: sc.index }))}'><span class="dthumb">${S.svg(sc.bg, '', true)}</span>${esc(sc.premise)}<small>${esc(sc.cast.join(' & '))}</small></button>`).join('')}
+          <h3 class="dhead">Best character</h3>
+          <div class="dgallery">${v.characters.map((c) => `<button type="button" aria-pressed="${vs.character === c.pid}" data-send='${esc(JSON.stringify({ type: 'vote', character: c.pid }))}'>${D.artCanvas(c.face, '')}<span>${esc(c.name)}</span></button>`).join('')}</div>`,
+        input: true,
+      };
+    }
+    return scoresScreen(v);
+  }
+
   function shirtScreen(v) {
     const D = window.PartyDraw;
     const base = `shirt:${v.phase}:${v.round}`;
@@ -523,6 +725,7 @@
           ),
         };
       if (v.game === 'shirt') return shirtScreen(v);
+      if (v.game === 'drama') return dramaScreen(v);
       return v.game === 'quip' ? quipScreen(v) : bluffScreen(v);
     }
     if (st.room.state === 'results' && v) return resultsScreen(v);
@@ -542,6 +745,7 @@
       st.room.state === 'playing' && v && typeof v.ends_in === 'number' && v.ends_in > 0;
     $('top').innerHTML =
       `<div class="phtop">${av(pid)}<div class="who">${esc(p.name)}<small>Room ${esc(st.room.code)}${isVip() ? ' · VIP' : ''}</small></div>
+      <button class="leave" type="button" data-act="leave" aria-label="Leave this room">Leave</button>
       <div class="pt">${fmt(pts)} pts${timed ? `<span class="mring"><svg viewBox="0 0 40 40"><circle class="bgc" cx="20" cy="20" r="16"/><circle class="fgc" id="ring" cx="20" cy="20" r="16" stroke-dasharray="100.5" stroke-dashoffset="0"/></svg><span id="left"></span></span>` : ''}</div></div>`;
   }
 
@@ -676,7 +880,55 @@
   }
 
   function act(a) {
+    if (a === 'theme') {
+      const t = ($('f-theme').value || '').trim();
+      if (!t) return showErr('Write a theme first.');
+      return send({ type: 'theme', text: t });
+    }
+    if (a === 'castname') {
+      const name = ($('f-cname').value || '').trim();
+      if (!name) return showErr('Give your character a name.');
+      dEmo = 'neutral';
+      return send({ type: 'character', name, bio: ($('f-cbio').value || '').trim() });
+    }
+    if (a === 'face') {
+      if (!pad || pad.empty()) return showErr('Draw something first.');
+      const v = st.view;
+      send({ type: 'face', emotion: dEmo, strokes: pad.strokes() });
+      const sent = new Set([...Object.keys(v.character.faces), dEmo]);
+      dEmo = Object.keys(MOODS).find((k) => !sent.has(k)) || '__done';
+      return;
+    }
+    if (a === 'fromneutral') {
+      const n = st.view.character.faces.neutral;
+      if (pad && n) pad.load(n);
+      return;
+    }
+    if (a === 'castdone') {
+      dEmo = '__done';
+      lastKey = '';
+      return render();
+    }
+    if (a === 'addline' && dLines && dJob) {
+      const last = dLines.lines[dLines.lines.length - 1];
+      dLines.lines.push({ who: last.who === 0 ? 1 : 0, emotion: 'neutral', text: '' });
+      return redrawLines(dJob, dMost);
+    }
+    if ((a === 'sendscript' || a === 'sendtwist') && dLines) {
+      const lines = dLines.lines.map((ln) => ({ ...ln, text: ln.text.trim() }));
+      if (lines.some((ln) => !ln.text))
+        return showErr('A line is empty: write something or remove it.');
+      if (a === 'sendtwist') return send({ type: 'twist', lines });
+      const premise = ($('f-premise').value || '').trim();
+      if (!premise) return showErr("Give the scene a title: what's happening, in one line.");
+      return send({ type: 'script', bg: dBg, premise, lines });
+    }
     if (a === 'join') return join();
+    if (a === 'leave') {
+      const mid = st && st.room.state === 'playing' && st.view && st.view.game;
+      if (mid && !confirm('Leave this game? Your seat stays empty until it ends.')) return;
+      return send({ type: 'leave' });
+    }
     if (a === 'host') return hostRoom();
     if (a === 'pinjoin') {
       pinErr = '';
@@ -739,7 +991,24 @@
       sel.color = Number(b.dataset.color);
       preview();
     } else if (b.dataset.choose) send({ type: 'choose', game: b.dataset.choose });
-    else if (b.dataset.fvote) {
+    else if (b.dataset.dtab) {
+      dEmo = b.dataset.dtab;
+      lastKey = '';
+      render();
+    } else if (b.dataset.bg) {
+      dBg = b.dataset.bg;
+      for (const x of document.querySelectorAll('[data-bg]'))
+        x.setAttribute('aria-pressed', String(x.dataset.bg === dBg));
+    } else if ((b.dataset.lwho || b.dataset.lemo || b.dataset.ldel) && dLines && dJob) {
+      if (b.dataset.lwho) {
+        const [i, w] = b.dataset.lwho.split(':').map(Number);
+        dLines.lines[i].who = w;
+      } else if (b.dataset.lemo) {
+        const [i, e] = b.dataset.lemo.split(':');
+        dLines.lines[Number(i)].emotion = e;
+      } else dLines.lines.splice(Number(b.dataset.ldel), 1);
+      redrawLines(dJob, dMost);
+    } else if (b.dataset.fvote) {
       const id = b.dataset.fvote;
       if (fpicks.includes(id)) fpicks = fpicks.filter((x) => x !== id);
       else if (fpicks.length < fmost) fpicks.push(id);
@@ -767,6 +1036,10 @@
     }
   });
   document.addEventListener('input', (e) => {
+    if (e.target.dataset.ltext !== undefined && dLines) {
+      const ln = dLines.lines[Number(e.target.dataset.ltext)];
+      if (ln) ln.text = e.target.value;
+    }
     if (e.target.id === 'f-ans') $('cnt').textContent = `${e.target.value.length}/80`;
     if (e.target.id === 'f-code') e.target.value = e.target.value.toUpperCase();
   });
@@ -825,7 +1098,10 @@
       backoff = 400;
       clearTimeout(offlineT);
       $('offline').hidden = true;
-      if (!pid && me.token && me.tokenCode && (!urlCode || urlCode === me.tokenCode)) {
+      // Rejoin the last room only if it was recent: an old session must not drop someone into
+      // a finished game's results.
+      const fresh = me.at && Date.now() - me.at < 4 * 3600 * 1000;
+      if (!pid && me.token && me.tokenCode && fresh && (!urlCode || urlCode === me.tokenCode)) {
         autoJoining = true;
         lastKey = '';
         render();
@@ -863,6 +1139,7 @@
             ...me,
             token: msg.token,
             tokenCode: me.code || me.tokenCode,
+            at: Date.now(),
             name: msg.name,
             device: msg.device || me.device,
           };
@@ -881,6 +1158,14 @@
           canHost = !!msg.hosting;
           if (!pid) render();
         }
+      } else if (msg.type === 'left') {
+        me = { name: me.name, device: me.device };
+        store.set(me);
+        pid = null;
+        st = null;
+        joinErr = '';
+        lastKey = '';
+        render();
       } else if (msg.type === 'closed') {
         me = { name: me.name, device: me.device };
         store.set(me);
