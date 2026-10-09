@@ -353,7 +353,7 @@
                   .map((o, k) =>
                     o.mine
                       ? ''
-                      : `<button class="like" type="button" data-like="${k}" aria-pressed="${!!o.liked}"><span class="h">♥</span>${esc(o.text)}</button>`,
+                      : `<button class="like" type="button" data-like="${k}" aria-pressed="${!!o.liked}" aria-label="Like this lie: ${esc(o.text)}"><span class="h" aria-hidden="true">♥</span>${esc(o.text)}</button>`,
                   )
                   .join('')}</div>`
               : ''
@@ -715,6 +715,19 @@
   function screen() {
     if (!pid || !st) return joinScreen();
     const v = st.view;
+    const intro = st.room.intro;
+    if (st.room.state === 'playing' && intro) {
+      const how = (window.PartyHowTo || {})[intro.game];
+      const g = st.room.games.find((x) => x.key === intro.game);
+      return {
+        key: `intro:${intro.game}`,
+        main: `<span class="kicker">How to play</span><h2 class="ptitle">${esc(g ? g.title : '')}</h2>
+          <p class="pnote">Watch the big screen. The game starts in a moment.</p>
+          ${how ? `<ol class="howto">${how.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol><p class="pnote">${esc(how.score)}</p>` : ''}`,
+        game: intro.game,
+        foot: skipBtn(),
+      };
+    }
     if (st.room.state === 'playing' && v) {
       if (v.phase === 'next_game')
         return {
@@ -745,8 +758,9 @@
       st.room.state === 'playing' && v && typeof v.ends_in === 'number' && v.ends_in > 0;
     $('top').innerHTML =
       `<div class="phtop">${av(pid)}<div class="who">${esc(p.name)}<small>Room ${esc(st.room.code)}${isVip() ? ' · VIP' : ''}</small></div>
-      <button class="leave" type="button" data-act="leave" aria-label="Leave this room">Leave</button>
-      <div class="pt">${fmt(pts)} pts${timed ? `<span class="mring"><svg viewBox="0 0 40 40"><circle class="bgc" cx="20" cy="20" r="16"/><circle class="fgc" id="ring" cx="20" cy="20" r="16" stroke-dasharray="100.5" stroke-dashoffset="0"/></svg><span id="left"></span></span>` : ''}</div></div>`;
+      <button class="aa" type="button" data-act="textsize" aria-label="Text size ${Math.round(ZOOMS[zoom] * 100)}%, tap to change">Aa</button>
+      <button class="leave" type="button" data-act="leave" aria-label="Leave this room" title="Leave this room"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/></svg></button>
+      <div class="pt">${fmt(pts)} pts${timed ? `<span class="mring" role="timer"><svg aria-hidden="true" viewBox="0 0 40 40"><circle class="bgc" cx="20" cy="20" r="16"/><circle class="fgc" id="ring" cx="20" cy="20" r="16" stroke-dasharray="100.5" stroke-dashoffset="0"/></svg><span id="left"></span></span>` : ''}</div></div>`;
   }
 
   function render() {
@@ -792,6 +806,7 @@
       $('foot').classList.toggle('flow', !!s.flow);
       if (s.after) s.after();
       if (s.input && pid) buzz();
+      if (s.key.split(':')[0] !== lastKey.split(':')[0] || !s.keep) announce();
       lastKey = s.key;
     }
     paintTimer();
@@ -822,8 +837,39 @@
     if (!ring || deadline === null) return;
     const left = Math.max(0, deadline - performance.now() / 1000);
     ring.style.strokeDashoffset = String(100.5 * (1 - left / total));
-    $('left').textContent = String(Math.ceil(left));
+    const secs = String(Math.ceil(left));
+    if ($('left').textContent !== secs) {
+      $('left').textContent = secs;
+      ring.closest('.mring').setAttribute('aria-label', `${secs} seconds left`);
+    }
   }
+
+  // Screen readers: say what the new screen is, and start reading from its title (unless the
+  // screen put the cursor in a text box).
+  function announce() {
+    const main = $('main');
+    const title = main.querySelector('.ptitle, .wait h2');
+    const kicker = main.querySelector('.kicker');
+    $('sr').textContent = [kicker && kicker.textContent, title && title.textContent]
+      .filter(Boolean)
+      .join(': ');
+    const busy = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+    if (title && !busy) {
+      title.setAttribute('tabindex', '-1');
+      title.focus({ preventScroll: true });
+    }
+  }
+
+  // Text size for phones: 100%, 115% or 130%, remembered.
+  const ZOOMS = [1, 1.15, 1.3];
+  let zoom = 0;
+  try {
+    zoom = Math.max(0, ZOOMS.indexOf(Number(localStorage.getItem('party-zoom') || 1)));
+  } catch {
+    /* private mode */
+  }
+  const applyZoom = () => document.documentElement.style.setProperty('--z', String(ZOOMS[zoom]));
+  applyZoom();
   setInterval(paintTimer, 250);
 
   function showErr(text) {
@@ -924,6 +970,16 @@
       return send({ type: 'script', bg: dBg, premise, lines });
     }
     if (a === 'join') return join();
+    if (a === 'textsize') {
+      zoom = (zoom + 1) % ZOOMS.length;
+      try {
+        localStorage.setItem('party-zoom', String(ZOOMS[zoom]));
+      } catch {
+        /* private mode */
+      }
+      applyZoom();
+      return header();
+    }
     if (a === 'leave') {
       const mid = st && st.room.state === 'playing' && st.view && st.view.game;
       if (mid && !confirm('Leave this game? Your seat stays empty until it ends.')) return;
