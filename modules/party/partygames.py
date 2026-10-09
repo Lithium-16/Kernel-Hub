@@ -19,10 +19,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from partydraw import SHIRTS, BadDrawing, check_drawing
+from partydraw import SHIRTS, BadDrawing, check_drawing, doodle
 
 MAX_TEXT = 80
 MAX_LIE = 40
+
+# What bots say (test players the host can add). Original, one per line of a Quip Clash answer.
+BOT_QUIPS = [
+    "A suspiciously large spoon", "Grandma's group chat", "Three raccoons in a coat", "Soup, but angry",
+    "A strongly worded email", "My accountant", "Gary", "A goose in a tuxedo", "Interpretive dance",
+    "The forbidden lasagna", "A haunted Roomba", "Emotional support cactus", "Wet socks",
+    "A motivational pigeon", "Free samples", "The vibes", "Sixteen hot dogs", "A tiny violin",
+    "Beep boop", "A very confident toddler", "Expired coupons", "My other personality",
+    "A llama in a bow tie", "Unseasoned chicken", "The group project", "A dramatic gasp",
+    "Crocs with socks", "An inflatable castle", "Reply all", "The neighbor's wifi",
+    "Glitter. Everywhere.", "A sandwich with no bread", "Cheese, but louder", "Hot tub time",
+    "A ghost who's bad at haunting", "Pineapple on everything", "Mild panic", "The microwave beep",
+    "A trench coat full of snacks", "Error 404: joke not found",
+]
 
 
 class Invalid(Exception):
@@ -197,6 +211,18 @@ class Game:
     def advance(self, now: float) -> None:
         raise NotImplementedError
 
+    def bot_move(self, pid: str) -> dict[str, Any] | None:
+        """What a bot sends next in this phase (a message for handle), or None."""
+        return None
+
+    def _bot_line(self) -> str:
+        """A bot answer nobody has used yet this game, when there's one left."""
+        said = self.__dict__.setdefault("_bot_said", set())
+        fresh = [q for q in BOT_QUIPS if q not in said] or BOT_QUIPS
+        line = self.rng.choice(fresh)
+        said.add(line)
+        return line
+
     def handle(self, pid: str, msg: dict[str, Any], now: float) -> None:
         raise NotImplementedError
 
@@ -344,6 +370,18 @@ class QuipClash(Game):
             self.final_votes[pid] = list(picks)
         else:
             raise Invalid("Not now: look at the big screen.")
+
+    def bot_move(self, pid: str) -> dict[str, Any] | None:
+        if self.phase == "write" and self._todo(pid) is not None:
+            return {"type": "answer", "text": self._bot_line()}
+        if self.phase == "vote" and pid not in self.matchups[self.current].authors:
+            return {"type": "vote", "choice": self.rng.randrange(2)}
+        if self.phase == "final_write":
+            return {"type": "answer", "text": self._bot_line()}
+        if self.phase == "final_vote" and (allowed := self._final_choices(pid)):
+            n = self.rng.randint(1, min(self.FINAL_VOTES, len(allowed)))
+            return {"type": "vote", "choices": self.rng.sample(allowed, n)}
+        return None
 
     def _final_choices(self, pid: str) -> list[str]:
         return [p for p in self.pids if p in self.final_answers and p != pid]
@@ -693,6 +731,17 @@ class BluffBuffet(Game):
             self.bluff.like(pid, msg.get("choice"))
         else:
             raise Invalid("Not now: look at the big screen.")
+
+    def bot_move(self, pid: str) -> dict[str, Any] | None:
+        if self.phase == "lie":
+            ideas = self.bluff.suggestions.get(pid) or [self._bot_line()]
+            return {"type": "lie", "text": self.rng.choice(ideas)}
+        if self.phase == "pick" and (allowed := self.bluff.can_pick(pid)):
+            truth = next((i for i in allowed if self.bluff.options[i].truth), None)
+            if truth is not None and self.rng.random() < 0.35:
+                return {"type": "pick", "choice": truth}
+            return {"type": "pick", "choice": self.rng.choice(allowed)}
+        return None
 
     def advance(self, now: float) -> None:
         if self.phase == "lie":
@@ -1075,6 +1124,32 @@ class ShirtShowdown(Game):
             self.votes.setdefault(pid, choice)
         else:
             raise Invalid("Not now: look at the big screen.")
+
+    def bot_move(self, pid: str) -> dict[str, Any] | None:
+        ph = self.phase
+        if ph == "draw":
+            mine = sum(1 for d in self.drawings if d["by"] == pid and d["round"] == self.round)
+            if mine < self.__dict__.setdefault("_bot_goal", {}).setdefault((pid, ph, self.round), self.rng.randint(1, 2)):
+                return {"type": "drawing", "strokes": doodle(self.rng)}
+            return {"type": "done"}
+        if ph == "slogan":
+            mine = sum(1 for x in self.slogans if x["by"] == pid and x["round"] == self.round)
+            if mine < 2:
+                ideas = BOT_QUIPS
+                taken = {norm(x["text"]) for x in self.slogans}
+                fresh = [t[: self.MAX_SLOGAN] for t in ideas if norm(t[: self.MAX_SLOGAN]) not in taken]
+                if fresh:
+                    return {"type": "slogan", "text": self.rng.choice(fresh)}
+            return {"type": "done"}
+        if ph == "assemble" and pid not in self.shirts and (hand := self.hands.get(pid)):
+            ds = [i for i in hand["drawings"] if i not in self.spent]
+            ss = [i for i in hand["slogans"] if i not in self.spent]
+            if ds or ss:
+                return {"type": "shirt", "drawing": self.rng.choice(ds) if ds else None,
+                        "slogan": self.rng.choice(ss) if ss else None, "color": self.rng.randrange(SHIRTS)}
+        if ph in ("vote", "final_vote") and (allowed := self.can_vote_for(pid)):
+            return {"type": "vote", "choice": self.rng.choice(allowed)}
+        return None
 
     # -- views ----------------------------------------------------------------------------
 

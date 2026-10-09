@@ -12,6 +12,8 @@ Anything else is refused, so a phone can't send a huge or broken drawing.
 
 from __future__ import annotations
 
+import math
+import random
 import re
 from typing import Any
 
@@ -71,3 +73,21 @@ def check_drawing(strokes: Any) -> list[dict[str, Any]]:
 
 def _int(v: Any, lo: int, hi: int) -> bool:
     return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
+
+
+def doodle(rng: random.Random) -> list[dict[str, Any]]:
+    """A random squiggly drawing (for bots): a few smooth loops and waves in the inks."""
+    out: list[dict[str, Any]] = []
+    if rng.random() < 0.4:
+        out.append({"fill": rng.randrange(2, len(INK))})
+    for _ in range(rng.randint(3, 6)):
+        cx, cy = rng.randint(80, SIZE - 80), rng.randint(80, SIZE - 80)
+        rx, ry = rng.randint(20, 120), rng.randint(20, 120)
+        a, b, phase = rng.randint(1, 3), rng.randint(1, 3), rng.random() * math.tau
+        pts: list[int] = []
+        for i in range(41):
+            t = i / 40 * math.tau
+            pts += [min(SIZE, max(0, round(cx + rx * math.cos(a * t + phase)))),
+                    min(SIZE, max(0, round(cy + ry * math.sin(b * t))))]
+        out.append({"c": rng.randrange(len(INK)), "w": rng.randint(4, 16), "p": pts})
+    return out

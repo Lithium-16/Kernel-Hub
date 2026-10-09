@@ -390,3 +390,87 @@ async def test_recap_and_kernel_actions(tmp_path):
     assert b.profile is None and p.store.profile_by_name("Bobby") is None
     counts = await p.reload_content()
     assert counts["quips"] >= 90 and counts["facts"] >= 35
+
+
+def play_out(r, limit=4000):
+    """Runs the clock until the game ends, the bots doing all the work."""
+    for _ in range(limit):
+        if r.state != "playing":
+            return
+        r.clock.t += 0.5
+        r.tick()
+    raise AssertionError(f"stuck in {r.game.phase}")
+
+
+@pytest.mark.parametrize("game", ["quip", "bluff", "shirt"])
+def test_bots_play_a_whole_game_by_themselves(game):
+    r, events = room()
+    with pytest.raises(Invalid, match="at least"):
+        r.start("quip")
+    bots = [r.add_bot() for _ in range(3)]
+    assert len({b.name for b in bots}) == 3 and all(p["bot"] for p in r.room_view()["players"])
+    assert r.vip is None  # a bot never runs the room; the host screen starts the game
+    r.host_command({"type": "start", "game": game})
+    refused = []
+    real = r.game.handle
+
+    def handle(pid, msg, now):
+        try:
+            real(pid, msg, now)
+        except Invalid as e:
+            refused.append((r.game.phase, msg.get("type"), str(e)))
+            raise
+
+    r.game.handle = handle
+    start = r.clock.t
+    play_out(r)
+    assert refused == []  # every bot move is one the game accepts
+    assert r.state == "results" and r.results["game"] == game
+    assert sum(s["score"] for s in r.results["standings"]) > 0
+    if game == "quip":
+        # bots answer and vote without waiting for the timers to run out
+        assert r.clock.t - start < 3 * 90 + 60
+    assert "player.joined" not in events
+
+
+def test_a_phone_plays_with_bots_and_stays_vip():
+    r, _ = room()
+    bot = r.add_bot()
+    ann = connect(r, "Ann")
+    r.add_bot()
+    assert r.vip == ann.pid
+    r.handle(ann.pid, {"type": "start", "game": "quip"})
+    with pytest.raises(Invalid, match="between games"):
+        r.add_bot()
+    with pytest.raises(Invalid, match="between games"):
+        r.remove_bots()
+    g = r.game
+    for _ in range(40):  # the bots answer; Ann is the one everyone waits for
+        r.clock.t += 0.5
+        r.tick()
+    assert g.phase == "write" and g.waiting_on() == {ann.pid}
+    r.host_command({"type": "kick", "pid": bot.pid})  # kicking a bot doesn't ban anyone
+    assert not r.banned
+    r.end_game()
+    assert r.remove_bots() == 1 and list(r.seats) == [ann.pid]
+
+
+def test_bots_fill_the_room_up_to_max_players():
+    r, _ = room(max_players=3)
+    connect(r, "Ann")
+    r.add_bot()
+    r.add_bot()
+    with pytest.raises(Invalid, match="full"):
+        r.add_bot()
+
+
+def test_bots_stay_out_of_the_hall_of_fame(tmp_path):
+    r, store, _ = stored_room(tmp_path)
+    connect(r, "Ann")
+    for _ in range(2):
+        r.add_bot()
+    r.start("quip")
+    play_out(r)
+    names = {row["name"] for row in r.host_state()["fame"]["board"]}
+    assert names <= {"Ann"}
+    assert all(h["name"] == "Ann" for h in r.host_state()["fame"]["hits"])

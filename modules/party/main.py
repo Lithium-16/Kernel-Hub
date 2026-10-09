@@ -38,6 +38,16 @@ async def kick(ctx: ActionContext, name: str) -> dict:
     return await party.kick(name)
 
 
+@mod.action("bot.add")
+async def add_bots(ctx: ActionContext, count: int = 1) -> dict:
+    return await party.add_bots(count)
+
+
+@mod.action("bot.remove")
+async def remove_bots(ctx: ActionContext) -> dict:
+    return await party.remove_bots()
+
+
 @mod.action("share.start")
 async def share(ctx: ActionContext, who: str) -> dict:
     return await party.share(who)
