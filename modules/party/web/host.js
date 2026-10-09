@@ -192,6 +192,16 @@
     return scores(v, T);
   }
 
+  // The how-to-play card before a game (the first time it's played tonight).
+  function introScene(intro) {
+    const how = (window.PartyHowTo || {})[intro.game] || { steps: [], score: '' };
+    const g = st.room.games.find((x) => x.key === intro.game) || { title: '' };
+    return `<div class="scene" data-game="${esc(intro.game)}">${bar(g.title, GLYPH[intro.game] || '★')}<span class="tag">How to play</span>
+      <h2 class="big" style="font-size:72px">${esc(g.title)}</h2>
+      <ol class="howto big-steps">${how.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
+      <p class="sub howscore"><b>Scoring:</b> ${esc(how.score)}</p>${ring()}</div>`;
+  }
+
   // -- Drama Club ------------------------------------------------------------------------
   const MOOD = { neutral: 'neutral', flustered: 'flustered', sad: 'sad', angry: 'angry' };
   function drama(v) {
@@ -261,6 +271,7 @@
       const c = $(`sp${k}`);
       if (!c) return;
       const mood = want === 'keep' ? cur[k] : want;
+      if (speaking && mood !== cur[k]) S().whoosh();
       cur[k] = mood;
       D.render(c, faces[k][mood] || faces[k].neutral || []);
       c.classList.toggle('dim', speaking === false);
@@ -299,12 +310,16 @@
         }
         const text = $('vntext');
         let n = 0;
+        const voice = ln.who === 2 ? 1 : ln.who * 2;
         const type = () => {
           if (!text.isConnected) return;
-          text.textContent = ln.text.slice(0, ++n);
+          n++;
+          text.textContent = ln.text.slice(0, n);
+          if (n % 2 === 1 && ln.text[n - 1] !== ' ') S().blip(voice);
           if (n < ln.text.length) at(28, type);
         };
-        type();
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) text.textContent = ln.text;
+        else type();
       });
     });
     at(when, () => {
@@ -438,7 +453,10 @@
     const v = st.view;
     let html;
     let scene;
-    if (r.state === 'playing' && v && v.game) {
+    if (r.state === 'playing' && r.intro) {
+      html = introScene(r.intro);
+      scene = `intro:${r.intro.game}`;
+    } else if (r.state === 'playing' && v && v.game) {
       html =
         v.game === 'drama'
           ? drama(v)
@@ -468,13 +486,19 @@
     }
     const { ends_in: _e, ...rest } = v || {};
     const content = JSON.stringify([r, rest, st.link, scene === 'fame' ? st.fame : null]);
-    if (v && typeof v.ends_in === 'number') {
-      if (scene !== lastScene || total === null) total = Math.max(v.ends_in, 1);
-      deadline = performance.now() / 1000 + v.ends_in;
+    const endsIn = r.intro
+      ? r.intro.ends_in
+      : v && typeof v.ends_in === 'number'
+        ? v.ends_in
+        : null;
+    if (endsIn !== null) {
+      if (scene !== lastScene || total === null) total = Math.max(endsIn, 1);
+      deadline = performance.now() / 1000 + endsIn;
     } else {
       deadline = null;
       total = null;
     }
+    cue(scene, r, v);
     if (content !== lastContent || scene !== lastScene) {
       const entering = scene !== lastScene;
       $('tvc').innerHTML = html;
@@ -492,13 +516,64 @@
     controls();
   }
 
+  let lastTick = null;
   function paintTimer() {
     const ring = $('ring');
     if (!ring || deadline === null) return;
     const left = Math.max(0, deadline - performance.now() / 1000);
     ring.style.strokeDashoffset = String(276.5 * (1 - left / total));
-    $('left').textContent = String(Math.ceil(left));
+    const secs = Math.ceil(left);
+    $('left').textContent = String(secs);
+    if (secs >= 1 && secs <= 5 && secs !== lastTick && total > 8) S().tick(secs === 1);
+    lastTick = secs;
   }
+
+  // -- sound: cues for what's on screen (sound.js makes the noises) ---------------------
+  const S = () => window.PartySound || new Proxy({}, { get: () => () => {} });
+  let cueScene = '';
+  let cueWaiting = null;
+  function cue(scene, r, v) {
+    const sound = S();
+    sound.track(
+      r.state === 'playing' ? (r.intro ? r.intro.game : v && v.game) || 'lobby' : 'lobby',
+    );
+    const waiting = v && Array.isArray(v.waiting) ? v.waiting.length : null;
+    if (scene !== cueScene) {
+      cueScene = scene;
+      lastTick = null;
+      const phase = (v && v.phase) || '';
+      if (scene === 'results') sound.fanfare();
+      else if (scene === 'lobby' || scene === 'fame') {
+        /* the music is enough */
+      } else if (/reveal|show/.test(phase)) sound.reveal();
+      else sound.phase();
+      if (scene === 'results' && v && v.badges && v.badges.length)
+        v.badges.forEach((_, i) => setTimeout(() => S().chime(), 1200 + i * 800));
+    } else if (waiting !== null && cueWaiting !== null && waiting < cueWaiting) sound.ding();
+    cueWaiting = waiting;
+  }
+  // Browsers only play sound after a click or key press.
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'soundchip';
+  chip.textContent = 'Click anywhere for sound';
+  document.body.append(chip);
+  const wake = () => {
+    S().unlock();
+    setTimeout(() => {
+      if (S().ready()) chip.remove();
+    }, 300);
+  };
+  addEventListener('pointerdown', wake);
+  addEventListener('keydown', (e) => {
+    wake();
+    if (e.key === 'm' || e.key === 'M') {
+      const off = S().prefs.sound || S().prefs.music;
+      S().set('sound', !off);
+      S().set('music', !off);
+      controls();
+    }
+  });
   setInterval(paintTimer, 250);
   // In the lobby, show the hall of fame for 10 seconds out of every 25.
   setInterval(() => {
@@ -575,6 +650,10 @@
       if (r.state === 'results') rows.push(btn('Back to lobby', { type: 'lobby' }));
     }
     if (r.guest) rows.push(btn('Close this room', { type: 'close' }, 'kick'));
+    const P = S().prefs || {};
+    rows.push(
+      `<button type="button" data-snd="sound" aria-pressed="${!!P.sound}">Sound ${P.sound ? 'on' : 'off'}</button><button type="button" data-snd="music" aria-pressed="${!!P.music}">Music ${P.music ? 'on' : 'off'}</button>`,
+    );
     if (r.players.length)
       rows.push(
         r.players.map((p) => btn(`Kick ${p.name}`, { type: 'kick', pid: p.pid }, 'kick')).join(''),
@@ -607,6 +686,11 @@
     }
   });
   $('ctl').addEventListener('click', (e) => {
+    const t = e.target.closest('[data-snd]');
+    if (t) {
+      S().set(t.dataset.snd, !S().prefs[t.dataset.snd]);
+      return controls();
+    }
     const b = e.target.closest('[data-cmd]');
     if (!b || !ws || ws.readyState !== 1) return;
     ctlMsg = '';

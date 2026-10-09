@@ -193,7 +193,14 @@ screen's **Start** plays a whole game on its own. They stay out of the hall of f
 this screen** opens a room of their own, with its own code and big screen, while yours keeps
 going. Up to `max_rooms` (4) can be open at once, a room closes after 30 minutes with nobody in
 it (or with **Close this room**), and every room records into the same hall of fame. Turn
-`open_hosting` off to allow only your room. Friends on a laptop can join with the same link: on a big window the
+`open_hosting` off to allow only your room.
+
+Each game opens with a short **how to play** card the first time it's played in a night (the
+VIP can skip it; `how_to_play = false` turns the cards off). The big screen has music and sound
+effects, made in the browser with no sound files: click the host page once to turn them on
+(browsers block sound until then), use **Sound** and **Music** in the host controls, or press
+**M** to mute. On phones, **Aa** makes the text bigger, and screen readers announce each new
+screen. Friends on a laptop can join with the same link: on a big window the
 page spreads out, with the question on the left and a bigger drawing pad.
 
 It remembers who played: a profile per name (a new phone asks for the profile's 4-digit PIN),
