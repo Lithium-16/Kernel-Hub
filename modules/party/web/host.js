@@ -217,17 +217,11 @@
         'Everyone draws a character',
         'Neutral, flustered, sad and angry. Nobody sees them until the show!',
       );
-    if (v.phase === 'stage')
-      return work(
-        'Set the stage',
-        'Pick a place, start the scene',
-        "You only know the characters' names. Choose a background and say what's happening.",
-      );
     if (v.phase === 'script')
       return work(
         'Write the script',
         'Lights, camera, typing',
-        'Write the scene line by line, with a mood for every line.',
+        "You only know the characters' names. Pick a place, name the situation and write it line by line.",
       );
     if (v.phase === 'twist')
       return work(
@@ -242,7 +236,7 @@
         <div class="vnbox" id="vnbox" hidden><div class="plate" id="vnplate"></div><p id="vntext"></p></div>
         <div class="vncard" id="vncard"><span class="tag">Scene ${story.index + 1} of ${v.of} · ${esc(v.theme)}</span><h2 class="big">${esc(story.premise)}</h2>
           <p class="sub">Starring ${esc(story.cast[0].name)} &amp; ${esc(story.cast[1].name)}</p></div>
-        <div class="vncredits" id="vncredits" hidden>Cast by <b>${esc(nameOf(story.credits.cast[0]))}</b> &amp; <b>${esc(nameOf(story.credits.cast[1]))}</b> · Stage by <b>${esc(nameOf(story.credits.stage))}</b> · Script by <b>${esc(nameOf(story.credits.script))}</b>${story.credits.twist ? ` · Twist by <b>${esc(nameOf(story.credits.twist))}</b>` : ''}</div>
+        <div class="vncredits" id="vncredits" hidden>Cast by <b>${esc(nameOf(story.credits.cast[0]))}</b> &amp; <b>${esc(nameOf(story.credits.cast[1]))}</b> · Script by <b>${esc(nameOf(story.credits.script))}</b>${story.credits.twist ? ` · Twist by <b>${esc(nameOf(story.credits.twist))}</b>` : ''}</div>
       </div></div>`;
     }
     if (v.phase === 'vote')
@@ -280,13 +274,18 @@
     show(1, 'neutral');
     const lines = [...story.lines, ...story.twist];
     const names = [story.cast[0].name, story.cast[1].name];
-    at(2600, () => {
+    at(3800, () => {
       $('vncard')?.classList.add('gone');
       $('sp0')?.classList.add('in');
       $('sp1')?.classList.add('in');
     });
-    lines.forEach((ln, i) => {
-      at(3400 + i * 3200, () => {
+    // the same pacing as DramaClub.line_s on the server: time to type a line out and to read it
+    const lineMs = (ln) => 1600 + 45 * ln.text.length;
+    let when = 4500;
+    lines.forEach((ln) => {
+      const start = when;
+      when += lineMs(ln);
+      at(start, () => {
         const box = $('vnbox');
         if (!box) return;
         box.hidden = false;
@@ -308,7 +307,7 @@
         type();
       });
     });
-    at(3400 + lines.length * 3200, () => {
+    at(when, () => {
       $('vnbox')?.setAttribute('hidden', '');
       $('vncredits')?.removeAttribute('hidden');
     });

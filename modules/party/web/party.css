@@ -1671,7 +1671,7 @@ body.play {
 .padwrap {
   position: relative;
   /* as big as the phone allows while the tools, colors and buttons still fit on screen */
-  width: min(100%, max(240px, calc(100svh - 420px)));
+  width: min(100%, max(240px, calc(100svh - 480px)));
   justify-self: center;
 }
 .studio .pad {
@@ -2131,9 +2131,6 @@ body.play {
 [data-game="drama"] {
   --acc: #b07cff;
 }
-.tbar.five {
-  grid-template-columns: repeat(5, 1fr);
-}
 .dcast {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2484,4 +2481,15 @@ body.play {
 .dcastwall small {
   color: #6b5f86;
   font-weight: 700;
+}
+.bgpick.row {
+  display: flex;
+  overflow-x: auto;
+  gap: 8px;
+  padding-bottom: 6px;
+  scroll-snap-type: x mandatory;
+}
+.bgpick.row button {
+  flex: 0 0 34%;
+  scroll-snap-align: start;
 }

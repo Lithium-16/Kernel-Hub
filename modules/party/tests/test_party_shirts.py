@@ -25,6 +25,14 @@ def test_drawings_are_checked():
         {"e": True, "w": 12, "p": [5, 5]},
         {"c": 7, "w": 1, "p": [1, 2, 3, 4]},
     ]
+    tools = [{"ff": 2, "x": 200, "y": 100}, {"c": 0, "w": 6, "p": [0, 0, 400, 0, 400, 400], "s": True},
+             {"e": True, "w": 6, "p": [1, 1, 9, 9], "s": True}]
+    assert check_drawing(tools) == tools
+    assert check_drawing([{"ff": "#AABBCC", "x": 0, "y": 400}] + LINE, sprite=True)[0]["ff"] == "#aabbcc"
+    for bad in ([{"ff": 2, "x": 401, "y": 1}], [{"ff": 2, "x": 1}], [{"ff": "nope", "x": 1, "y": 1}],
+                [{"ff": 2, "x": 1, "y": 1.5}], [{"c": 0, "w": 4, "p": [1, 2], "s": 1}], [{"c": 0, "w": 4, "p": [1, 2], "s": False}]):
+        with pytest.raises(BadDrawing):
+            check_drawing(bad)
     for bad in (None, [], "x", ["stroke"],
                 [{"c": 8, "w": 4, "p": [1, 1]}], [{"c": "red", "w": 4, "p": [1, 1]}], [{"c": "#12345", "w": 4, "p": [1, 1]}],
                 [{"c": 0, "w": 0, "p": [1, 1]}], [{"c": 0, "w": 41, "p": [1, 1]}], [{"c": 0, "w": 4.5, "p": [1, 1]}],
