@@ -3835,15 +3835,21 @@ body:has(.scene.vn[data-game="drama"]) {
   transform-origin: bottom;
 }
 @keyframes barin {
-  from { transform: scaleY(0); }
+  from {
+    transform: scaleY(0);
+  }
 }
 .vnbg {
   transform-origin: 50% 65%;
   animation: kenburns 32s ease-in-out infinite alternate;
 }
 @keyframes kenburns {
-  from { transform: scale(1.02); }
-  to { transform: scale(1.1) translate(-1.5%, -1%); }
+  from {
+    transform: scale(1.02);
+  }
+  to {
+    transform: scale(1.1) translate(-1.5%, -1%);
+  }
 }
 .vnstage .sprite {
   bottom: 56px;
@@ -3853,10 +3859,14 @@ body:has(.scene.vn[data-game="drama"]) {
   animation: breathe 5.5s ease-in-out infinite;
 }
 .sprite.in.pop {
-  animation: breathe 5.5s ease-in-out infinite, hop 0.4s ease-out;
+  animation:
+    breathe 5.5s ease-in-out infinite,
+    hop 0.4s ease-out;
 }
 @keyframes breathe {
-  50% { scale: 1.012 1.022; }
+  50% {
+    scale: 1.012 1.022;
+  }
 }
 .vnbox {
   bottom: 88px;
@@ -3887,7 +3897,10 @@ body:has(.scene.vn[data-game="drama"]) {
   animation: cue 1.1s ease-in-out infinite;
 }
 @keyframes cue {
-  50% { translate: 0 6px; opacity: 0.55; }
+  50% {
+    translate: 0 6px;
+    opacity: 0.55;
+  }
 }
 .vnbox.narrator {
   border-left-color: rgba(255, 255, 255, 0.28);
@@ -3928,16 +3941,27 @@ body:has(.scene.vn[data-game="drama"]) {
   animation: linedrop 1.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 @keyframes linedrop {
-  from { transform: scaleY(0); }
+  from {
+    transform: scaleY(0);
+  }
 }
 .vncard > * {
   animation: cardrise 1s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
-.vncard > :nth-child(2) { animation-delay: 0.14s; }
-.vncard > :nth-child(3) { animation-delay: 0.28s; }
-.vncard > :nth-child(4) { animation-delay: 0.42s; }
+.vncard > :nth-child(2) {
+  animation-delay: 0.14s;
+}
+.vncard > :nth-child(3) {
+  animation-delay: 0.28s;
+}
+.vncard > :nth-child(4) {
+  animation-delay: 0.42s;
+}
 @keyframes cardrise {
-  from { opacity: 0; translate: 0 26px; }
+  from {
+    opacity: 0;
+    translate: 0 26px;
+  }
 }
 .vncard .big {
   font-size: 92px;
@@ -3990,7 +4014,9 @@ body:has(.scene.vn[data-game="drama"]) {
   animation: wipe 0.7s cubic-bezier(0.6, 0, 0.3, 1) forwards;
 }
 @keyframes wipe {
-  to { translate: 100% 0; }
+  to {
+    translate: 100% 0;
+  }
 }
 /* the last seconds: the ring goes red and pulses */
 .scene[data-game="drama"] .timer.urgent .fgc,
@@ -4001,18 +4027,26 @@ body:has(.scene.vn[data-game="drama"]) {
   animation: urgent 0.5s ease-in-out infinite alternate;
 }
 @keyframes urgent {
-  to { scale: 1.1; }
+  to {
+    scale: 1.1;
+  }
 }
 /* the phones: a figure in each character's colour in the preview */
 .ghostsprite {
   background:
     radial-gradient(circle at 50% 22%, #ffd9b8 0 15%, transparent 15.5%),
-    linear-gradient(hsl(var(--hue, 262) 65% 58%), hsl(var(--hue, 262) 65% 58%)) 50% 100% / 46% 58% no-repeat;
+    linear-gradient(hsl(var(--hue, 262) 65% 58%), hsl(var(--hue, 262) 65% 58%)) 50% 100% / 46% 58%
+    no-repeat;
 }
 
 /* ---- more effects ---- */
 .vnfx.fxl {
-  background: repeating-conic-gradient(from 0deg at 50% 50%, transparent 0 3deg, rgba(255, 255, 255, 0.92) 3.2deg 3.7deg, transparent 3.9deg 7deg);
+  background: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    transparent 0 3deg,
+    rgba(255, 255, 255, 0.92) 3.2deg 3.7deg,
+    transparent 3.9deg 7deg
+  );
   -webkit-mask: radial-gradient(circle at 50% 50%, transparent 22%, #000 64%);
   mask: radial-gradient(circle at 50% 50%, transparent 22%, #000 64%);
 }
@@ -4020,12 +4054,25 @@ body:has(.scene.vn[data-game="drama"]) {
   animation: fxspeed 1.1s ease-out both;
 }
 @keyframes fxspeed {
-  0% { opacity: 0; scale: 1.7; }
-  15% { opacity: 1; }
-  100% { opacity: 0; scale: 1; }
+  0% {
+    opacity: 0;
+    scale: 1.7;
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    scale: 1;
+  }
 }
 .vnfx.fxg {
-  background: repeating-linear-gradient(0deg, rgba(255, 0, 90, 0.24) 0 2px, rgba(0, 255, 230, 0.2) 2px 4px, transparent 4px 7px);
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(255, 0, 90, 0.24) 0 2px,
+    rgba(0, 255, 230, 0.2) 2px 4px,
+    transparent 4px 7px
+  );
   mix-blend-mode: screen;
 }
 .vnstage.fx-glitch .fxg {
@@ -4036,16 +4083,46 @@ body:has(.scene.vn[data-game="drama"]) {
   animation: fxglitch 0.9s steps(1) 2;
 }
 @keyframes fxglitchov {
-  0%, 100% { opacity: 0; }
-  10%, 40%, 70% { opacity: 0.85; }
-  25%, 55% { opacity: 0.25; }
+  0%,
+  100% {
+    opacity: 0;
+  }
+  10%,
+  40%,
+  70% {
+    opacity: 0.85;
+  }
+  25%,
+  55% {
+    opacity: 0.25;
+  }
 }
 @keyframes fxglitch {
-  0%, 60%, 100% { translate: 0 0; filter: none; clip-path: none; }
-  10% { translate: -16px 0; filter: hue-rotate(90deg) saturate(2); }
-  20% { translate: 20px -4px; clip-path: inset(8% 0 52% 0); }
-  30% { translate: -8px 3px; clip-path: none; filter: contrast(1.7); }
-  45% { translate: 14px 0; filter: hue-rotate(-70deg); clip-path: inset(40% 0 20% 0); }
+  0%,
+  60%,
+  100% {
+    translate: 0 0;
+    filter: none;
+    clip-path: none;
+  }
+  10% {
+    translate: -16px 0;
+    filter: hue-rotate(90deg) saturate(2);
+  }
+  20% {
+    translate: 20px -4px;
+    clip-path: inset(8% 0 52% 0);
+  }
+  30% {
+    translate: -8px 3px;
+    clip-path: none;
+    filter: contrast(1.7);
+  }
+  45% {
+    translate: 14px 0;
+    filter: hue-rotate(-70deg);
+    clip-path: inset(40% 0 20% 0);
+  }
 }
 .vnparts {
   position: absolute;
@@ -4071,9 +4148,19 @@ body:has(.scene.vn[data-game="drama"]) {
   animation-name: fxrise;
 }
 @keyframes fxrise {
-  0% { translate: 0 0; opacity: 0; scale: 0.6; }
-  12% { opacity: 1; }
-  100% { translate: calc(var(--k) * 90px) -820px; opacity: 0; scale: 1.15; }
+  0% {
+    translate: 0 0;
+    opacity: 0;
+    scale: 0.6;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    translate: calc(var(--k) * 90px) -820px;
+    opacity: 0;
+    scale: 1.15;
+  }
 }
 .vnparts.petals .part {
   left: var(--x);
@@ -4085,9 +4172,19 @@ body:has(.scene.vn[data-game="drama"]) {
   animation-name: fxfall;
 }
 @keyframes fxfall {
-  0% { translate: 0 0; rotate: var(--r); opacity: 0; }
-  10% { opacity: 0.95; }
-  100% { translate: calc(var(--k) * 160px - 120px) 840px; rotate: 560deg; opacity: 0.8; }
+  0% {
+    translate: 0 0;
+    rotate: var(--r);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.95;
+  }
+  100% {
+    translate: calc(var(--k) * 160px - 120px) 840px;
+    rotate: 560deg;
+    opacity: 0.8;
+  }
 }
 .vnparts.rain .part {
   left: var(--x);
@@ -4100,9 +4197,17 @@ body:has(.scene.vn[data-game="drama"]) {
   animation-iteration-count: 8;
 }
 @keyframes fxrain {
-  0% { translate: 0 0; opacity: 0; }
-  10% { opacity: 1; }
-  100% { translate: -90px 880px; opacity: 0.6; }
+  0% {
+    translate: 0 0;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    translate: -90px 880px;
+    opacity: 0.6;
+  }
 }
 .vnparts.sparkle .part {
   left: var(--x);
@@ -4112,8 +4217,17 @@ body:has(.scene.vn[data-game="drama"]) {
   animation-name: fxtwinkle;
 }
 @keyframes fxtwinkle {
-  0%, 100% { scale: 0; opacity: 0; rotate: 0deg; }
-  50% { scale: 1.1; opacity: 1; rotate: 90deg; }
+  0%,
+  100% {
+    scale: 0;
+    opacity: 0;
+    rotate: 0deg;
+  }
+  50% {
+    scale: 1.1;
+    opacity: 1;
+    rotate: 90deg;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .vnbg,
@@ -4176,7 +4290,9 @@ body:has(.scene.vn[data-game="drama"]) {
   opacity: 0.42;
 }
 @keyframes drift {
-  to { transform: translate(360px, 360px); }
+  to {
+    transform: translate(360px, 360px);
+  }
 }
 /* ---- phones ---- */
 #ph[data-game="drama"] .phtop {
@@ -4207,11 +4323,21 @@ body:has(.scene.vn[data-game="drama"]) {
   border-color: var(--ol);
   color: var(--ol);
 }
-#ph[data-game="drama"] .dsteps span:nth-child(1):is(.done, .now) { background: var(--pk); }
-#ph[data-game="drama"] .dsteps span:nth-child(2):is(.done, .now) { background: var(--og); }
-#ph[data-game="drama"] .dsteps span:nth-child(3):is(.done, .now) { background: var(--yl); }
-#ph[data-game="drama"] .dsteps span:nth-child(4):is(.done, .now) { background: var(--tl); }
-#ph[data-game="drama"] .dsteps span:nth-child(5):is(.done, .now) { background: var(--bl); }
+#ph[data-game="drama"] .dsteps span:nth-child(1):is(.done, .now) {
+  background: var(--pk);
+}
+#ph[data-game="drama"] .dsteps span:nth-child(2):is(.done, .now) {
+  background: var(--og);
+}
+#ph[data-game="drama"] .dsteps span:nth-child(3):is(.done, .now) {
+  background: var(--yl);
+}
+#ph[data-game="drama"] .dsteps span:nth-child(4):is(.done, .now) {
+  background: var(--tl);
+}
+#ph[data-game="drama"] .dsteps span:nth-child(5):is(.done, .now) {
+  background: var(--bl);
+}
 #ph[data-game="drama"] .dsteps span.now {
   height: auto;
   min-height: 26px;
@@ -4236,9 +4362,15 @@ body:has(.scene.vn[data-game="drama"]) {
   color: var(--ol);
   font-weight: 900;
 }
-#ph[data-game="drama"] [data-wstep="1"] .wnum { background: var(--pk); }
-#ph[data-game="drama"] [data-wstep="2"] .wnum { background: var(--og); }
-#ph[data-game="drama"] [data-wstep="3"] .wnum { background: var(--tl); }
+#ph[data-game="drama"] [data-wstep="1"] .wnum {
+  background: var(--pk);
+}
+#ph[data-game="drama"] [data-wstep="2"] .wnum {
+  background: var(--og);
+}
+#ph[data-game="drama"] [data-wstep="3"] .wnum {
+  background: var(--tl);
+}
 #ph[data-game="drama"] .wstep.done:not(.open) .wnum {
   background: var(--tl);
   color: var(--ol);
@@ -4273,8 +4405,12 @@ body:has(.scene.vn[data-game="drama"]) {
     0 0 0 3px var(--pk);
 }
 @keyframes popin {
-  0% { scale: 0.86; }
-  100% { scale: 1; }
+  0% {
+    scale: 0.86;
+  }
+  100% {
+    scale: 1;
+  }
 }
 #ph[data-game="drama"] button:active:not(:disabled) {
   scale: 0.96;
@@ -4311,28 +4447,54 @@ body:has(.scene.vn[data-game="drama"]) {
 #ph[data-game="drama"] .phmain.enter > * {
   animation: bouncein 0.6s cubic-bezier(0.3, 1.4, 0.5, 1) both;
 }
-#ph[data-game="drama"] .phmain.enter > :nth-child(2) { animation-delay: 0.05s; }
-#ph[data-game="drama"] .phmain.enter > :nth-child(3) { animation-delay: 0.1s; }
-#ph[data-game="drama"] .phmain.enter > :nth-child(4) { animation-delay: 0.15s; }
-#ph[data-game="drama"] .phmain.enter > :nth-child(5) { animation-delay: 0.2s; }
-#ph[data-game="drama"] .phmain.enter > :nth-child(6) { animation-delay: 0.25s; }
-#ph[data-game="drama"] .phmain.enter > :nth-child(n + 7) { animation-delay: 0.3s; }
+#ph[data-game="drama"] .phmain.enter > :nth-child(2) {
+  animation-delay: 0.05s;
+}
+#ph[data-game="drama"] .phmain.enter > :nth-child(3) {
+  animation-delay: 0.1s;
+}
+#ph[data-game="drama"] .phmain.enter > :nth-child(4) {
+  animation-delay: 0.15s;
+}
+#ph[data-game="drama"] .phmain.enter > :nth-child(5) {
+  animation-delay: 0.2s;
+}
+#ph[data-game="drama"] .phmain.enter > :nth-child(6) {
+  animation-delay: 0.25s;
+}
+#ph[data-game="drama"] .phmain.enter > :nth-child(n + 7) {
+  animation-delay: 0.3s;
+}
 @keyframes bouncein {
-  from { opacity: 0; translate: 0 40px; scale: 0.92; }
-  60% { translate: 0 -8px; scale: 1.02; }
+  from {
+    opacity: 0;
+    translate: 0 40px;
+    scale: 0.92;
+  }
+  60% {
+    translate: 0 -8px;
+    scale: 1.02;
+  }
 }
 #ph[data-game="drama"] .wstep.open .wbody {
   animation: wexpand 0.38s cubic-bezier(0.3, 1.4, 0.5, 1);
 }
 @keyframes wexpand {
-  from { opacity: 0; translate: 0 -10px; }
+  from {
+    opacity: 0;
+    translate: 0 -10px;
+  }
 }
 /* waiting screens bob, and the dots count */
 #ph[data-game="drama"] .wait .face {
   animation: bob 2.6s ease-in-out infinite;
 }
 @keyframes bob {
-  50% { scale: 1.06; translate: 0 -6px; rotate: 2deg; }
+  50% {
+    scale: 1.06;
+    translate: 0 -6px;
+    rotate: 2deg;
+  }
 }
 #ph[data-game="drama"] .wait h2.ptitle::after {
   content: "";
@@ -4342,10 +4504,18 @@ body:has(.scene.vn[data-game="drama"]) {
   animation: dots 1.6s steps(1) infinite;
 }
 @keyframes dots {
-  0% { content: ""; }
-  25% { content: "."; }
-  50% { content: ".."; }
-  75% { content: "..."; }
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75% {
+    content: "...";
+  }
 }
 /* a burst of confetti from a button you press */
 .cf {
@@ -4399,19 +4569,46 @@ body:has(.scene.vn[data-game="drama"]) {
   box-shadow: 0 8px 0 var(--ol);
   animation: popcard 0.7s cubic-bezier(0.3, 1.5, 0.5, 1) both;
 }
-.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 1) { background: var(--pk); }
-.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 2) { background: var(--yl); }
-.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 3) { background: var(--tl); }
-.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 4) { background: var(--og); }
-.scene[data-game="drama"]:not(.vn) .opt:nth-child(odd) { --tilt: -1.4deg; }
-.scene[data-game="drama"]:not(.vn) .opt:nth-child(even) { --tilt: 1.2deg; }
-.scene[data-game="drama"]:not(.vn) .opt:nth-child(2) { animation-delay: 0.1s; }
-.scene[data-game="drama"]:not(.vn) .opt:nth-child(3) { animation-delay: 0.2s; }
-.scene[data-game="drama"]:not(.vn) .opt:nth-child(4) { animation-delay: 0.3s; }
-.scene[data-game="drama"]:not(.vn) .opt:nth-child(n + 5) { animation-delay: 0.4s; }
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 1) {
+  background: var(--pk);
+}
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 2) {
+  background: var(--yl);
+}
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 3) {
+  background: var(--tl);
+}
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 4) {
+  background: var(--og);
+}
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(odd) {
+  --tilt: -1.4deg;
+}
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(even) {
+  --tilt: 1.2deg;
+}
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(2) {
+  animation-delay: 0.1s;
+}
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(3) {
+  animation-delay: 0.2s;
+}
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(4) {
+  animation-delay: 0.3s;
+}
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(n + 5) {
+  animation-delay: 0.4s;
+}
 @keyframes popcard {
-  from { opacity: 0; translate: 0 50px; scale: 0.8; rotate: 0deg; }
-  to { rotate: var(--tilt, 0deg); }
+  from {
+    opacity: 0;
+    translate: 0 50px;
+    scale: 0.8;
+    rotate: 0deg;
+  }
+  to {
+    rotate: var(--tilt, 0deg);
+  }
 }
 .scene[data-game="drama"]:not(.vn) .opt {
   rotate: var(--tilt, 0deg);
@@ -4443,7 +4640,9 @@ body:has(.scene.vn[data-game="drama"]) {
   animation: tickpop 0.45s cubic-bezier(0.3, 1.8, 0.5, 1) both;
 }
 @keyframes tickpop {
-  from { scale: 0; }
+  from {
+    scale: 0;
+  }
 }
 .dprog .pips i {
   height: 12px;
@@ -4488,10 +4687,18 @@ body:has(.scene.vn[data-game="drama"]) {
   color: var(--ol);
   box-shadow: 0 6px 0 var(--ol);
 }
-#ph[data-game="drama"] .choice:nth-of-type(4n + 1) { background: var(--pk); }
-#ph[data-game="drama"] .choice:nth-of-type(4n + 2) { background: var(--yl); }
-#ph[data-game="drama"] .choice:nth-of-type(4n + 3) { background: var(--tl); }
-#ph[data-game="drama"] .choice:nth-of-type(4n + 4) { background: var(--og); }
+#ph[data-game="drama"] .choice:nth-of-type(4n + 1) {
+  background: var(--pk);
+}
+#ph[data-game="drama"] .choice:nth-of-type(4n + 2) {
+  background: var(--yl);
+}
+#ph[data-game="drama"] .choice:nth-of-type(4n + 3) {
+  background: var(--tl);
+}
+#ph[data-game="drama"] .choice:nth-of-type(4n + 4) {
+  background: var(--og);
+}
 #ph[data-game="drama"] .choice small {
   color: rgba(26, 18, 48, 0.82);
   opacity: 1;
@@ -4528,11 +4735,15 @@ body:has(.scene.vn[data-game="drama"]) {
   background: var(--bg);
 }
 body.play:has(#ph[data-game="drama"]) {
-  background: var(--dots) 0 0 / 22px 22px, var(--bg);
+  background:
+    var(--dots) 0 0 / 22px 22px,
+    var(--bg);
   background-attachment: fixed;
 }
 .tvc[data-game="drama"] {
-  background: var(--dots) 0 0 / 30px 30px, var(--bg);
+  background:
+    var(--dots) 0 0 / 30px 30px,
+    var(--bg);
 }
 /* easy to hit with a thumb */
 #ph[data-game="drama"] .fxrow button,

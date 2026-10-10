@@ -176,9 +176,13 @@
           tone(200, t, 0.5, { type: 'triangle', vol: 0.12, glide: 4 });
           noise(t + 0.3, 0.2, { vol: 0.16, freq: 800, q: 0.7 });
         } else if (name === 'blur') {
-          [0, 0.18, 0.36].forEach((a, i) => note(i % 2 ? 7 : 0, a, 0.5, { type: 'sine', vol: 0.07, glide: 0.97 }));
+          [0, 0.18, 0.36].forEach((a, i) =>
+            note(i % 2 ? 7 : 0, a, 0.5, { type: 'sine', vol: 0.07, glide: 0.97 }),
+          );
         } else if (name === 'sepia') {
-          [7, 12, 16, 12].forEach((s, i) => note(s, i * 0.18, 0.5, { type: 'triangle', vol: 0.09 }));
+          [7, 12, 16, 12].forEach((s, i) =>
+            note(s, i * 0.18, 0.5, { type: 'triangle', vol: 0.09 }),
+          );
         } else if (name === 'hop') {
           note(12, 0, 0.1, { type: 'square', vol: 0.06 });
           note(19, 0.12, 0.12, { type: 'square', vol: 0.06 });
@@ -186,7 +190,9 @@
           noise(t, 0.45, { vol: 0.25, freq: 3000, q: 0.5, sweep: 0.2 });
           tone(1200, t, 0.3, { type: 'sawtooth', vol: 0.05, glide: 0.3 });
         } else if (name === 'sparkle') {
-          [19, 24, 28, 31, 36].forEach((s, i) => note(s, i * 0.07, 0.4, { type: 'sine', vol: 0.07 }));
+          [19, 24, 28, 31, 36].forEach((s, i) =>
+            note(s, i * 0.07, 0.4, { type: 'sine', vol: 0.07 }),
+          );
         } else if (name === 'hearts') {
           note(12, 0, 0.5, { type: 'sine', vol: 0.09 });
           note(16, 0.14, 0.6, { type: 'sine', vol: 0.09 });

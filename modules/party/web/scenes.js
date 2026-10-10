@@ -315,7 +315,22 @@
   // -- effects: a line's screen effects play as classes on a stage (CSS in party.css), plus a few
   // made of particles (hearts, petals, rain, sparkles). The big screen and the phones' previews
   // share this.
-  const FX_KEYS = ['shake', 'flash_red', 'flash_white', 'blackout', 'zoom', 'blur', 'sepia', 'hop', 'speed', 'sparkle', 'hearts', 'petals', 'rain', 'glitch'];
+  const FX_KEYS = [
+    'shake',
+    'flash_red',
+    'flash_white',
+    'blackout',
+    'zoom',
+    'blur',
+    'sepia',
+    'hop',
+    'speed',
+    'sparkle',
+    'hearts',
+    'petals',
+    'rain',
+    'glitch',
+  ];
   const PARTS = {
     hearts: { glyph: '♥', n: 24, life: [2.6, 4.2] },
     petals: { glyph: '', n: 24, life: [4, 6.5] },
