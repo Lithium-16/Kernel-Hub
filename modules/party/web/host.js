@@ -284,7 +284,7 @@
       return `<div class="scene vn" data-game="drama"><div class="vncredroll"><div class="roll">
         <span class="tag">The end</span><h2 class="big">${esc(v.theme)}</h2>
         <h3>Starring</h3>
-        <div class="dcastwall">${cr.characters.map((c, i) => `<div><canvas class="art" width="400" height="400" data-cycle="${i}"></canvas><span class="moodtag" data-moodtag="${i}"></span><b>${esc(c.name)}</b><small>invented by ${esc(nameOf(c.creator))}<br>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>
+        <div class="dcastwall">${cr.characters.map((c, i) => `<div><div class="moodstage"><canvas class="art on" width="400" height="400" data-cycle="${i}"></canvas><canvas class="art" width="400" height="400" data-cycle2="${i}"></canvas></div><span class="moodtag" data-moodtag="${i}"></span><b>${esc(c.name)}</b><small>invented by ${esc(nameOf(c.creator))}<br>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>
         <h3>Written by</h3>
         <p class="sub">${cr.writers.map((w, i) => `Chapter ${i + 1}: <b>${esc(nameOf(w))}</b>`).join(' · ')}</p>
       </div></div></div>`;
@@ -347,25 +347,34 @@
     stopCredits();
     const D = window.PartyDraw;
     const tiles = cr.characters.map((c, i) => ({
-      canvas: document.querySelector(`canvas[data-cycle="${i}"]`),
+      canvases: [
+        document.querySelector(`canvas[data-cycle="${i}"]`),
+        document.querySelector(`canvas[data-cycle2="${i}"]`),
+      ],
       tag: document.querySelector(`[data-moodtag="${i}"]`),
       moods: c.moods && c.moods.length ? c.moods : [{ name: 'neutral', face: c.face }],
       at: i, // start on different moods, so they don't all change at once
+      front: 0,
     }));
-    const show = (t) => {
+    // each change draws the next mood on the hidden canvas, then fades it in over the other one
+    const show = (t, first) => {
       const m = t.moods[t.at % t.moods.length];
-      if (t.canvas) D.render(t.canvas, m.face);
+      if (!first) t.front = 1 - t.front;
+      const [on, off] = [t.canvases[t.front], t.canvases[1 - t.front]];
+      if (on) D.render(on, m.face);
+      on?.classList.add('on');
+      off?.classList.remove('on');
       if (t.tag) t.tag.textContent = t.moods.length > 1 ? m.name : '';
     };
-    tiles.forEach(show);
+    tiles.forEach((t) => show(t, true));
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     creditsTimer = setInterval(() => {
       if (!document.querySelector('canvas[data-cycle]')) return stopCredits();
       for (const t of tiles) {
         t.at++;
-        show(t);
+        show(t, false);
       }
-    }, 900);
+    }, 1100);
   }
   // A line's effects (screen shake, flashes…) are classes on the stage, any number at once. They
   // are set when the line appears and stay until the next one, so Flashback lasts as long as the line.

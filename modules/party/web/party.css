@@ -3493,3 +3493,92 @@ body.play {
 .dfx {
   min-width: 0;
 }
+
+/* Credits: tiles line up, moods cross-fade inside a fixed stage, the mood name sits in a pill */
+.dcastwall > div {
+  align-content: start;
+  justify-items: center;
+  min-height: 330px;
+  gap: 6px;
+}
+.dcastwall .moodstage {
+  position: relative;
+  width: 130px;
+  height: 130px;
+  padding: 0;
+  gap: 0;
+  border-radius: 0;
+  background: none;
+  display: block;
+  min-height: 0;
+}
+.dcastwall .moodstage canvas {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+.dcastwall .moodstage canvas.on {
+  opacity: 1;
+}
+.dcastwall .moodtag {
+  min-width: 70px;
+  min-height: 22px;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--acc, #7a45d1) 16%, #fff);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
+.dcastwall > div > b {
+  min-height: 2.4em;
+  display: grid;
+  align-items: center;
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dcastwall .moodstage canvas {
+    transition: none;
+  }
+}
+
+/* Rows that scroll sideways fade out on the right while there's more to see */
+.sfade {
+  --sf: var(--card, var(--surface));
+  position: relative;
+}
+.sfade.onbg {
+  --sf: var(--bg);
+}
+.sfade::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 36px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--sf));
+  transition: opacity 0.2s;
+}
+.sfade.end::after {
+  opacity: 0;
+}
+
+/* The write step's send bar: slimmer, and it says what's still missing */
+.phfoot.slim {
+  padding-top: 8px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+}
+.phfoot.slim .big-btn {
+  min-height: 46px;
+  padding-block: 6px;
+  font-size: 18px;
+}
+.big-btn.pending {
+  background: var(--surface);
+  color: var(--muted);
+  border: 2px dashed var(--line);
+  box-shadow: none;
+}
