@@ -440,7 +440,7 @@
   const speakerName = (who) =>
     who === 'n' ? 'Narrator' : (dJob.cast.find((c) => c.pid === who) || { name: '?' }).name;
   function lineRows() {
-    if (!dCast.length) return '<p class="pnote">Pick who\'s in your chapter first (up to 2).</p>';
+    if (!dCast.length) return '<p class="pnote">Pick who\'s in your chapter first.</p>';
     const who = [...dCast, 'n'];
     return `${dLines
       .map(
@@ -456,7 +456,7 @@
                   )
                   .join('')}</div>`
           }
-          <div class="row"><input data-ltext="${i}" maxlength="80" autocomplete="off" aria-label="Line ${i + 1}" placeholder="${ln.who === 'n' ? 'What happens…' : 'What they say…'}" value="${esc(ln.text)}">${dLines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line ${i + 1}">×</button>` : ''}</div>
+          <div class="row"><textarea data-ltext="${i}" maxlength="400" rows="1" autocomplete="off" aria-label="Line ${i + 1}" placeholder="${ln.who === 'n' ? 'What happens…' : 'What they say…'}">${esc(ln.text)}</textarea>${dLines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line ${i + 1}">×</button>` : ''}</div>
         </div>`,
       )
       .join('')}
@@ -489,8 +489,8 @@
         key: base,
         main: `${top}<h2 class="ptitle">What's tonight's story about?</h2>
           <p class="pnote">Pitch a theme and the problem the story is about. Then the room votes. Idea: ${esc(v.idea || 'anything dramatic')}</p>
-          <div class="field"><label for="f-theme">Your theme</label><input id="f-theme" maxlength="50" autocomplete="off" placeholder="A haunted bakery"></div>
-          <div class="field"><label for="f-problem">The problem: what goes wrong?</label><input id="f-problem" maxlength="70" autocomplete="off" placeholder="Someone stole every croissant"></div>`,
+          <div class="field"><label for="f-theme">Your theme</label><input id="f-theme" maxlength="120" autocomplete="off" placeholder="A haunted bakery"></div>
+          <div class="field"><label for="f-problem">The problem: what goes wrong?</label><input id="f-problem" maxlength="160" autocomplete="off" placeholder="Someone stole every croissant"></div>`,
         foot: '<button class="big-btn" type="button" data-act="theme">Pitch it</button>',
         input: true,
       };
@@ -526,9 +526,9 @@
         key: base,
         main: `${top}<h2 class="ptitle">Invent a character</h2>
           <p class="pnote">Don't draw them: describe them. Someone else draws them, and you'll see the result in the show. Theme: <b>${esc(v.theme)}</b></p>
-          <div class="field"><label for="f-cname">Name</label><input id="f-cname" maxlength="18" autocomplete="off" placeholder="Vlad"></div>
-          <div class="field"><label for="f-clook">What they look like</label><input id="f-clook" maxlength="60" autocomplete="off" placeholder="tall vampire, tiny chef hat, flour everywhere"></div>
-          <div class="field"><label for="f-cpers">Personality</label><input id="f-cpers" maxlength="50" autocomplete="off" placeholder="nervous about literally everything"></div>`,
+          <div class="field"><label for="f-cname">Name</label><input id="f-cname" maxlength="24" autocomplete="off" placeholder="Vlad"></div>
+          <div class="field"><label for="f-clook">What they look like</label><input id="f-clook" maxlength="200" autocomplete="off" placeholder="tall vampire, tiny chef hat, flour everywhere"></div>
+          <div class="field"><label for="f-cpers">Personality</label><input id="f-cpers" maxlength="160" autocomplete="off" placeholder="nervous about literally everything"></div>`,
         foot: '<button class="big-btn" type="button" data-act="create">Send them in</button>',
         input: true,
       };
@@ -597,7 +597,7 @@
           <div class="card dpart"><span class="kicker">${esc(label)}</span><span>${esc(hint)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b>. The problem: <b>${esc(v.problem)}</b></span></div>
           ${sofar || '<p class="pnote"><b>You start the story!</b></p>'}
           <p class="pnote">One sentence that carries on from the story so far. Starring ${v.cast.map((c) => `<b>${esc(c.name)}</b>`).join(', ')}.</p>
-          <div class="field"><label for="f-headline">Chapter ${ch.number}'s headline</label><input id="f-headline" maxlength="80" enterkeyhint="send" autocomplete="off" placeholder="Vlad gets blamed for the missing croissants"></div>`,
+          <div class="field"><label for="f-headline">Chapter ${ch.number}'s headline</label><input id="f-headline" maxlength="200" enterkeyhint="send" autocomplete="off" placeholder="Vlad gets blamed for the missing croissants"></div>`,
         foot: '<button class="big-btn" type="button" data-act="headline">Send headline</button>',
         input: true,
       };
@@ -622,11 +622,12 @@
           <div class="card dpart"><span class="kicker">${esc(label)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b>. The problem: <b>${esc(v.problem)}</b></span>
             ${outlineList(ch.outline, ch.number)}
             <span class="pnote">${esc(hint)} Get the story from the chapter before into the one after.</span></div>
-          <h3 class="dhead">Who's in it? <small>(up to 2)</small></h3>
+          <h3 class="dhead">Who's in it? <small>(as many as you like)</small></h3>
           <div class="dcastpick">${v.cast.map((c) => `<button type="button" data-dcast="${esc(c.pid)}" aria-pressed="${dCast.includes(c.pid)}"><b>${esc(c.name)}</b><span>${esc(c.look || '')}</span>${c.personality ? `<i>${esc(c.personality)}</i>` : ''}</button>`).join('')}</div>
           <h3 class="dhead">Where?</h3>
           <div class="bgpick row">${v.backgrounds.map((b) => `<button type="button" data-bg="${b}" aria-pressed="${b === dBg}" aria-label="${esc(S.LABELS[b])}">${S.svg(b, '', true)}<span>${esc(S.LABELS[b])}</span></button>`).join('')}</div>
           <h3 class="dhead">Your chapter</h3>
+          <p class="pnote">Tip: put actions between asterisks, like <b>*slams the door*</b>.</p>
           <div id="dlines"></div>`,
         foot: '<button class="big-btn" type="button" data-act="sendchapter">Send my chapter</button>',
         after: () => {
@@ -647,7 +648,10 @@
             `Chapter ${v.number} of ${v.of}`,
             v.yours ? "This one's yours! Watch their faces." : 'Watch the big screen!',
           ),
-        foot: skipBtn(),
+        // the show moves on when the host clicks the big screen, or when the VIP taps here
+        foot: isVip()
+          ? `<button class="big-btn" type="button" data-send='{"type":"next"}'>Next line ▸</button>${skipBtn()}`
+          : '',
       };
     if (v.phase === 'credits')
       return {
@@ -972,6 +976,43 @@
   applyZoom();
   setInterval(paintTimer, 250);
 
+  // Drama Club: what's typed or drawn but not sent yet goes to the server every so often, so
+  // if time runs out it's used as it is instead of a stand-in.
+  let lastDraft = '';
+  function draftNow() {
+    const v = st && st.room.state === 'playing' && st.view;
+    if (!v || v.game !== 'drama') return null;
+    const val = (id) => ($(id) ? $(id).value.trim() : '');
+    if (v.phase === 'pitch' && !v.mine && val('f-theme'))
+      return { text: val('f-theme'), problem: val('f-problem') };
+    if (v.phase === 'create' && !v.character.name && val('f-cname'))
+      return { name: val('f-cname'), look: val('f-clook'), personality: val('f-cpers') };
+    if (v.phase === 'draw' && pad && !pad.empty() && dEmo in MOODS)
+      return { emotion: dEmo, strokes: pad.strokes() };
+    if (v.phase === 'headline' && v.chapter.turn === 'now' && val('f-headline'))
+      return { text: val('f-headline') };
+    if (v.phase === 'write' && !v.chapter.done && dLines && dLines.some((ln) => ln.text.trim()))
+      return {
+        bg: dBg,
+        cast: dCast || [],
+        lines: dLines.map((ln) => ({
+          who: ln.who === 'n' ? 2 : (dCast || []).indexOf(ln.who),
+          emotion: ln.emotion,
+          text: ln.text.trim(),
+        })),
+      };
+    return null;
+  }
+  setInterval(() => {
+    const d = draftNow();
+    if (!d) return;
+    const msg = JSON.stringify({ type: 'draft', ...d });
+    if (msg !== lastDraft) {
+      lastDraft = msg;
+      send(JSON.parse(msg));
+    }
+  }, 1500);
+
   function showErr(text) {
     let e = $('main').querySelector('.err');
     if (!e) {
@@ -1176,8 +1217,7 @@
     } else if (b.dataset.dcast && dCast) {
       const c = b.dataset.dcast;
       if (dCast.includes(c)) dCast = dCast.filter((x) => x !== c);
-      else if (dCast.length < 2) dCast.push(c);
-      else return showErr('Up to 2 characters per chapter. Tap one to take them out.');
+      else dCast.push(c);
       // lines spoken by someone who left go to whoever's still here
       for (const ln of dLines)
         if (ln.who !== 'n' && !dCast.includes(ln.who)) ln.who = dCast[0] || 'n';

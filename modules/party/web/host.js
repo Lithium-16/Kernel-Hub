@@ -257,16 +257,16 @@
       );
     if (v.phase === 'show') {
       const ch = v.chapter;
-      const one = ch.cast.length === 1;
       const hl = ch.headline ? `<p class="sub dhl">${esc(ch.headline)}</p>` : '';
       const card =
         ch.index === 0
           ? `<span class="tag">Tonight's novel</span><h2 class="big">${esc(v.theme)}</h2><p class="sub dchap">Chapter 1 · The beginning</p>${hl}`
           : `<span class="tag">${esc(v.theme)}</span><h2 class="big">Chapter ${ch.index + 1}</h2>${PART[ch.part] ? `<p class="sub dchap">${PART[ch.part]}</p>` : ''}${hl}`;
       return `<div class="scene vn" data-game="drama"><div class="vnstage">${S.svg(ch.bg, 'vnbg')}
-        ${ch.cast.map((_, k) => `<canvas class="sprite ${one ? 'c' : k ? 'r' : 'l'}" width="400" height="400" id="sp${k}"></canvas>`).join('')}
+        ${ch.cast.map((_, k) => `<canvas class="sprite ${spot(k, ch.cast.length)}" width="400" height="400" id="sp${k}"${crowd(k, ch.cast.length)}></canvas>`).join('')}
         <div class="vnbox" id="vnbox" hidden><div class="plate" id="vnplate"></div><p id="vntext"></p></div>
         <div class="vnchap" aria-hidden="true">Ch. ${ch.index + 1} of ${ch.of}</div>
+        <div class="vnnext" aria-hidden="true">Click or press Space ▸</div>
         <div class="vncard" id="vncard">${card}</div>
       </div></div>`;
     }
@@ -286,70 +286,121 @@
     return scores(v, T);
   }
 
-  // The visual-novel player for one chapter: its title card, then the cast walks on, each line
-  // types out and the speaker's sprite switches to the line's mood.
+  // Where each character stands: one in the middle, two left and right, a crowd spread across.
+  const spot = (k, n) => (n === 1 ? 'c' : n === 2 ? (k ? 'r' : 'l') : 'n');
+  function crowd(k, n) {
+    if (n <= 2) return '';
+    const w = Math.max(210, Math.min(380, 1180 / n));
+    const gap = (1280 - n * w) / (n + 1);
+    return ` style="left:${Math.round(gap + k * (w + gap))}px;width:${Math.round(w)}px;height:${Math.round(w)}px"`;
+  }
+  // The visual-novel player for one chapter. The host clicks through it: line -1 is the
+  // chapter's title card, then each click shows the next line (typed out, the speaker's sprite in
+  // the line's mood). Text between *asterisks* is an action, shown in its own style.
   let vnTimers = [];
+  let vn = null; // {ch, line, cur: moods}
   function stopVN() {
     for (const t of vnTimers) clearTimeout(t);
     vnTimers = [];
   }
+  /** A line split into plain text and *actions*, without the asterisks. */
+  function parts(text) {
+    const out = [];
+    const re = /\*([^*]+)\*/g;
+    let last = 0;
+    for (const m of text.matchAll(re)) {
+      if (m.index > last) out.push({ t: text.slice(last, m.index), act: false });
+      out.push({ t: m[1], act: true });
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) out.push({ t: text.slice(last), act: false });
+    return out;
+  }
+  /** The first n letters of a line, as HTML with the actions styled. */
+  function richUpTo(segs, n) {
+    let left = n;
+    let html = '';
+    for (const sg of segs) {
+      if (left <= 0) break;
+      const t = sg.t.slice(0, left);
+      left -= t.length;
+      html += sg.act ? `<em class="act">${esc(t)}</em>` : esc(t);
+    }
+    return html;
+  }
   function playVN(ch) {
+    vn = { ch, line: -2, cur: ch.cast.map(() => 'neutral') };
+    vnLine(ch.line);
+  }
+  function vnLine(line) {
+    if (!vn || line === vn.line) return;
     const D = window.PartyDraw;
+    const { ch } = vn;
+    stopVN();
     const at = (ms, f) => vnTimers.push(setTimeout(f, ms));
     const faces = ch.cast.map((c) => c.faces || {});
-    const names = ch.cast.map((c) => c.name);
+    // everyone's mood as of this line (the page may have been reloaded mid-chapter)
     const cur = ch.cast.map(() => 'neutral');
-    const show = (k, want, speaking) => {
+    for (const ln of ch.lines.slice(0, Math.max(0, line + 1)))
+      if (ln.who !== 2 && cur[ln.who] !== undefined) cur[ln.who] = ln.emotion;
+    const moved =
+      vn.line >= -1 &&
+      line >= 0 &&
+      ch.lines[line] &&
+      ch.lines[line].who !== 2 &&
+      vn.cur[ch.lines[line].who] !== cur[ch.lines[line].who];
+    vn.line = line;
+    vn.cur = cur;
+    ch.cast.forEach((_, k) => {
+      const c = $(`sp${k}`);
+      if (c) D.render(c, faces[k][cur[k]] || faces[k].neutral || []);
+    });
+    const card = $('vncard');
+    const box = $('vnbox');
+    if (line < 0) {
+      card?.classList.remove('gone');
+      if (box) box.hidden = true;
+      return;
+    }
+    card?.classList.add('gone');
+    ch.cast.forEach((_, k) => $(`sp${k}`)?.classList.add('in'));
+    const ln = ch.lines[line];
+    if (!ln || !box) return;
+    box.hidden = false;
+    const narr = ln.who === 2;
+    const segs = parts(ln.text);
+    const len = segs.reduce((n, sg) => n + sg.t.length, 0);
+    box.classList.toggle('narrator', narr);
+    box.classList.toggle('long', len > 120);
+    box.classList.toggle('longer', len > 240);
+    $('vnplate').textContent = narr ? '' : ch.cast[ln.who].name;
+    ch.cast.forEach((_, k) => {
       const c = $(`sp${k}`);
       if (!c) return;
-      const mood = want === 'keep' ? cur[k] : want;
-      if (speaking && mood !== cur[k]) S().whoosh();
-      cur[k] = mood;
-      D.render(c, faces[k][mood] || faces[k].neutral || []);
-      c.classList.toggle('dim', speaking === false);
-      if (speaking) {
+      c.classList.toggle('dim', !narr && k !== ln.who);
+      if (!narr && k === ln.who) {
         c.classList.remove('pop');
         void c.offsetWidth;
         c.classList.add('pop');
       }
+    });
+    if (moved) S().whoosh();
+    const text = $('vntext');
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      text.innerHTML = richUpTo(segs, len);
+      return;
+    }
+    let n = 0;
+    const voice = narr ? 1 : ln.who * 2;
+    const flat = segs.map((sg) => sg.t).join('');
+    const type = () => {
+      if (!text.isConnected) return;
+      n++;
+      text.innerHTML = richUpTo(segs, n);
+      if (n % 2 === 1 && flat[n - 1] !== ' ') S().blip(voice);
+      if (n < len) at(22, type);
     };
-    ch.cast.forEach((_, k) => show(k, 'neutral'));
-    // the same pacing as DramaClub._show_s and line_s on the server
-    const title = ch.index === 0 ? 6500 : 3500;
-    at(title, () => {
-      $('vncard')?.classList.add('gone');
-      ch.cast.forEach((_, k) => $(`sp${k}`)?.classList.add('in'));
-    });
-    const lineMs = (ln) => 1600 + 45 * ln.text.length;
-    let when = title + 700;
-    ch.lines.forEach((ln) => {
-      const start = when;
-      when += lineMs(ln);
-      at(start, () => {
-        const box = $('vnbox');
-        if (!box) return;
-        box.hidden = false;
-        const narr = ln.who === 2;
-        box.classList.toggle('narrator', narr);
-        $('vnplate').textContent = narr ? '' : names[ln.who];
-        if (!narr) {
-          show(ln.who, ln.emotion, true);
-          ch.cast.forEach((_, k) => k !== ln.who && show(k, 'keep', false));
-        } else ch.cast.forEach((_, k) => $(`sp${k}`)?.classList.remove('dim'));
-        const text = $('vntext');
-        let n = 0;
-        const voice = narr ? 1 : ln.who * 2;
-        const type = () => {
-          if (!text.isConnected) return;
-          n++;
-          text.textContent = ln.text.slice(0, n);
-          if (n % 2 === 1 && ln.text[n - 1] !== ' ') S().blip(voice);
-          if (n < ln.text.length) at(28, type);
-        };
-        if (matchMedia('(prefers-reduced-motion: reduce)').matches) text.textContent = ln.text;
-        else type();
-      });
-    });
+    type();
   }
 
   function shirtGame(v) {
@@ -541,6 +592,8 @@
       lastContent = content;
       lastScene = scene;
     }
+    if (v && v.game === 'drama' && v.phase === 'show' && scene === lastScene)
+      vnLine(v.chapter.line);
     paintTimer();
     controls();
   }
@@ -602,6 +655,18 @@
       S().set('music', !off);
       controls();
     }
+    if ([' ', 'Enter', 'ArrowRight'].includes(e.key) && vnOn()) {
+      e.preventDefault();
+      nextLine();
+    }
+  });
+  // Drama Club's show: the host clicks (or presses Space) through it, line by line.
+  const vnOn = () => st && st.view && st.view.game === 'drama' && st.view.phase === 'show';
+  function nextLine() {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'next' }));
+  }
+  $('tvc').addEventListener('click', (e) => {
+    if (vnOn() && !e.target.closest('button')) nextLine();
   });
   setInterval(paintTimer, 250);
   // In the lobby, show the hall of fame for 10 seconds out of every 25.

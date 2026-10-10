@@ -172,14 +172,14 @@ def test_writing_a_chapter():
     assert v["chapter"]["part"] == g.part(g.chapter_of("p0"))
     with pytest.raises(Invalid, match="background"):
         g.handle("p0", chapter(["p1"], bg="moon"), 1.0)
-    with pytest.raises(Invalid, match="one or two"):
-        g.handle("p0", chapter(["p1", "p2", "p0"]), 1.0)
-    with pytest.raises(Invalid, match="one or two"):
+    with pytest.raises(Invalid, match="who's in"):
+        g.handle("p0", chapter([]), 1.0)
+    with pytest.raises(Invalid, match="who's in"):
         g.handle("p0", chapter(["p1", "p1"]), 1.0)
     with pytest.raises(Invalid, match="who says"):  # one character: speaker 1 doesn't exist
         g.handle("p0", chapter(["p1"], [{"who": 1, "emotion": "sad", "text": "hi"}]), 1.0)
     with pytest.raises(Invalid, match="At most"):
-        g.handle("p0", chapter(["p1"], [{"who": 0, "emotion": "sad", "text": "hi"}] * 7), 1.0)
+        g.handle("p0", chapter(["p1"], [{"who": 0, "emotion": "sad", "text": "hi"}] * (DramaClub.MAX_LINES + 1)), 1.0)
     g.handle("p0", chapter(["p2", "p1"], [{"who": NARRATOR, "emotion": "neutral", "text": "Midnight."},
                                          {"who": 1, "emotion": "flustered", "text": "Oh no."}]), 1.0)
     ch = g.chapters[g.chapter_of("p0")]
@@ -261,3 +261,76 @@ def test_characters_are_listed_in_their_own_random_order():
         assert sorted(listed) == sorted(pids)
         same_as_seats += listed == g.order or listed == pids
     assert same_as_seats <= 2  # not the seating order, which would give away who drew whom
+
+
+def test_unsent_work_is_used_when_time_runs_out():
+    pids, g = drama(4)
+    g.handle("p0", {"type": "draft", "text": "A haunted bakery", "problem": "Croissants are missing"}, 1.0)
+    g.tick(1000.0)  # pitch time's up: p0's draft counts as their pitch
+    assert g.themes["p0"] == "A haunted bakery" and g.problems["p0"] == "Croissants are missing"
+    play_to(g, "create")
+    for p in pids[1:]:
+        g.handle(p, g.bot_move(p), 1.0)
+    g.handle("p0", {"type": "draft", "name": "Vlad", "look": "cape"}, 1.0)
+    g.tick(2000.0)
+    assert g.phase == "draw" and g.characters["p0"].name == "Vlad" and g.characters["p0"].look == "cape"
+    artist = g.characters["p0"].artist
+    g.handle(artist, {"type": "draft", "emotion": "sad", "strokes": LINE}, 1.0)
+    g.tick(3000.0)
+    assert g.characters["p0"].faces["sad"] == LINE  # the mood left on the pad was kept
+    assert g.phase == "headline"
+    head = g.chapters[0].headliner
+    g.handle(head, {"type": "draft", "text": "Vlad gets blamed"}, 1.0)
+    g.tick(4000.0)
+    assert g.chapters[0].headline == "Vlad gets blamed"
+    t = 4000.0
+    while g.phase == "headline":  # the rest of the relay times out, turn by turn
+        t += 1000.0
+        g.tick(t)
+    writer = g.chapters[1].writer
+    g.handle(writer, {"type": "draft", "bg": "cafe", "cast": ["p0", "nobody"], "lines": [
+        {"who": 0, "emotion": "angry", "text": "Who ate it?"},
+        {"who": 1, "emotion": "sad", "text": "not me"},  # speaker 1 isn't in the cast: narrator
+        {"who": 0, "emotion": "sad", "text": "   "},  # blank: dropped
+    ]}, 1.0)
+    g.tick(t + 10_000.0)
+    ch = g.chapters[1]
+    assert g.phase == "show" and ch.bg == "cafe" and ch.cast == ["p0"]
+    assert ch.lines == [{"who": 0, "emotion": "angry", "text": "Who ate it?"},
+                        {"who": NARRATOR, "emotion": "sad", "text": "not me"}]
+
+
+def test_a_sent_answer_beats_the_draft_and_late_drafts_are_ignored():
+    pids, g = drama(3)
+    g.handle("p0", {"type": "draft", "text": "draft theme"}, 1.0)
+    g.handle("p0", {"type": "theme", "text": "sent theme"}, 1.0)
+    g.tick(1000.0)
+    assert g.themes["p0"] == "sent theme"
+    play_to(g, "show")
+    g.handle("p0", {"type": "draft", "text": "too late"}, 1.0)  # no error, nothing stored
+    assert ("show", "p0") not in g.drafts
+
+
+def test_a_chapter_can_use_the_whole_cast_and_long_lines():
+    pids, g = drama(5)
+    play_to(g, "write")
+    long = "and then " * 30  # 270 letters of narration
+    lines = [{"who": k, "emotion": "neutral", "text": f"line {k}"} for k in range(5)]
+    lines += [{"who": NARRATOR, "emotion": "neutral", "text": long}] * 10
+    g.handle("p0", chapter(pids, lines), 1.0)  # all five characters, 15 lines
+    ch = g.chapters[g.chapter_of("p0")]
+    assert ch.cast == pids and len(ch.lines) == 15 and ch.lines[-1]["text"] == long.strip()
+
+
+def test_the_show_waits_for_the_host_line_by_line():
+    pids, g = drama(3)
+    play_to(g, "show")
+    assert g.deadline is None and g.line == -1  # the title card, until the host clicks
+    g.tick(1e9)
+    assert g.phase == "show" and g.showing == 0
+    n = len(g.chapters[0].lines)
+    for k in range(n):
+        g.next_line(1.0)
+        assert g.host_view(1.0)["chapter"]["line"] == k
+    g.next_line(1.0)  # past the last line: the next chapter, from its title card
+    assert g.showing == 1 and g.line == -1
