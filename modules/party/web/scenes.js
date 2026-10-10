@@ -303,10 +303,11 @@
     train_beach: 'Train by the sea',
     onsen: 'Hot spring',
   };
-  /** The scene as an <svg> string (falls back to the classroom). small: a thumbnail, for phones. */
+  /** The scene as an <svg> string (falls back to the classroom). small: a thumbnail, for phones. A key like u:<id> is an uploaded picture. */
   const svg = (key, cls = '', small = false) => {
-    const inner =
-      key in PHOTOS
+    const inner = key.startsWith('u:') // a background a player uploaded (the id is hex)
+      ? `<image href="/ubg/${key.slice(2).replace(/[^0-9a-f]/g, '')}" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>`
+      : key in PHOTOS
         ? `<image href="/bg/${key}${small ? '.thumb' : ''}.webp" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>`
         : (SCENES[key] || SCENES.classroom)();
     return `<svg class="${cls}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${inner}</svg>`;

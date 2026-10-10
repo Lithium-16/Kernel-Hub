@@ -4,7 +4,13 @@
   const KEY = new URLSearchParams(location.search).get('key') || '';
   const GLYPH = { quip: 'Q', bluff: 'B', shirt: 'T', drama: 'D' };
   // Timer speeds the host can pick (the server's TIMERS).
-  const TIMERS = { fast: 'Fast', normal: 'Normal', relaxed: 'Relaxed', extra: 'Extra time' };
+  const TIMERS = {
+    fast: 'Fast',
+    normal: 'Normal',
+    relaxed: 'Relaxed',
+    extra: 'Extra time',
+    artist: 'Artist (no drawing limit)',
+  };
   const $ = (id) => document.getElementById(id);
   const esc = (s) =>
     String(s ?? '').replace(
@@ -224,10 +230,10 @@
     if (v.phase === 'pitch')
       return work(
         "What's tonight's story about?",
-        'Write a theme on your phone. Then everyone votes.',
+        'Write a theme, the problem and a name for every character on your phone. Then everyone votes.',
       );
     if (v.phase === 'pitch_vote')
-      return `${head(step)}<div class="dthemes">${v.themes.map((t) => `<div class="opt">${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
+      return `${head(step)}<div class="dthemes">${v.themes.map((t) => `<div class="opt">${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? `<small class="dnames">Cast: ${t.names.map(esc).join(' · ')}</small>` : ''}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
     if (v.phase === 'create')
       return work(
         'Everyone invents a character',
@@ -236,7 +242,7 @@
     if (v.phase === 'draw')
       return work(
         "Draw someone else's character",
-        'Neutral, flustered, sad and angry. Nobody sees the drawings until the show!',
+        'Neutral, flustered, sad and angry, plus any extra moods you like. Nobody sees the drawings until the show!',
       );
     if (v.phase === 'headline') {
       const r = v.relay;
@@ -264,6 +270,7 @@
           : `<span class="tag">${esc(v.theme)}</span><h2 class="big">Chapter ${ch.index + 1}</h2>${PART[ch.part] ? `<p class="sub dchap">${PART[ch.part]}</p>` : ''}${hl}`;
       return `<div class="scene vn" data-game="drama"><div class="vnstage">${S.svg(ch.bg, 'vnbg')}
         ${ch.cast.map((_, k) => `<canvas class="sprite ${spot(k, ch.cast.length)}" width="400" height="400" id="sp${k}"${crowd(k, ch.cast.length)}></canvas>`).join('')}
+        <div class="vnfx fxr" aria-hidden="true"></div><div class="vnfx fxw" aria-hidden="true"></div><div class="vnfx fxk" aria-hidden="true"></div><div class="vnfx fxs" aria-hidden="true"></div>
         <div class="vnbox" id="vnbox" hidden><div class="plate" id="vnplate"></div><p id="vntext"></p></div>
         <div class="vnchap" aria-hidden="true">Ch. ${ch.index + 1} of ${ch.of}</div>
         <div class="vnnext" aria-hidden="true">Click or press Space ▸</div>
@@ -328,6 +335,18 @@
     }
     return html;
   }
+  // A line's effects (screen shake, flashes…) are classes on the stage, any number at once. They
+  // are set when the line appears and stay until the next one, so Flashback lasts as long as the line.
+  const FX = ['shake', 'flash_red', 'flash_white', 'blackout', 'zoom', 'blur', 'sepia', 'hop'];
+  function playFx(list) {
+    const stage = document.querySelector('.vnstage');
+    if (!stage) return;
+    stage.classList.remove(...FX.map((x) => `fx-${x}`));
+    const on = (list || []).filter((x) => FX.includes(x));
+    if (!on.length) return;
+    void stage.offsetWidth; // restart the animations
+    stage.classList.add(...on.map((x) => `fx-${x}`));
+  }
   function playVN(ch) {
     vn = { ch, line: -2, cur: ch.cast.map(() => 'neutral') };
     vnLine(ch.line);
@@ -342,12 +361,12 @@
     // everyone's mood as of this line (the page may have been reloaded mid-chapter)
     const cur = ch.cast.map(() => 'neutral');
     for (const ln of ch.lines.slice(0, Math.max(0, line + 1)))
-      if (ln.who !== 2 && cur[ln.who] !== undefined) cur[ln.who] = ln.emotion;
+      if (ln.who >= 0 && cur[ln.who] !== undefined) cur[ln.who] = ln.emotion;
     const moved =
       vn.line >= -1 &&
       line >= 0 &&
       ch.lines[line] &&
-      ch.lines[line].who !== 2 &&
+      ch.lines[line].who >= 0 &&
       vn.cur[ch.lines[line].who] !== cur[ch.lines[line].who];
     vn.line = line;
     vn.cur = cur;
@@ -360,6 +379,7 @@
     if (line < 0) {
       card?.classList.remove('gone');
       if (box) box.hidden = true;
+      playFx([]);
       return;
     }
     card?.classList.add('gone');
@@ -367,7 +387,8 @@
     const ln = ch.lines[line];
     if (!ln || !box) return;
     box.hidden = false;
-    const narr = ln.who === 2;
+    playFx(ln.fx);
+    const narr = ln.who < 0;
     const segs = parts(ln.text);
     const len = segs.reduce((n, sg) => n + sg.t.length, 0);
     box.classList.toggle('narrator', narr);

@@ -181,14 +181,19 @@ The games (3 to 8 players; Bluff Buffet works with 2):
 - **Quip Clash**: answer silly prompts, then everyone votes between two answers.
 - **Bluff Buffet**: write a believable lie for a weird true fact, then find the truth.
 - **Shirt Showdown**: draw designs, write slogans, make shirts and battle them.
-- **Drama Club**: the room writes one visual novel together. Pitch a theme and the story's
-  problem, invent a character in words, then draw someone else's character in four moods.
+- **Drama Club**: the room writes one visual novel together. Pitch a theme, the story's
+  problem and a name for each character; the winning pitch's names are dealt out, and everyone
+  builds a character on theirs in words. Then draw someone else's character in four moods (and
+  extra moods of your own, which the writers can pick for that character's lines).
   Players take turns writing a one-line headline per chapter, in order, each seeing the story
-  so far; then everyone writes their chapter at once with the whole outline in view. The big screen plays the
+  so far; then everyone writes their chapter at once with the whole outline in view. Each line
+  can set off stackable effects on the big screen (screen shake, red or white flash, blackout,
+  zoom, blur, flashback, jump), and chapters can use backgrounds players upload from their
+  phones (JPEG, PNG or WebP, two each, kept only until the game ends). The big screen plays the
   chapters in order. Nobody sees the drawings until the show.
 
 Need more (or less) time? The VIP picks **Timers** on their phone (Fast, Normal, Relaxed or
-Extra time), and the host controls on the big screen have the same choice. It applies to every
+Extra time, or Artist: normal speed, but Drama Club's drawing step has no time limit), and the host controls on the big screen have the same choice. It applies to every
 game in that room; changed mid-game, it takes effect from the next step. `timer_scale` sets
 where new rooms start.
 

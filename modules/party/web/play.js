@@ -68,6 +68,8 @@
   let dLines = null;
   let dJob = null;
   let dMost = 6;
+  let dMore = false; // drawing: back to the pad after saying "I'm done" (for more moods)
+  let dSeenUp = null; // writing: the uploaded backgrounds this phone has already seen
 
   $('ph').innerHTML =
     `<div id="top"></div><main class="phmain" id="main"></main><div class="phfoot" id="foot" hidden></div>`;
@@ -161,7 +163,13 @@
   }
 
   // Timer speeds the host can pick (the server's TIMERS): every timed step is multiplied.
-  const TIMERS = { fast: 'Fast', normal: 'Normal', relaxed: 'Relaxed', extra: 'Extra time' };
+  const TIMERS = {
+    fast: 'Fast',
+    normal: 'Normal',
+    relaxed: 'Relaxed',
+    extra: 'Extra time',
+    artist: 'Artist (no drawing limit)',
+  };
   const timerRow = () =>
     `<h3 class="dhead">Timers</h3><div class="timers" role="group" aria-label="Timer speed">${Object.entries(
       TIMERS,
@@ -411,6 +419,28 @@
 
   // -- Drama Club ------------------------------------------------------------------------
   const MOODS = { neutral: 'Neutral', flustered: 'Flustered', sad: 'Sad', angry: 'Angry' };
+  const moodLabel = (k) => MOODS[k] || k.charAt(0).toUpperCase() + k.slice(1);
+  /** An extra mood's name the way the server will keep it. */
+  const normMood = (t) =>
+    t
+      .replace(/[^\p{L}\p{N}_ '-]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+      .slice(0, 16)
+      .trim();
+  /** Effects a line can set off on the big screen (stackable). */
+  const FX = {
+    shake: 'Screen shake',
+    flash_red: 'Red flash',
+    flash_white: 'White flash',
+    blackout: 'Blackout',
+    zoom: 'Zoom punch',
+    blur: 'Dizzy blur',
+    sepia: 'Flashback',
+    hop: 'Jump',
+  };
+  const NAME_IDEAS = ['Vlad', 'Mimi', 'Captain Pickles', 'Dr. Moon', 'Sir Toast', 'Aiko', 'Big Gary', 'Luna'];
   const PART = {
     beginning: ['the beginning', 'Start the story. Bring in some characters and set things up.'],
     middle: [
@@ -439,6 +469,11 @@
   /** The chapter editor: who says each line, how they feel, and what they say. */
   const speakerName = (who) =>
     who === 'n' ? 'Narrator' : (dJob.cast.find((c) => c.pid === who) || { name: '?' }).name;
+  /** The moods a character's lines can use: the four everyone draws, plus any the artist added. */
+  const moodsOf = (who) =>
+    who === 'n'
+      ? []
+      : [...Object.keys(MOODS), ...((dJob.cast.find((c) => c.pid === who) || {}).moods || [])];
   function lineRows() {
     if (!dCast.length) return '<p class="pnote">Pick who\'s in your chapter first.</p>';
     const who = [...dCast, 'n'];
@@ -449,13 +484,20 @@
           ${
             ln.who === 'n'
               ? ''
-              : `<div class="moods">${Object.entries(MOODS)
+              : `<div class="moods">${moodsOf(ln.who)
                   .map(
-                    ([k, label]) =>
-                      `<button type="button" data-lemo="${i}:${k}" aria-pressed="${ln.emotion === k}">${label}</button>`,
+                    (k) =>
+                      `<button type="button" data-lemo="${i}:${esc(k)}" aria-pressed="${ln.emotion === k}">${esc(moodLabel(k))}</button>`,
                   )
                   .join('')}</div>`
           }
+          <details class="dfx"${ln.fxOpen || ln.fx.length ? ' open' : ''}><summary>Effects${ln.fx.length ? ` · ${ln.fx.length}` : ''}</summary><div class="moods">${Object.entries(FX)
+            .filter(([k]) => dJob.effects.includes(k))
+            .map(
+              ([k, label]) =>
+                `<button type="button" data-lfx="${i}:${k}" aria-pressed="${ln.fx.includes(k)}">${label}</button>`,
+            )
+            .join('')}</div></details>
           <div class="row"><textarea data-ltext="${i}" maxlength="400" rows="1" autocomplete="off" aria-label="Line ${i + 1}" placeholder="${ln.who === 'n' ? 'What happens…' : 'What they say…'}">${esc(ln.text)}</textarea>${dLines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line ${i + 1}">×</button>` : ''}</div>
         </div>`,
       )
@@ -468,6 +510,64 @@
     for (const b of document.querySelectorAll('[data-dcast]'))
       b.setAttribute('aria-pressed', String(dCast.includes(b.dataset.dcast)));
   }
+  /** The "Where?" row: the preset backgrounds, then the ones players uploaded. */
+  function bgButtons() {
+    const S = window.PartyScenes;
+    const presets = dJob.backgrounds.map(
+      (b) =>
+        `<button type="button" data-bg="${b}" aria-pressed="${b === dBg}" aria-label="${esc(S.LABELS[b])}">${S.svg(b, '', true)}<span>${esc(S.LABELS[b])}</span></button>`,
+    );
+    const mine = dJob.uploads.map(
+      (u) =>
+        `<button type="button" data-bg="${esc(u.id)}" aria-pressed="${u.id === dBg}" aria-label="${esc(u.name)}">${S.svg(u.id, '', true)}<span>${esc(u.name)}<small>by ${esc(player(u.by).name)}</small></span></button>`,
+    );
+    return [...mine, ...presets].join('');
+  }
+  function bgUpload() {
+    return dJob.uploads_left > 0
+      ? `<label class="bgupl" role="button">＋ Add your own background (${dJob.uploads_left} left)<input type="file" id="f-bgfile" accept="image/*" hidden></label><p class="pnote">Everyone writing can pick it. Only share pictures you're happy to put on the big screen.</p>`
+      : '<p class="pnote">You added your backgrounds. Anyone can pick them.</p>';
+  }
+  function redrawBgs() {
+    const row = $('dbgs');
+    if (!row || !dJob) return;
+    for (const u of dJob.uploads)
+      if (u.by === pid && !dSeenUp.has(u.id)) {
+        dSeenUp.add(u.id); // your new upload is picked for you
+        dBg = u.id;
+      }
+    if (!dJob.backgrounds.includes(dBg) && !dJob.uploads.some((u) => u.id === dBg))
+      dBg = dJob.backgrounds[0];
+    row.innerHTML = bgButtons();
+    $('dbgup').innerHTML = bgUpload();
+  }
+  /** Shrinks a picked picture to a 16:9 JPEG that fits what the server accepts, and sends it. */
+  async function sendBackground(file) {
+    try {
+      const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() =>
+        createImageBitmap(file),
+      );
+      const canvas = document.createElement('canvas');
+      const g = canvas.getContext('2d');
+      for (const [w, q] of [[960, 0.82], [960, 0.7], [960, 0.55], [800, 0.5], [640, 0.45], [480, 0.4]]) {
+        const h = Math.round((w * 9) / 16);
+        canvas.width = w;
+        canvas.height = h;
+        const k = Math.max(w / bmp.width, h / bmp.height); // fill the frame, cropping the edges
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, w, h);
+        g.drawImage(bmp, (w - bmp.width * k) / 2, (h - bmp.height * k) / 2, bmp.width * k, bmp.height * k);
+        const data = canvas.toDataURL('image/jpeg', q).split(',')[1];
+        if ((data.length * 3) / 4 <= 140000) {
+          const name = file.name.replace(/\.[^.]+$/, '').slice(0, 24);
+          return send({ type: 'upload_bg', name, data });
+        }
+      }
+      showErr('That picture is too detailed. Try another one.');
+    } catch {
+      showErr("That picture can't be opened. Try a JPEG or PNG.");
+    }
+  }
   function dramaScreen(v) {
     const D = window.PartyDraw;
     const S = window.PartyScenes;
@@ -477,7 +577,10 @@
       dLines = null;
       dCast = null;
     }
-    if (v.phase !== 'draw') dEmo = null;
+    if (v.phase !== 'draw') {
+      dEmo = null;
+      dMore = false;
+    }
     if (v.phase === 'pitch') {
       if (v.mine)
         return {
@@ -490,7 +593,9 @@
         main: `${top}<h2 class="ptitle">What's tonight's story about?</h2>
           <p class="pnote">Pitch a theme and the problem the story is about. Then the room votes. Idea: ${esc(v.idea || 'anything dramatic')}</p>
           <div class="field"><label for="f-theme">Your theme</label><input id="f-theme" maxlength="120" autocomplete="off" placeholder="A haunted bakery"></div>
-          <div class="field"><label for="f-problem">The problem: what goes wrong?</label><input id="f-problem" maxlength="160" autocomplete="off" placeholder="Someone stole every croissant"></div>`,
+          <div class="field"><label for="f-problem">The problem: what goes wrong?</label><input id="f-problem" maxlength="160" autocomplete="off" placeholder="Someone stole every croissant"></div>
+          <div class="field"><label for="f-name0">Names for the characters <small>(${v.name_slots}: one for each player)</small></label><div class="names">${Array.from({ length: v.name_slots }, (_, i) => `<input id="f-name${i}" maxlength="24" autocomplete="off" aria-label="Character name ${i + 1}" placeholder="${NAME_IDEAS[i % NAME_IDEAS.length]}">`).join('')}</div>
+          <span class="pnote">If your pitch wins, these names are dealt out and everyone builds a character on theirs. Leave some blank and we'll fill them in.</span></div>`,
         foot: '<button class="big-btn" type="button" data-act="theme">Pitch it</button>',
         input: true,
       };
@@ -505,7 +610,7 @@
       return {
         key: base,
         main: `${top}<h2 class="ptitle">Which story should we tell?</h2>
-          ${v.themes.map((t) => `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'><span>${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}</span></button>`).join('')}`,
+          ${v.themes.map((t) => `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'><span>${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? `<small class="dnames">Cast: ${t.names.map(esc).join(', ')}</small>` : ''}</span></button>`).join('')}`,
         input: true,
       };
     }
@@ -526,7 +631,8 @@
         key: base,
         main: `${top}<h2 class="ptitle">Invent a character</h2>
           <p class="pnote">Don't draw them: describe them. Someone else draws them, and you'll see the result in the show. Theme: <b>${esc(v.theme)}</b></p>
-          <div class="field"><label for="f-cname">Name</label><input id="f-cname" maxlength="24" autocomplete="off" placeholder="Vlad"></div>
+          ${v.suggested ? `<p class="pnote">The winning pitch named your character <b>${esc(v.suggested)}</b>. Build on it: a title, a surname or a nickname is fine.</p>` : ''}
+          <div class="field"><label for="f-cname">Name</label><input id="f-cname" maxlength="24" autocomplete="off" value="${esc(v.suggested || '')}" placeholder="Vlad"></div>
           <div class="field"><label for="f-clook">What they look like</label><input id="f-clook" maxlength="200" autocomplete="off" placeholder="tall vampire, tiny chef hat, flour everywhere"></div>
           <div class="field"><label for="f-cpers">Personality</label><input id="f-cpers" maxlength="160" autocomplete="off" placeholder="nervous about literally everything"></div>`,
         foot: '<button class="big-btn" type="button" data-act="create">Send them in</button>',
@@ -535,33 +641,38 @@
     }
     if (v.phase === 'draw') {
       const c = v.drawing;
-      const sent = Object.keys(c.faces);
-      const all = Object.keys(MOODS).every((k) => sent.includes(k));
-      // dEmo: the mood being drawn, or '__done' once all four are in and the player is happy
-      if (dEmo === '__done' && !all) dEmo = null;
-      if (dEmo !== '__done' && !(dEmo in MOODS))
-        dEmo = Object.keys(MOODS).find((k) => !sent.includes(k)) || 'neutral';
-      if (all && dEmo === '__done')
+      if (v.ready && !dMore)
         return {
           key: base + ':all',
           main: top + wait(`${esc(c.name)} is ready!`, 'Nobody sees them until the show. Shh!'),
-          foot: skipBtn(),
+          foot: `<button class="ghost" type="button" data-act="drawmore">Draw more moods</button>${skipBtn()}`,
         };
-      const tabs = `<div class="moods tabs">${Object.entries(MOODS)
+      const sent = Object.keys(c.faces);
+      const have = Object.keys(MOODS).every((k) => sent.includes(k));
+      // dEmo: the mood on the pad: one of the four, an extra mood, or a new extra mood's name
+      if (!dEmo) dEmo = Object.keys(MOODS).find((k) => !sent.includes(k)) || 'neutral';
+      const names = [...Object.keys(MOODS), ...c.moods];
+      if (!names.includes(dEmo)) names.push(dEmo); // a new extra mood, not saved yet
+      const tabs = `<div class="moods tabs">${names
         .map(
-          ([k, label]) =>
-            `<button type="button" data-dtab="${k}" aria-pressed="${k === dEmo}">${sent.includes(k) ? '✓ ' : ''}${label}</button>`,
+          (k) =>
+            `<button type="button" data-dtab="${esc(k)}" aria-pressed="${k === dEmo}">${sent.includes(k) ? '✓ ' : ''}${esc(moodLabel(k))}</button>`,
         )
         .join('')}</div>`;
+      const extra =
+        have && c.moods.length < v.max_moods
+          ? `<div class="newmood"><input id="f-newmood" maxlength="${v.max_mood_name}" autocomplete="off" aria-label="Name an extra mood" placeholder="Extra mood: smug, sparkly…"><button class="ghost" type="button" data-act="addmood">＋ Add</button></div>`
+          : '';
       const neutral = c.faces.neutral;
       return {
-        key: `${base}:${dEmo}:${sent.join(',')}`,
-        main: `${top}<span class="kicker">Your job: draw ${esc(c.name)} · ${MOODS[dEmo].toLowerCase()}</span>
-          ${charCard(c)}${tabs}
-          <p class="pnote">${dEmo === 'neutral' ? 'Full character, standing. No background: the scene goes behind them.' : 'Tap Start from neutral, then change the face.'}</p>
+        key: `${base}:${dEmo}:${sent.join(',')}:${c.moods.join(',')}`,
+        main: `${top}<span class="kicker">Your job: draw ${esc(c.name)} · ${esc(dEmo)}</span>
+          ${charCard(c)}${tabs}${extra}
+          <p class="pnote">${dEmo === 'neutral' ? 'Full character, standing. No background: the scene goes behind them.' : 'Tap Start from neutral, then change the face.'}${have ? " The four main moods are in: add extra moods if you like (writers can pick them for this character's lines), then tap I'm done." : ''}</p>
+          ${c.moods.includes(dEmo) ? '<button class="ghost" type="button" data-act="dropmood">Remove this mood</button>' : ''}
           <div id="studio"></div>`,
         flow: true,
-        foot: `<div class="footrow"><button class="big-btn" type="button" data-act="face">${all ? 'Save' : `Save ${MOODS[dEmo].toLowerCase()}`}</button>${dEmo !== 'neutral' && neutral ? '<button class="ghost" type="button" data-act="fromneutral">Start from neutral</button>' : all ? '<button class="ghost" type="button" data-act="drawdone">Done</button>' : ''}</div>`,
+        foot: `<div class="footrow"><button class="big-btn" type="button" data-act="face">Save ${esc(dEmo)}</button>${dEmo !== 'neutral' && neutral ? '<button class="ghost" type="button" data-act="fromneutral">Start from neutral</button>' : ''}${have ? '<button class="ghost" type="button" data-act="drawdone">I\'m done</button>' : ''}</div>`,
         after: () => {
           pad = D.Studio($('studio'), {
             sprite: true,
@@ -610,11 +721,13 @@
           main: top + wait('Chapter sent!', 'Waiting for the other writers. The show starts soon!'),
           foot: skipBtn(),
         };
+      dJob = v;
       if (!dLines) {
-        dLines = [{ who: 'n', emotion: 'neutral', text: '' }];
+        dLines = [{ who: 'n', emotion: 'neutral', text: '', fx: [] }];
         dCast = [];
+        dSeenUp = new Set(v.uploads.filter((u) => u.by === pid).map((u) => u.id));
       }
-      if (!v.backgrounds.includes(dBg)) dBg = v.backgrounds[0];
+      if (!v.backgrounds.includes(dBg) && !v.uploads.some((u) => u.id === dBg)) dBg = v.backgrounds[0];
       const [label, hint] = PART[ch.part];
       return {
         key: base,
@@ -625,9 +738,10 @@
           <h3 class="dhead">Who's in it? <small>(as many as you like)</small></h3>
           <div class="dcastpick">${v.cast.map((c) => `<button type="button" data-dcast="${esc(c.pid)}" aria-pressed="${dCast.includes(c.pid)}"><b>${esc(c.name)}</b><span>${esc(c.look || '')}</span>${c.personality ? `<i>${esc(c.personality)}</i>` : ''}</button>`).join('')}</div>
           <h3 class="dhead">Where?</h3>
-          <div class="bgpick row">${v.backgrounds.map((b) => `<button type="button" data-bg="${b}" aria-pressed="${b === dBg}" aria-label="${esc(S.LABELS[b])}">${S.svg(b, '', true)}<span>${esc(S.LABELS[b])}</span></button>`).join('')}</div>
+          <div class="bgpick row" id="dbgs">${bgButtons()}</div>
+          <div id="dbgup" class="bgup">${bgUpload()}</div>
           <h3 class="dhead">Your chapter</h3>
-          <p class="pnote">Tip: put actions between asterisks, like <b>*slams the door*</b>.</p>
+          <p class="pnote">Tip: put actions between asterisks, like <b>*slams the door*</b>. Open <b>Effects</b> on a line to shake the screen, flash it red and more (they stack).</p>
           <div id="dlines"></div>`,
         foot: '<button class="big-btn" type="button" data-act="sendchapter">Send my chapter</button>',
         after: () => {
@@ -635,6 +749,7 @@
           dMost = v.max_lines;
           redrawLines();
         },
+        refresh: () => redrawBgs(), // someone uploaded a background
         keep: true,
         input: true,
       };
@@ -912,7 +1027,7 @@
       if (s.input && pid) buzz();
       if (s.key.split(':')[0] !== lastKey.split(':')[0] || !s.keep) announce();
       lastKey = s.key;
-    }
+    } else if (s.refresh) s.refresh();
     paintTimer();
     wakeLock(st && st.room.state === 'playing');
   }
@@ -979,16 +1094,18 @@
   // Drama Club: what's typed or drawn but not sent yet goes to the server every so often, so
   // if time runs out it's used as it is instead of a stand-in.
   let lastDraft = '';
+  /** The character names typed on the pitch screen. */
+  const pitchNames = () =>
+    [...document.querySelectorAll('[id^="f-name"]')].map((x) => x.value.trim()).filter(Boolean);
   function draftNow() {
     const v = st && st.room.state === 'playing' && st.view;
     if (!v || v.game !== 'drama') return null;
     const val = (id) => ($(id) ? $(id).value.trim() : '');
     if (v.phase === 'pitch' && !v.mine && val('f-theme'))
-      return { text: val('f-theme'), problem: val('f-problem') };
+      return { text: val('f-theme'), problem: val('f-problem'), names: pitchNames() };
     if (v.phase === 'create' && !v.character.name && val('f-cname'))
       return { name: val('f-cname'), look: val('f-clook'), personality: val('f-cpers') };
-    if (v.phase === 'draw' && pad && !pad.empty() && dEmo in MOODS)
-      return { emotion: dEmo, strokes: pad.strokes() };
+    if (v.phase === 'draw' && pad && !pad.empty() && dEmo) return { emotion: dEmo, strokes: pad.strokes() };
     if (v.phase === 'headline' && v.chapter.turn === 'now' && val('f-headline'))
       return { text: val('f-headline') };
     if (v.phase === 'write' && !v.chapter.done && dLines && dLines.some((ln) => ln.text.trim()))
@@ -996,9 +1113,10 @@
         bg: dBg,
         cast: dCast || [],
         lines: dLines.map((ln) => ({
-          who: ln.who === 'n' ? 2 : (dCast || []).indexOf(ln.who),
+          who: ln.who === 'n' ? -1 : (dCast || []).indexOf(ln.who),
           emotion: ln.emotion,
           text: ln.text.trim(),
+          fx: ln.fx,
         })),
       };
     return null;
@@ -1070,7 +1188,12 @@
     if (a === 'theme') {
       const t = ($('f-theme').value || '').trim();
       if (!t) return showErr('Write a theme first.');
-      return send({ type: 'theme', text: t, problem: ($('f-problem').value || '').trim() });
+      return send({
+        type: 'theme',
+        text: t,
+        problem: ($('f-problem').value || '').trim(),
+        names: pitchNames(),
+      });
     }
     if (a === 'headline') {
       const t = ($('f-headline').value || '').trim();
@@ -1092,7 +1215,19 @@
       const v = st.view;
       send({ type: 'face', emotion: dEmo, strokes: pad.strokes() });
       const sent = new Set([...Object.keys(v.drawing.faces), dEmo]);
-      dEmo = Object.keys(MOODS).find((k) => !sent.has(k)) || '__done';
+      dEmo = Object.keys(MOODS).find((k) => !sent.has(k)) || dEmo; // on to the next main mood
+      return;
+    }
+    if (a === 'addmood') {
+      const name = normMood($('f-newmood').value || '');
+      if (!name) return showErr('Give the mood a name.');
+      dEmo = name;
+      lastKey = '';
+      return render();
+    }
+    if (a === 'dropmood') {
+      send({ type: 'unface', emotion: dEmo });
+      dEmo = 'neutral';
       return;
     }
     if (a === 'fromneutral') {
@@ -1101,7 +1236,11 @@
       return;
     }
     if (a === 'drawdone') {
-      dEmo = '__done';
+      dMore = false;
+      return send({ type: 'ready' });
+    }
+    if (a === 'drawmore') {
+      dMore = true;
       lastKey = '';
       return render();
     }
@@ -1109,15 +1248,16 @@
       const said = dLines.filter((ln) => ln.who !== 'n');
       const last = said.length ? said[said.length - 1].who : null;
       const next = dCast.find((w) => w !== last) || dCast[0];
-      dLines.push({ who: next, emotion: 'neutral', text: '' });
+      dLines.push({ who: next, emotion: 'neutral', text: '', fx: [] });
       return redrawLines();
     }
     if (a === 'sendchapter' && dLines) {
       if (!dCast.length) return showErr("Pick who's in your chapter first.");
       const lines = dLines.map((ln) => ({
-        who: ln.who === 'n' ? 2 : dCast.indexOf(ln.who),
+        who: ln.who === 'n' ? -1 : dCast.indexOf(ln.who),
         emotion: ln.emotion,
         text: ln.text.trim(),
+        fx: ln.fx,
       }));
       if (lines.some((ln) => !ln.text))
         return showErr('A line is empty: write something or remove it.');
@@ -1187,6 +1327,12 @@
     }
   }
 
+  document.addEventListener('change', (e) => {
+    if (e.target.id === 'f-bgfile' && e.target.files[0]) {
+      sendBackground(e.target.files[0]);
+      e.target.value = '';
+    }
+  });
   document.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b || b.disabled || b.closest('.studio')) return;
@@ -1221,13 +1367,21 @@
       // lines spoken by someone who left go to whoever's still here
       for (const ln of dLines)
         if (ln.who !== 'n' && !dCast.includes(ln.who)) ln.who = dCast[0] || 'n';
+      for (const ln of dLines) if (!moodsOf(ln.who).includes(ln.emotion)) ln.emotion = 'neutral';
       if (dCast.length === 1 && dLines.length === 1 && !dLines[0].text)
-        dLines.push({ who: dCast[0], emotion: 'neutral', text: '' });
+        dLines.push({ who: dCast[0], emotion: 'neutral', text: '', fx: [] });
       redrawLines();
-    } else if ((b.dataset.lwho || b.dataset.lemo || b.dataset.ldel) && dLines && dJob) {
+    } else if ((b.dataset.lwho || b.dataset.lemo || b.dataset.ldel || b.dataset.lfx) && dLines && dJob) {
       if (b.dataset.lwho) {
         const [i, w] = b.dataset.lwho.split(':');
-        dLines[Number(i)].who = w;
+        const ln = dLines[Number(i)];
+        ln.who = w;
+        if (!moodsOf(w).includes(ln.emotion)) ln.emotion = 'neutral'; // that mood belongs to another character
+      } else if (b.dataset.lfx) {
+        const [i, e] = b.dataset.lfx.split(':');
+        const ln = dLines[Number(i)];
+        ln.fxOpen = true;
+        ln.fx = ln.fx.includes(e) ? ln.fx.filter((x) => x !== e) : [...ln.fx, e];
       } else if (b.dataset.lemo) {
         const [i, e] = b.dataset.lemo.split(':');
         dLines[Number(i)].emotion = e;

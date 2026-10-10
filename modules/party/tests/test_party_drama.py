@@ -55,7 +55,7 @@ def test_theme_pitch_and_vote():
         g.handle(p, {"type": "theme", "text": f"theme {p}", "problem": f"problem {p}"}, 1.0)
     g.tick(1.0)
     assert g.phase == "pitch_vote"
-    assert {"pid": "p1", "text": "theme p1", "problem": "problem p1"} in g.player_view("p0", 1.0)["themes"]
+    assert {"pid": "p1", "text": "theme p1", "problem": "problem p1", "names": []} in g.player_view("p0", 1.0)["themes"]
     with pytest.raises(Invalid, match="someone else"):
         g.handle("p0", {"type": "vote", "choice": "p0"}, 1.0)
     for p in ("p0", "p2", "p3"):
@@ -103,7 +103,7 @@ def test_create_then_draw_the_card_you_were_dealt():
     g.handle(artist, {"type": "face", "emotion": "neutral", "strokes": LINE}, 101.0)
     assert g.characters["p0"].faces["neutral"] == LINE
     with pytest.raises(Invalid, match="mood"):
-        g.handle(artist, {"type": "face", "emotion": "smug", "strokes": LINE}, 101.0)
+        g.handle(artist, {"type": "face", "emotion": "!!!", "strokes": LINE}, 101.0)
     assert g.waiting_on() == set(pids)  # 3 moods to go for this artist, 4 for the others
 
 
@@ -296,8 +296,8 @@ def test_unsent_work_is_used_when_time_runs_out():
     g.tick(t + 10_000.0)
     ch = g.chapters[1]
     assert g.phase == "show" and ch.bg == "cafe" and ch.cast == ["p0"]
-    assert ch.lines == [{"who": 0, "emotion": "angry", "text": "Who ate it?"},
-                        {"who": NARRATOR, "emotion": "sad", "text": "not me"}]
+    assert ch.lines == [{"who": 0, "emotion": "angry", "text": "Who ate it?", "fx": []},
+                        {"who": NARRATOR, "emotion": "sad", "text": "not me", "fx": []}]
 
 
 def test_a_sent_answer_beats_the_draft_and_late_drafts_are_ignored():
@@ -389,3 +389,251 @@ def test_the_themes_bonus_shows_in_the_final_gains():
     play_to(g, "scores")
     assert g.gained["p1"] >= DramaClub.THEME_PTS
     assert all(g.gained.get(p, 0) == g.scores[p] for p in pids)
+
+
+# -- character names from the pitch ---------------------------------------------------------
+
+
+def test_the_winning_pitch_names_the_characters():
+    pids, g = drama(4)
+    for p in pids:
+        g.handle(p, {"type": "theme", "text": f"theme {p}", "names": [f"{p}-a", f"{p}-b", "", f"{p}-d", "extra"]}, 1.0)
+    g.tick(1.0)
+    shown = g.player_view("p0", 1.0)["themes"]
+    assert [t["names"] for t in shown if t["pid"] == "p1"] == [["p1-a", "p1-b", "p1-d", "extra"]]
+    for p in ("p0", "p2", "p3"):
+        g.handle(p, {"type": "vote", "choice": "p1"}, 1.0)
+    g.handle("p1", {"type": "vote", "choice": "p0"}, 1.0)
+    g.tick(1.0)
+    dealt = sorted(c.suggested for c in g.characters.values())
+    assert dealt == ["p1-a", "p1-b", "p1-d", "extra"] or dealt == sorted(["p1-a", "p1-b", "p1-d", "extra"])
+    assert g.player_view("p2", 1.0)["suggested"] == g.characters["p2"].suggested
+
+
+def test_missing_or_odd_name_ideas_are_filled_in():
+    pids, g = drama(4)
+    g.handle("p0", {"type": "theme", "text": "only pitch", "names": ["Vlad", "vlad", " VLAD "]}, 1.0)
+    with pytest.raises(Invalid, match="names"):
+        g.handle("p1", {"type": "theme", "text": "bad", "names": "Vlad"}, 1.0)
+    with pytest.raises(Invalid, match="names"):
+        g.handle("p1", {"type": "theme", "text": "bad", "names": [["Vlad"]]}, 1.0)
+    g.handle("p2", {"type": "draft", "text": "from a draft", "names": [5, "Zed", None]}, 1.0)
+    g.tick(g.deadline + 1)
+    assert g.phase == "pitch_vote" and g.name_ideas["p0"] == ["Vlad"] and g.name_ideas["p2"] == ["Zed"]
+    g.tick(g.deadline + 1)
+    names = [c.suggested for c in g.characters.values()]
+    assert len({n.lower() for n in names}) == 4 and all(names)
+
+
+def test_time_running_out_uses_the_suggested_name():
+    pids, g = drama(3)
+    for p in pids:
+        g.handle(p, {"type": "theme", "text": p, "names": ["Ann", "Bo", "Cy"]}, 1.0)
+    g.tick(1.0)
+    g.tick(g.deadline + 1)  # nobody voted: a pitch is picked anyway
+    assert g.phase == "create"
+    mine = g.characters["p0"].suggested
+    g.handle("p0", {"type": "character", "name": mine + " the Brave"}, 1.0)
+    g.tick(g.deadline + 1)
+    assert g.characters["p0"].name == mine + " the Brave"
+    others = sorted(c.name for p, c in g.characters.items() if p != "p0")
+    assert others == sorted(n for n in ("Ann", "Bo", "Cy") if n != mine)
+
+
+# -- the Artist timer ------------------------------------------------------------------------
+
+
+def test_the_artist_timer_has_no_drawing_limit():
+    pids, g = drama(3)
+    g.artist = True
+    play_to(g, "create")
+    g.tick(g.deadline + 1)
+    assert g.phase == "draw" and g.deadline is None and g.player_view("p0", 1.0)["ends_in"] is None
+    g.tick(1e9)
+    assert g.phase == "draw"  # no timer ends it
+    play_to(g, "headline")  # the artists finishing does, and the other steps keep their limits
+    assert g.deadline is not None
+
+
+def test_a_normal_timer_still_limits_drawing():
+    pids, g = drama(3)
+    play_to(g, "create")
+    g.tick(g.deadline + 1)
+    assert g.phase == "draw" and g.deadline is not None
+
+
+# -- extra moods ------------------------------------------------------------------------------
+
+
+def to_draw(n=4):
+    pids, g = drama(n)
+    play_to(g, "create")
+    g.tick(g.deadline + 1)
+    assert g.phase == "draw"
+    return pids, g
+
+
+def draw_all(g, pid):
+    for e in EMOTIONS:
+        g.handle(pid, {"type": "face", "emotion": e, "strokes": LINE}, 1.0)
+
+
+def test_artists_add_extra_moods_and_say_when_theyre_done():
+    pids, g = to_draw()
+    artist = g.characters["p0"].artist
+    with pytest.raises(Invalid, match="four main"):
+        g.handle(artist, {"type": "ready"}, 1.0)
+    draw_all(g, artist)
+    g.handle(artist, {"type": "face", "emotion": "  Smug!! ", "strokes": LINE}, 1.0)
+    g.handle(artist, {"type": "face", "emotion": "smug", "strokes": LINE}, 1.0)  # same mood again: redrawn
+    assert g.characters["p0"].moods() == ["smug"]
+    assert g.player_view(artist, 1.0)["drawing"]["moods"] == ["smug"]
+    assert artist in g.waiting_on()  # the four are in, but they haven't said they're done
+    g.handle(artist, {"type": "ready"}, 1.0)
+    assert artist not in g.waiting_on() and g.phase == "draw"
+    g.handle(artist, {"type": "unface", "emotion": "smug"}, 1.0)
+    assert g.characters["p0"].moods() == []
+    with pytest.raises(Invalid, match="four main"):
+        g.handle(artist, {"type": "unface", "emotion": "sad"}, 1.0)
+
+
+def test_extra_moods_are_limited():
+    from partygames import MAX_CUSTOM
+
+    pids, g = to_draw()
+    artist = g.characters["p0"].artist
+    draw_all(g, artist)
+    for k in range(MAX_CUSTOM):
+        g.handle(artist, {"type": "face", "emotion": f"mood {k}", "strokes": LINE}, 1.0)
+    with pytest.raises(Invalid, match="extra moods"):
+        g.handle(artist, {"type": "face", "emotion": "one too many", "strokes": LINE}, 1.0)
+    for bad in (None, 5, ["x"], ""):
+        with pytest.raises(Invalid):
+            g.handle(artist, {"type": "face", "emotion": bad, "strokes": LINE}, 1.0)
+
+
+def test_the_mood_on_the_pad_is_kept_when_time_runs_out():
+    pids, g = to_draw()
+    artist = g.characters["p0"].artist
+    g.handle(artist, {"type": "draft", "emotion": "smug", "strokes": LINE}, 1.0)
+    g.tick(g.deadline + 1)
+    assert g.phase == "headline" and g.characters["p0"].faces["smug"] == LINE
+
+
+def test_lines_can_use_their_speakers_extra_moods():
+    pids, g = to_draw(4)
+    for p in pids:
+        draw_all(g, p)
+    g.handle(g.characters["p0"].artist, {"type": "face", "emotion": "smug", "strokes": LINE}, 1.0)
+    for p in pids:
+        g.handle(p, {"type": "ready"}, 1.0)
+    play_to(g, "write")
+    p0, p1 = "p0", "p1"
+    line = {"who": 0, "emotion": "smug", "text": "heh"}
+    g.handle("p2", chapter([p0, p1], [line]), 1.0)  # p0 is cast 0 and has "smug"
+    assert g.chapters[g.chapter_of("p2")].lines[0]["emotion"] == "smug"
+    with pytest.raises(Invalid, match="how they feel"):
+        g.handle("p3", chapter([p0, p1], [dict(line, who=1)]), 1.0)  # p1's character has no such mood
+    with pytest.raises(Invalid, match="how they feel"):
+        g.handle("p3", chapter([p0, p1], [dict(line, who=NARRATOR)]), 1.0)  # the narrator has no moods
+    with pytest.raises(Invalid, match="how they feel"):
+        g.handle("p3", chapter([p0, p1], [dict(line, emotion=["smug"])]), 1.0)
+    assert "smug" in [m for c in g.player_view("p3", 1.0)["cast"] for m in c["moods"]]
+
+
+def test_a_third_character_can_speak():
+    pids, g = drama(5)
+    play_to(g, "write")
+    lines = [{"who": k, "emotion": "neutral", "text": f"line {k}"} for k in range(3)]
+    g.handle("p0", chapter(pids[:3], lines + [{"who": NARRATOR, "emotion": "neutral", "text": "..."}]), 1.0)
+    assert [x["who"] for x in g.chapters[g.chapter_of("p0")].lines] == [0, 1, 2, NARRATOR]
+
+
+# -- effects ------------------------------------------------------------------------------------
+
+
+def test_lines_can_stack_effects():
+    pids, g = drama(4)
+    play_to(g, "write")
+    lines = [{"who": 0, "emotion": "angry", "text": "What?!", "fx": ["shake", "flash_red", "shake"]},
+             {"who": NARRATOR, "emotion": "neutral", "text": "Silence.", "fx": ["blackout"]},
+             {"who": 0, "emotion": "sad", "text": "Oh."}]
+    g.handle("p0", chapter([pids[1]], lines), 1.0)
+    assert [x["fx"] for x in g.chapters[g.chapter_of("p0")].lines] == [["shake", "flash_red"], ["blackout"], []]
+    for bad in ("shake", ["explode"], [3], [["shake"]]):
+        with pytest.raises(Invalid, match="effect"):
+            g.handle("p1", chapter([pids[0]], [dict(lines[0], fx=bad)]), 1.0)
+
+
+def test_unsent_lines_keep_valid_effects_only():
+    pids, g = drama(4)
+    play_to(g, "write")
+    g.handle("p0", {"type": "draft", "cast": [pids[1]], "bg": "cafe",
+                    "lines": [{"who": 0, "emotion": "sad", "text": "hi", "fx": ["zoom", "nope", 4, "zoom", "blur"]}]}, 1.0)
+    g.tick(g.deadline + 1)
+    assert g.chapters[g.chapter_of("p0")].lines[0]["fx"] == ["zoom", "blur"]
+
+
+# -- custom backgrounds -------------------------------------------------------------------------
+
+JPEG = b"\xff\xd8\xff\xe0" + b"0" * 200
+PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 200
+WEBP = b"RIFF" + b"\x00" * 4 + b"WEBP" + b"0" * 200
+
+
+def upload(g, pid, raw, name="My room"):
+    import base64
+
+    g.handle(pid, {"type": "upload_bg", "name": name, "data": base64.b64encode(raw).decode()}, 1.0)
+
+
+def test_players_upload_backgrounds_others_can_pick():
+    pids, g = drama(4)
+    play_to(g, "write")
+    upload(g, "p0", JPEG, "  Cozy   attic ")
+    upload(g, "p0", PNG)
+    ups = g.player_view("p1", 1.0)["uploads"]
+    assert [(u["name"], u["by"]) for u in ups] == [("Cozy attic", "p0"), ("My room", "p0")]
+    assert g.player_view("p0", 1.0)["uploads_left"] == 0 and g.player_view("p1", 1.0)["uploads_left"] == 2
+    with pytest.raises(Invalid, match="each"):
+        upload(g, "p0", WEBP)
+    bg = ups[0]["id"]
+    g.handle("p1", chapter([pids[0]], bg=bg), 1.0)  # somebody else picks it
+    assert g.chapters[g.chapter_of("p1")].bg == bg
+    with pytest.raises(Invalid, match="background"):
+        g.handle("p2", chapter([pids[0]], bg="u:nothere"), 1.0)
+    img = g.uploads[bg[2:]]
+    assert img.mime == "image/jpeg" and img.data == JPEG
+
+
+def test_uploads_are_checked():
+    import base64
+
+    pids, g = drama(4)
+    with pytest.raises(Invalid, match="Not now"):
+        upload(g, "p0", JPEG)  # only while writing
+    play_to(g, "write")
+    for raw, match in ((b"<svg onload=alert(1)>", "JPEG, PNG or WebP"), (b"GIF89a" + b"0" * 50, "JPEG, PNG or WebP"),
+                       (JPEG + b"0" * 150_000, "too big")):
+        with pytest.raises(Invalid, match=match):
+            upload(g, "p0", raw)
+    for bad in (None, 5, "not base64!!", "A" * 400_000):
+        with pytest.raises(Invalid):
+            g.handle("p0", {"type": "upload_bg", "data": bad}, 1.0)
+    g.handle("p0", {"type": "upload_bg", "name": ["x"], "data": base64.b64encode(WEBP).decode()}, 1.0)
+    (only,) = g.uploads.values()
+    assert only.name == "Custom" and only.mime == "image/webp"
+
+
+def test_a_custom_background_isnt_kept_in_the_greatest_hits():
+    pids, g = drama(4)
+    play_to(g, "write")
+    upload(g, "p0", JPEG)
+    bg = "u:" + next(iter(g.uploads))
+    for p in pids:
+        g.handle(p, chapter([pids[0]], bg=bg), 1.0)
+    play_to(g, "vote")
+    for p in pids:
+        g.handle(p, {"type": "vote", "chapter": g._chapter_choices(p)[0]}, 1.0)
+    g.tick(g.deadline + 1)
+    assert g.hits and all(h["scene"]["bg"] in BACKGROUNDS for h in g.hits)
