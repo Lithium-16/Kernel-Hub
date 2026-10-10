@@ -724,7 +724,7 @@
       return {
         key: base,
         main: `${top}<h2 class="ptitle">Which story should we tell?</h2>
-          ${v.themes.map((t) => `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'><span>${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? `<small class="dnames">Cast: ${t.names.slice(0, 3).map(esc).join(', ')}${t.names.length > 3 ? ` +${t.names.length - 3}` : ''}</small>` : ''}</span></button>`).join('')}`,
+          ${v.themes.map((t) => `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'><span>${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? `<span class="dcast"><span class="lbl">Cast</span>${t.names.slice(0, 4).map((n) => `<span class="cn">${esc(n)}</span>`).join('')}${t.names.length > 4 ? `<span class="cn more">+${t.names.length - 4}</span>` : ''}</span>` : ''}</span></button>`).join('')}`,
         input: true,
       };
     }
@@ -914,7 +914,7 @@
         key: `${base}:${vs.chapter}:${vs.drawing}`,
         main: `${top}<h2 class="ptitle">Vote: best chapter and best drawing</h2>
           <h3 class="dhead">Best chapter</h3>
-          ${v.chapters.map((c) => `<button class="choice" type="button" aria-pressed="${vs.chapter === c.index}" data-send='${esc(JSON.stringify({ type: 'vote', chapter: c.index }))}'><span class="dthumb">${S.svg(c.bg, '', true)}</span><span class="ctext">Chapter ${c.number}: “${esc(c.first)}”<small>${esc(c.cast.join(' & '))}</small></span></button>`).join('')}
+          ${v.chapters.map((c) => `<button class="choice" type="button" aria-pressed="${vs.chapter === c.index}" data-send='${esc(JSON.stringify({ type: 'vote', chapter: c.index }))}'><span class="dthumb">${S.svg(c.bg, '', true)}</span><span class="ctext">Chapter ${c.number}: “${esc(c.first)}”<span class="dcast"><span class="lbl">Cast</span>${c.cast.map((n) => `<span class="cn">${esc(n)}</span>`).join('')}</span></span></button>`).join('')}
           <h3 class="dhead">Best drawing</h3>
           <div class="dgallery">${v.drawings.map((c) => `<button type="button" aria-pressed="${vs.drawing === c.pid}" data-send='${esc(JSON.stringify({ type: 'vote', drawing: c.pid }))}'>${D.artCanvas(c.face, '')}<span>${esc(c.name)}</span></button>`).join('')}</div>`,
         input: true,
