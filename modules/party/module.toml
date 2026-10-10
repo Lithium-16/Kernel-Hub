@@ -24,7 +24,7 @@ open_hosting = true
 # How many rooms people can open from the share link at once (this PC's room not counted). A
 # room nobody is in for 30 minutes closes by itself.
 max_rooms = 4
-# The starting timer speed for new rooms (0.75 fast, 1.0 normal, 1.5 relaxed, 2.0 extra time). The host
+# The starting timer speed for new rooms (0.75 fast, 1.0 normal, 1.5 relaxed, 2.0 extra time; the host can also pick "artist" in the room: normal speed, but no time limit for drawing in Drama Club). The host
 # can change it per room from the big screen or the VIP's phone.
 timer_scale = 1.0
 # Questions in a Bluff Buffet game (points grow: x1, then x1.5, and x2 on the final question).

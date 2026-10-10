@@ -3176,3 +3176,212 @@ body.play {
   font-weight: 800;
   opacity: 0.75;
 }
+
+/* ---------------- Drama Club: character names, extra moods, effects, uploaded backgrounds ---------------- */
+.names {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.names input {
+  min-width: 0;
+}
+.dnames {
+  display: block;
+  margin-top: 4px;
+  font-weight: 800;
+  opacity: 0.85;
+}
+.newmood {
+  display: flex;
+  gap: 8px;
+}
+.newmood input {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 16px;
+}
+.newmood .ghost {
+  min-height: 48px;
+}
+.moods.tabs {
+  overflow-x: auto;
+}
+.dfx summary {
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--muted);
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+.dfx[open] summary {
+  margin-bottom: 6px;
+}
+.bgpick button small {
+  display: block;
+  font-weight: 700;
+  opacity: 0.75;
+}
+.bgup {
+  display: grid;
+  gap: 6px;
+}
+.bgupl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 2px dashed var(--acc);
+  background: color-mix(in srgb, var(--acc) 12%, var(--surface));
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* The big screen's effects: classes on the stage, set while a line is up (see playFx in host.js). */
+.vnfx {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  opacity: 0;
+  pointer-events: none;
+}
+.vnfx.fxr {
+  background: #ff1030;
+}
+.vnfx.fxw {
+  background: #fff;
+}
+.vnfx.fxk {
+  background: #000;
+}
+.vnfx.fxs {
+  background: rgba(120, 80, 30, 0.28);
+  -webkit-backdrop-filter: sepia(0.95) contrast(1.05) brightness(0.92);
+  backdrop-filter: sepia(0.95) contrast(1.05) brightness(0.92);
+}
+.vnbox,
+.vnchap,
+.vnnext,
+.vncard {
+  z-index: 6;
+}
+.vnstage.fx-flash_red .fxr {
+  animation: fxflash 0.9s ease-out;
+}
+.vnstage.fx-flash_white .fxw {
+  animation: fxflash 0.9s ease-out;
+}
+.vnstage.fx-blackout .fxk {
+  animation: fxblack 1.8s ease-in-out;
+}
+.vnstage.fx-sepia .fxs {
+  opacity: 1;
+}
+.vnstage.fx-shake > :not(.vnfx) {
+  animation: fxshake 0.7s linear;
+}
+.vnstage.fx-zoom .vnbg,
+.vnstage.fx-zoom .sprite {
+  animation: fxzoom 0.8s ease-out;
+}
+.vnstage.fx-blur .vnbg,
+.vnstage.fx-blur .sprite {
+  animation: fxblur 1.6s ease-out;
+}
+.vnstage.fx-hop .sprite.in {
+  animation: fxhop 0.5s ease-out 2;
+}
+@keyframes fxflash {
+  0% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes fxblack {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  30%,
+  60% {
+    opacity: 1;
+  }
+}
+@keyframes fxshake {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  10% {
+    translate: -18px 8px;
+  }
+  20% {
+    translate: 16px -10px;
+  }
+  30% {
+    translate: -14px -6px;
+  }
+  40% {
+    translate: 12px 10px;
+  }
+  50% {
+    translate: -10px 4px;
+  }
+  60% {
+    translate: 8px -6px;
+  }
+  75% {
+    translate: -5px 3px;
+  }
+  90% {
+    translate: 3px -2px;
+  }
+}
+@keyframes fxzoom {
+  0% {
+    scale: 1;
+  }
+  30% {
+    scale: 1.14;
+  }
+  100% {
+    scale: 1;
+  }
+}
+@keyframes fxblur {
+  0% {
+    filter: blur(0);
+  }
+  20% {
+    filter: blur(14px);
+  }
+  100% {
+    filter: blur(0);
+  }
+}
+@keyframes fxhop {
+  40% {
+    translate: 0 -40px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vnstage[class*="fx-"] * {
+    animation: none !important;
+  }
+  .vnfx:not(.fxs) {
+    display: none;
+  }
+}
