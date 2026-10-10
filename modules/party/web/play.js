@@ -448,7 +448,16 @@
     rain: ['🌧️', 'Rain', 'Rain'],
     glitch: ['📺', 'Glitch', 'Glitch'],
   };
-  const NAME_IDEAS = ['Vlad', 'Mimi', 'Captain Pickles', 'Dr. Moon', 'Sir Toast', 'Aiko', 'Big Gary', 'Luna'];
+  const NAME_IDEAS = [
+    'Vlad',
+    'Mimi',
+    'Captain Pickles',
+    'Dr. Moon',
+    'Sir Toast',
+    'Aiko',
+    'Big Gary',
+    'Luna',
+  ];
   const PART = {
     beginning: ['the beginning', 'Start the story. Bring in some characters and set things up.'],
     middle: [
@@ -505,13 +514,17 @@
                   )
                   .join('')}</div>`
           }
-          <details class="dfx"${ln.fxOpen ? ' open' : ''}><summary>Effects${ln.fx.length ? `<span class="fxon" aria-label="${ln.fx.map((k) => FX[k][2]).join(', ')}">${ln.fx.map((k) => FX[k][0]).join(' ')}</span>` : ''}</summary><div class="sfade"><div class="fxrow">${Object.entries(FX)
+          <details class="dfx"${ln.fxOpen ? ' open' : ''}><summary>Effects${ln.fx.length ? `<span class="fxon" aria-label="${ln.fx.map((k) => FX[k][2]).join(', ')}">${ln.fx.map((k) => FX[k][0]).join(' ')}</span>` : ''}</summary><div class="sfade"><div class="fxrow">${Object.entries(
+            FX,
+          )
             .filter(([k]) => dJob.effects.includes(k))
             .map(
               ([k, [icon, short, label]]) =>
                 `<button type="button" data-lfx="${i}:${k}" aria-pressed="${ln.fx.includes(k)}" aria-label="${label}" title="${label}"><span aria-hidden="true">${icon}</span>${short}</button>`,
             )
-            .join('')}</div></div>${ln.fx.length ? `<button type="button" class="ghost prevbtn" data-lprev="${i}">▶ Preview</button>` : ''}</details>
+            .join(
+              '',
+            )}</div></div>${ln.fx.length ? `<button type="button" class="ghost prevbtn" data-lprev="${i}">▶ Preview</button>` : ''}</details>
         </div>`;
       })
       .join('')}
@@ -548,7 +561,9 @@
     if (story && n > 1) story.open = false; // the story card gets out of the way (tap it to read again)
     stepSummaries();
     fadeCheck();
-    document.querySelector(`[data-wstep="${n}"]`).scrollIntoView({ block: 'start', behavior: 'smooth' });
+    document
+      .querySelector(`[data-wstep="${n}"]`)
+      .scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
   /** A small stand-in for the big screen: the chosen background, the cast as figures in their colours, and the line's effects. */
   function previewFx(i) {
@@ -565,7 +580,10 @@
         .map((c, k) => {
           const spot = n === 1 ? 'c' : n === 2 ? (k ? 'r' : 'l') : 'n';
           const w = n > 2 ? Math.max(210, Math.min(380, 1180 / n)) : 0;
-          const pos = n > 2 ? ` style="left:${Math.round((1280 - n * w) / (n + 1) + k * (w + (1280 - n * w) / (n + 1)))}px;width:${Math.round(w)}px;height:${Math.round(w)}px;--hue:${hueOf(c)}"` : ` style="--hue:${hueOf(c)}"`;
+          const pos =
+            n > 2
+              ? ` style="left:${Math.round((1280 - n * w) / (n + 1) + k * (w + (1280 - n * w) / (n + 1)))}px;width:${Math.round(w)}px;height:${Math.round(w)}px;--hue:${hueOf(c)}"`
+              : ` style="--hue:${hueOf(c)}"`;
           return `<div class="sprite ${spot} in ghostsprite"${pos}></div>`;
         })
         .join('');
@@ -619,7 +637,11 @@
       );
     }
   }
-  document.addEventListener('scroll', (e) => e.target.parentElement?.classList?.contains('sfade') && fadeCheck(), true);
+  document.addEventListener(
+    'scroll',
+    (e) => e.target.parentElement?.classList?.contains('sfade') && fadeCheck(),
+    true,
+  );
   /** The "Where?" row: the preset backgrounds, then the ones players uploaded. */
   function bgButtons() {
     const S = window.PartyScenes;
@@ -662,14 +684,27 @@
       );
       const canvas = document.createElement('canvas');
       const g = canvas.getContext('2d');
-      for (const [w, q] of [[960, 0.82], [960, 0.7], [960, 0.55], [800, 0.5], [640, 0.45], [480, 0.4]]) {
+      for (const [w, q] of [
+        [960, 0.82],
+        [960, 0.7],
+        [960, 0.55],
+        [800, 0.5],
+        [640, 0.45],
+        [480, 0.4],
+      ]) {
         const h = Math.round((w * 9) / 16);
         canvas.width = w;
         canvas.height = h;
         const k = Math.max(w / bmp.width, h / bmp.height); // fill the frame, cropping the edges
         g.fillStyle = '#fff';
         g.fillRect(0, 0, w, h);
-        g.drawImage(bmp, (w - bmp.width * k) / 2, (h - bmp.height * k) / 2, bmp.width * k, bmp.height * k);
+        g.drawImage(
+          bmp,
+          (w - bmp.width * k) / 2,
+          (h - bmp.height * k) / 2,
+          bmp.width * k,
+          bmp.height * k,
+        );
         const data = canvas.toDataURL('image/jpeg', q).split(',')[1];
         if ((data.length * 3) / 4 <= 140000) {
           const name = file.name.replace(/\.[^.]+$/, '').slice(0, 24);
@@ -724,7 +759,21 @@
       return {
         key: base,
         main: `${top}<h2 class="ptitle">Which story should we tell?</h2>
-          ${v.themes.map((t) => `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'><span>${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? `<span class="dcast"><span class="lbl">Cast</span>${t.names.slice(0, 4).map((n) => `<span class="cn">${esc(n)}</span>`).join('')}${t.names.length > 4 ? `<span class="cn more">+${t.names.length - 4}</span>` : ''}</span>` : ''}</span></button>`).join('')}`,
+          ${v.themes
+            .map(
+              (t) =>
+                `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'><span>${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${
+                  t.names.length
+                    ? `<span class="dcast"><span class="lbl">Cast</span>${t.names
+                        .slice(0, 4)
+                        .map((n) => `<span class="cn">${esc(n)}</span>`)
+                        .join(
+                          '',
+                        )}${t.names.length > 4 ? `<span class="cn more">+${t.names.length - 4}</span>` : ''}</span>`
+                    : ''
+                }</span></button>`,
+            )
+            .join('')}`,
         input: true,
       };
     }
@@ -773,7 +822,9 @@
           (k) =>
             `<button type="button" data-dtab="${esc(k)}" aria-pressed="${k === dEmo}">${sent.includes(k) ? '✓ ' : ''}${esc(moodLabel(k))}</button>`,
         )
-        .join('')}${canAdd ? `<button type="button" class="addtab" data-act="newmood" aria-expanded="${dNewMood}">＋ Mood</button>` : ''}</div>`;
+        .join(
+          '',
+        )}${canAdd ? `<button type="button" class="addtab" data-act="newmood" aria-expanded="${dNewMood}">＋ Mood</button>` : ''}</div>`;
       const extra =
         canAdd && dNewMood
           ? `<div class="newmood"><input id="f-newmood" maxlength="${v.max_mood_name}" autocomplete="off" aria-label="Name an extra mood" placeholder="Name it: smug, sparkly…"><button class="ghost" type="button" data-act="addmood">Add</button></div>`
@@ -846,7 +897,8 @@
         dStep = 1;
         dSeenUp = new Set(v.uploads.filter((u) => u.by === pid).map((u) => u.id));
       }
-      if (!v.backgrounds.includes(dBg) && !v.uploads.some((u) => u.id === dBg)) dBg = v.backgrounds[0];
+      if (!v.backgrounds.includes(dBg) && !v.uploads.some((u) => u.id === dBg))
+        dBg = v.backgrounds[0];
       const [label, hint] = PART[ch.part];
       return {
         key: base,
@@ -1234,7 +1286,8 @@
       return { text: val('f-theme'), problem: val('f-problem'), names: pitchNames() };
     if (v.phase === 'create' && !v.character.name && val('f-cname'))
       return { name: val('f-cname'), look: val('f-clook'), personality: val('f-cpers') };
-    if (v.phase === 'draw' && pad && !pad.empty() && dEmo) return { emotion: dEmo, strokes: pad.strokes() };
+    if (v.phase === 'draw' && pad && !pad.empty() && dEmo)
+      return { emotion: dEmo, strokes: pad.strokes() };
     if (v.phase === 'headline' && v.chapter.turn === 'now' && val('f-headline'))
       return { text: val('f-headline') };
     if (v.phase === 'write' && !v.chapter.done && dLines && dLines.some((ln) => ln.text.trim()))
@@ -1534,7 +1587,11 @@
       if (dCast.length === 1 && dLines.length === 1 && !dLines[0].text)
         dLines.push({ who: dCast[0], emotion: 'neutral', text: '', fx: [] });
       redrawLines();
-    } else if ((b.dataset.lwho || b.dataset.lemo || b.dataset.ldel || b.dataset.lfx) && dLines && dJob) {
+    } else if (
+      (b.dataset.lwho || b.dataset.lemo || b.dataset.ldel || b.dataset.lfx) &&
+      dLines &&
+      dJob
+    ) {
       if (b.dataset.lwho) {
         const [i, w] = b.dataset.lwho.split(':');
         const ln = dLines[Number(i)];

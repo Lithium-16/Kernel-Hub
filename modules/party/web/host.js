@@ -232,7 +232,9 @@
       `<span class="dcast"><span class="lbl">Cast</span>${names
         .slice(0, max)
         .map((n) => `<span class="cn">${esc(n)}</span>`)
-        .join('')}${names.length > max ? `<span class="cn more">+${names.length - max}</span>` : ''}</span>`;
+        .join(
+          '',
+        )}${names.length > max ? `<span class="cn more">+${names.length - max}</span>` : ''}</span>`;
     const work = (title, sub, extra = '', rows = doneRow(v.waiting)) =>
       `${head(step)}<h2 class="big" style="font-size:64px">${title}</h2>${theme}<p class="sub">${sub}</p>${extra}${rows}${ring()}</div>`;
     // Drawing: each artist's moods so far (four pips), their extra moods, and when they're done
@@ -839,11 +841,18 @@
         .map(([k, label]) => btn(label + (r.timer === k ? ' ✓' : ''), { type: 'timer', timer: k }))
         .join('')}`,
     );
-    const ups = (r.state === 'playing' && st.view && st.view.phase === 'write' && st.view.uploads) || [];
+    const ups =
+      (r.state === 'playing' && st.view && st.view.phase === 'write' && st.view.uploads) || [];
     if (ups.length)
       rows.push(
         ups
-          .map((u) => btn(`Remove background “${u.name}” (${nameOf(u.by)})`, { type: 'remove_bg', id: u.id }, 'kick'))
+          .map((u) =>
+            btn(
+              `Remove background “${u.name}” (${nameOf(u.by)})`,
+              { type: 'remove_bg', id: u.id },
+              'kick',
+            ),
+          )
           .join(''),
       );
     if (r.guest) rows.push(btn('Close this room', { type: 'close' }, 'kick'));
