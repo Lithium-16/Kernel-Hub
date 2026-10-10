@@ -92,7 +92,7 @@
     const rows = v.standings || [];
     const max = Math.max(1, ...rows.map((s) => s.score));
     return `<div class="scene" data-game="${v.game}">${bar(title, GLYPH[v.game])}<span class="tag">${v.phase === 'over' ? 'Final scores' : 'Scores'}</span>
-      <div class="board">${rows
+      <div class="board${rows.length > 6 ? ' dense' : ''}">${rows
         .map(
           (
             s,
@@ -227,6 +227,9 @@
     const theme = v.theme
       ? `<span class="dtheme">${esc(v.theme)}</span>${v.problem ? `<p class="dproblem">The problem: <b>${esc(v.problem)}</b></p>` : ''}`
       : '';
+    /** A pitch's character names, the first few (the phones have them all). */
+    const cast = (names) =>
+      names.slice(0, 4).map(esc).join(' · ') + (names.length > 4 ? ` · +${names.length - 4}` : '');
     const work = (title, sub, extra = '', rows = doneRow(v.waiting)) =>
       `${head(step)}<h2 class="big" style="font-size:64px">${title}</h2>${theme}<p class="sub">${sub}</p>${extra}${rows}${ring()}</div>`;
     // Drawing: each artist's moods so far (four pips), their extra moods, and when they're done
@@ -244,7 +247,7 @@
         'Write a theme, the problem and a name for every character on your phone. Then everyone votes.',
       );
     if (v.phase === 'pitch_vote')
-      return `${head(step)}<div class="dthemes">${v.themes.map((t) => `<div class="opt">${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? `<small class="dnames">Cast: ${t.names.map(esc).join(' · ')}</small>` : ''}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
+      return `${head(step)}<div class="dthemes${v.themes.length > 6 ? ' dense denser' : v.themes.length > 4 ? ' dense' : ''}">${v.themes.map((t) => `<div class="opt">${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? `<small class="dnames">Cast: ${cast(t.names)}</small>` : ''}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
     if (v.phase === 'create')
       return work(
         'Everyone invents a character',
@@ -303,7 +306,7 @@
     }
     if (v.phase === 'vote')
       return `${head(step)}<h2 class="big" style="font-size:52px">Vote: best chapter and best drawing</h2>
-        <div class="dcastwall">${(v.gallery || []).map((c) => `<div>${D.artCanvas(c.face, '')}<b>${esc(c.name)}</b><small>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>${doneRow(v.waiting)}${ring()}</div>`;
+        <div class="dcastwall${(v.gallery || []).length > 6 ? ' dense' : ''}">${(v.gallery || []).map((c) => `<div>${D.artCanvas(c.face, '')}<b>${esc(c.name)}</b><small>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>${doneRow(v.waiting)}${ring()}</div>`;
     return scores(v, T);
   }
 

@@ -4540,3 +4540,192 @@ body.play:has(#ph[data-game="drama"]) {
   min-height: 44px;
   font-size: 14px;
 }
+
+/* ---- design audit fixes ---- */
+/* a line: its header (number, remove), then the text box first */
+.dline .lhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.dline .lhead .x {
+  width: auto;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--muted);
+  text-decoration: underline;
+}
+.dline textarea {
+  width: 100%;
+  min-height: 64px;
+  font-size: 17px;
+}
+.dfx summary {
+  min-height: 44px;
+}
+/* drawing: the extra-mood tab and a compact bottom bar */
+.moods.tabs .addtab {
+  flex: 0 0 auto;
+  border-style: dashed;
+}
+.linkbtn {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-weight: 800;
+  text-decoration: underline;
+  color: var(--fg);
+}
+.phfoot .footrow {
+  display: flex;
+  gap: 8px;
+}
+.phfoot .footrow .big-btn {
+  flex: 2 1 0;
+  min-width: 0;
+}
+.phfoot .footrow .ghost {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  padding-inline: 8px;
+}
+/* the pitch: the optional names fold away */
+.namesd > summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 800;
+  list-style: none;
+}
+.namesd > summary::-webkit-details-marker {
+  display: none;
+}
+.namesd > summary::before {
+  content: "＋";
+  font-weight: 900;
+}
+.namesd[open] > summary::before {
+  content: "－";
+}
+.namesd .names {
+  margin: 6px 0;
+}
+/* the chapter vote: the cast under the quote, the whole width */
+.choice .ctext {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+/* a full room: everything still fits the big screen */
+.dthemes.dense {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 8px 0;
+}
+.dthemes.dense .opt {
+  padding: 14px 16px;
+  font-size: 26px;
+  line-height: 1.15;
+}
+.dthemes.dense .opt small {
+  font-size: 16px;
+  margin-top: 4px;
+}
+.dcastwall.dense {
+  gap: 10px;
+}
+.dcastwall.dense > div {
+  width: 128px;
+  padding: 6px;
+  min-height: 0;
+}
+.dcastwall.dense .moodstage,
+.dcastwall.dense canvas {
+  width: 100px;
+  height: 100px;
+}
+.dcastwall.dense b {
+  font-size: 16px;
+}
+.dcastwall.dense small {
+  font-size: 12px;
+}
+.board.dense {
+  gap: 6px;
+}
+.board.dense .brow {
+  grid-template-columns: 40px 52px 180px 1fr 130px;
+  gap: 12px;
+  font-size: 21px;
+}
+.board.dense .brow .av {
+  width: 52px;
+  height: 52px;
+  font-size: 24px;
+}
+.board.dense .brow .track {
+  height: 34px;
+}
+/* big-screen titles: a lighter hard shadow so small ones stay readable */
+.scene[data-game="drama"]:not(.vn) .big {
+  text-shadow: 3px 3px 0 var(--pk);
+}
+/* the show: the textbox leaves more of the characters visible */
+.vnbar {
+  height: 56px;
+}
+.vnbox {
+  bottom: 72px;
+  min-height: 118px;
+  padding: 32px 40px 22px;
+  font-size: 32px;
+}
+.vnstage .sprite {
+  bottom: 52px;
+}
+
+/* audit: more room to draw on a small phone, readable labels, thumb-sized controls */
+#ph[data-game="drama"] .dchar {
+  padding: 10px 14px;
+  gap: 1px;
+}
+#ph[data-game="drama"] .dchar b {
+  font-size: 17px;
+}
+#ph[data-game="drama"] .dchar .pnote {
+  font-size: 13px;
+}
+.dcastwall .moodtag {
+  color: #1a1230;
+}
+.dline .lhead .x {
+  min-height: 44px;
+}
+.linkbtn {
+  min-height: 44px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+}
+.dthemes.denser {
+  grid-template-columns: repeat(4, 1fr);
+}
+.dthemes.denser .opt {
+  font-size: 22px;
+  padding: 12px 14px;
+}
+.dthemes.denser .opt small {
+  font-size: 15px;
+}
+.dthemes.dense .opt small.dnames {
+  display: none;
+}
