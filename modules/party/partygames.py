@@ -1274,6 +1274,7 @@ class Character:
 class Chapter:
     writer: str
     headline: str = ""  # one sentence: what happens in it, written before the chapter itself
+    headliner: str = ""  # who writes the headline: never the chapter's own writer
     bg: str = ""
     cast: list[str] = field(default_factory=list)  # the characters in it (by creator), 1 or 2
     lines: list[dict[str, Any]] = field(default_factory=list)
@@ -1283,6 +1284,7 @@ class DramaClub(Game):
     """One visual novel, written by the whole room. Everyone pitches a theme and the story's
     problem, and the room picks one. Everyone invents a character in words, then draws someone
     else's character in four moods. Then the outline is written as a relay: one headline per
+    chapter (each written by someone other than that chapter's writer),
     chapter, in order, each writer seeing the story so far. Then everyone writes their chapter
     at the same time with the whole outline in view, so the plot builds from start to end. The big screen plays the chapters
     in order as one story, and only then does anyone see the drawings. Everyone votes for the
@@ -1303,6 +1305,8 @@ class DramaClub(Game):
         self.characters: dict[str, Character] = {
             p: Character(p, artist=self.order[(i - 1) % n]) for i, p in enumerate(self.order)}
         self.chapters = [Chapter(p) for p in self.order]
+        for i, ch in enumerate(self.chapters):  # you write the headline of the next player's chapter
+            ch.headliner = self.chapters[(i + 1) % n].writer
         self.used = used if used is not None else set()
         self.themes: dict[str, str] = {}
         self.problems: dict[str, str] = {}  # each pitch's problem: what the story is about solving
@@ -1343,7 +1347,7 @@ class DramaClub(Game):
             return {c.artist for c in self.characters.values() if set(EMOTIONS) - set(c.faces)}
         if ph == "headline":
             ch = self.chapters[self.relay]
-            return set() if ch.headline else {ch.writer}
+            return set() if ch.headline else {ch.headliner}
         if ph == "write":
             return {ch.writer for ch in self.chapters if not ch.lines}
         if ph == "vote":
@@ -1507,7 +1511,7 @@ class DramaClub(Game):
             if not text:
                 raise Invalid("Write what happens in your chapter, in one sentence.")
             ch = self.chapters[self.relay]
-            if ch.writer != pid or ch.headline:
+            if ch.headliner != pid or ch.headline:
                 raise Invalid("Not your turn yet: watch the outline grow on the big screen.")
             ch.headline = text
         elif ph == "write" and kind == "chapter":
@@ -1592,7 +1596,7 @@ class DramaClub(Game):
             if missing:
                 return {"type": "face", "emotion": missing[0], "strokes": doodle(self.rng, sprite=True)}
             return None
-        if ph == "headline" and (ch := self.chapters[self.relay]).writer == pid and not ch.headline:
+        if ph == "headline" and (ch := self.chapters[self.relay]).headliner == pid and not ch.headline:
             return {"type": "headline", "text": self._bot_line()[:MAX_HEADLINE]}
         if ph == "write" and not self.chapters[self.chapter_of(pid)].lines:
             cast = self.rng.sample(list(self.characters), min(2, len(self.characters)))
@@ -1619,7 +1623,7 @@ class DramaClub(Game):
 
     def _outline(self, upto: int) -> list[dict[str, Any]]:
         """The headlines of the first `upto` chapters, in order: the story so far."""
-        return [{"number": i + 1, "part": self.part(i), "headline": ch.headline, "writer": ch.writer}
+        return [{"number": i + 1, "part": self.part(i), "headline": ch.headline, "by": ch.headliner}
                 for i, ch in enumerate(self.chapters[:upto])]
 
     def _common(self, now: float) -> dict[str, Any]:
@@ -1637,7 +1641,7 @@ class DramaClub(Game):
         elif ph == "headline":
             v["outline"] = self._outline(self.relay)
             v["relay"] = {"number": self.relay + 1, "of": len(self.chapters), "part": self.part(self.relay),
-                          "writer": self.chapters[self.relay].writer}
+                          "writer": self.chapters[self.relay].headliner}
         elif ph == "write":
             v["cast"] = [c.card() for c in self.characters.values()]  # names only: still no art
         elif ph == "show":
@@ -1671,12 +1675,13 @@ class DramaClub(Game):
             c = self.drawing_for(pid)
             v["drawing"] = c.card() | {"faces": c.faces}  # only the art you're making
         elif ph == "headline":
-            i = self.chapter_of(pid)
+            i = next(k for k, ch in enumerate(self.chapters) if ch.headliner == pid)  # the headline you write
             turn = "done" if i < self.relay or self.chapters[i].headline else "now" if i == self.relay else "waiting"
             v["chapter"] = {"number": i + 1, "of": len(self.chapters), "part": self.part(i),
                             "turn": turn, "turns_left": max(0, i - self.relay)}
             v["outline"] = self._outline(self.relay + (1 if self.chapters[self.relay].headline else 0))
-            v["writer"] = self.chapters[self.relay].writer
+            v["writer"] = self.chapters[self.relay].headliner
+            v["for"] = self.chapters[i].writer  # who will write the chapter you're heading
             v["cast"] = [c.card() for c in self.characters.values()]
         elif ph == "write":
             i = self.chapter_of(pid)
