@@ -68,6 +68,7 @@
   let dLines = null;
   let dJob = null;
   let dMost = 6;
+  let dStep = 1; // writing: which of the three steps (who, where, lines) is open
   let dMore = false; // drawing: back to the pad after saying "I'm done" (for more moods)
   let dSeenUp = null; // writing: the uploaded backgrounds this phone has already seen
 
@@ -474,20 +475,25 @@
     who === 'n'
       ? []
       : [...Object.keys(MOODS), ...((dJob.cast.find((c) => c.pid === who) || {}).moods || [])];
+  const MOOD_ICON = { neutral: '😐', flustered: '😳', sad: '😢', angry: '😠' };
+  /** Each character in the chapter gets its own colour: on their chips and down the side of their lines. */
+  const hueOf = (who) => (who === 'n' ? null : (dCast.indexOf(who) * 57 + 262) % 360);
   function lineRows() {
     if (!dCast.length) return '<p class="pnote">Pick who\'s in your chapter first.</p>';
     const who = [...dCast, 'n'];
     return `${dLines
-      .map(
-        (ln, i) => `<div class="dline">
-          <div class="who">${who.map((w) => `<button type="button" data-lwho="${i}:${w}" aria-pressed="${ln.who === w}">${esc(speakerName(w))}</button>`).join('')}</div>
+      .map((ln, i) => {
+        const h = hueOf(ln.who);
+        return `<div class="dline" data-line="${i}" style="${h === null ? '' : `--hue:${h}`}">
+          <div class="lhead"><span class="lnum">Line ${i + 1}</span></div>
+          <div class="who">${who.map((w) => `<button type="button" data-lwho="${i}:${w}" style="--hue:${hueOf(w) ?? 0}" class="${w === 'n' ? 'narr' : 'cast'}" aria-pressed="${ln.who === w}">${w === 'n' ? '' : '<i class="dot" aria-hidden="true"></i>'}${esc(speakerName(w))}</button>`).join('')}</div>
           ${
             ln.who === 'n'
               ? ''
-              : `<div class="moods">${moodsOf(ln.who)
+              : `<div class="moods mood">${moodsOf(ln.who)
                   .map(
                     (k) =>
-                      `<button type="button" data-lemo="${i}:${esc(k)}" aria-pressed="${ln.emotion === k}">${esc(moodLabel(k))}</button>`,
+                      `<button type="button" data-lemo="${i}:${esc(k)}" aria-pressed="${ln.emotion === k}"><span aria-hidden="true">${MOOD_ICON[k] || '✨'}</span>${esc(moodLabel(k))}</button>`,
                   )
                   .join('')}</div>`
           }
@@ -497,12 +503,67 @@
               ([k, [icon, short, label]]) =>
                 `<button type="button" data-lfx="${i}:${k}" aria-pressed="${ln.fx.includes(k)}" aria-label="${label}" title="${label}"><span aria-hidden="true">${icon}</span>${short}</button>`,
             )
-            .join('')}</div></div></details>
+            .join('')}</div></div>${ln.fx.length ? `<button type="button" class="ghost prevbtn" data-lprev="${i}">▶ Preview</button>` : ''}</details>
           <div class="row"><textarea data-ltext="${i}" maxlength="400" rows="1" autocomplete="off" aria-label="Line ${i + 1}" placeholder="${ln.who === 'n' ? 'What happens…' : 'What they say…'}">${esc(ln.text)}</textarea>${dLines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line ${i + 1}">×</button>` : ''}</div>
-        </div>`,
-      )
+        </div>`;
+      })
       .join('')}
       ${dLines.length < dMost ? '<button class="ghost" type="button" data-act="addline">+ Add a line</button>' : ''}`;
+  }
+  // -- the write step's three parts: who, where, lines (one open at a time, the others a summary)
+  function stepSummaries() {
+    if (!dJob || !$('wsum1')) return;
+    const bgName = dBg.startsWith('u:')
+      ? (dJob.uploads.find((u) => u.id === dBg) || { name: 'Custom' }).name
+      : window.PartyScenes.LABELS[dBg] || dBg;
+    $('wsum1').textContent = dCast.length
+      ? dCast.map((c) => (dJob.cast.find((x) => x.pid === c) || { name: '?' }).name).join(', ')
+      : 'Pick at least one';
+    $('wsum2').textContent = bgName;
+    const empty = dLines ? dLines.filter((ln) => !ln.text.trim()).length : 0;
+    $('wsum3').textContent = !dCast.length
+      ? 'After you pick who is in it'
+      : `${dLines.length} line${dLines.length === 1 ? '' : 's'}${empty ? ` · ${empty} to fill` : ' · ready'}`;
+    document.querySelector('[data-wstep="1"]').classList.toggle('done', dCast.length > 0);
+    document.querySelector('[data-wstep="2"]').classList.toggle('done', dCast.length > 0);
+    document.querySelector('[data-wstep="3"]').classList.toggle('done', dCast.length > 0 && !empty);
+  }
+  function showStep(n) {
+    dStep = n;
+    for (const k of [1, 2, 3]) {
+      const sec = document.querySelector(`[data-wstep="${k}"]`);
+      if (!sec) return;
+      sec.classList.toggle('open', k === n);
+      sec.querySelector('.wbody').hidden = k !== n;
+      sec.querySelector('.whead').setAttribute('aria-expanded', String(k === n));
+    }
+    const story = $('dstory');
+    if (story && n > 1) story.open = false; // the story card gets out of the way (tap it to read again)
+    stepSummaries();
+    fadeCheck();
+    document.querySelector(`[data-wstep="${n}"]`).scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+  /** Sets the effect classes on a stage (the big screen's own CSS plays them); used by the preview. */
+  function applyFx(stage, list) {
+    const all = Object.keys(FX).map((k) => `fx-${k}`);
+    stage.classList.remove(...all);
+    void stage.offsetWidth; // restart the animations
+    stage.classList.add(...list.filter((k) => k in FX).map((k) => `fx-${k}`));
+  }
+  /** A small stand-in for the big screen: the chosen background, a figure, and the line's effects. */
+  function previewFx(i) {
+    const ln = dLines[i];
+    const det = document.querySelector(`[data-line="${i}"] .dfx`);
+    if (!ln || !det) return;
+    let box = det.querySelector('.fxprev');
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'fxprev';
+      box.innerHTML = `<div class="vnstage">${window.PartyScenes.svg(dBg, 'vnbg')}<div class="sprite c in ghostsprite"></div><div class="vnfx fxr"></div><div class="vnfx fxw"></div><div class="vnfx fxk"></div><div class="vnfx fxs"></div><div class="vnbox"><div class="plate">${esc(speakerName(ln.who))}</div><p>${esc(ln.text.trim() || 'Your line shows up here…')}</p></div></div>`;
+      det.append(box);
+    }
+    box.style.setProperty('--k', String(box.clientWidth / 1280));
+    applyFx(box.querySelector('.vnstage'), ln.fx);
   }
   function redrawLines() {
     const box = $('dlines');
@@ -511,6 +572,7 @@
       b.setAttribute('aria-pressed', String(dCast.includes(b.dataset.dcast)));
     fadeCheck();
     syncSend();
+    stepSummaries();
   }
   /** The send button says what's still missing (it stays tappable: tapping explains). */
   function syncSend() {
@@ -567,6 +629,7 @@
     row.innerHTML = bgButtons();
     $('dbgup').innerHTML = bgUpload();
     fadeCheck();
+    stepSummaries();
   }
   /** Shrinks a picked picture to a 16:9 JPEG that fits what the server accepts, and sends it. */
   async function sendBackground(file) {
@@ -752,6 +815,7 @@
       if (!dLines) {
         dLines = [{ who: 'n', emotion: 'neutral', text: '', fx: [] }];
         dCast = [];
+        dStep = 1;
         dSeenUp = new Set(v.uploads.filter((u) => u.by === pid).map((u) => u.id));
       }
       if (!v.backgrounds.includes(dBg) && !v.uploads.some((u) => u.id === dBg)) dBg = v.backgrounds[0];
@@ -759,22 +823,29 @@
       return {
         key: base,
         main: `${top}<h2 class="ptitle">Write chapter ${ch.number} of ${ch.of}</h2>
-          <div class="card dpart"><span class="kicker">${esc(label)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b>. The problem: <b>${esc(v.problem)}</b></span>
+          <details class="card dpart" id="dstory" open><summary><span class="kicker">${esc(label)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b></span></summary><span class="pnote">The problem: <b>${esc(v.problem)}</b></span>
             ${outlineList(ch.outline, ch.number)}
-            <span class="pnote">${esc(hint)} Get the story from the chapter before into the one after.</span></div>
-          <h3 class="dhead">Who's in it? <small>(as many as you like)</small></h3>
-          <div class="dcastpick">${v.cast.map((c) => `<button type="button" data-dcast="${esc(c.pid)}" aria-pressed="${dCast.includes(c.pid)}"><b>${esc(c.name)}</b><span>${esc(c.look || '')}</span>${c.personality ? `<i>${esc(c.personality)}</i>` : ''}</button>`).join('')}</div>
-          <h3 class="dhead">Where?</h3>
-          <div class="sfade onbg"><div class="bgpick row" id="dbgs">${bgButtons()}</div></div>
-          <div id="dbgup" class="bgup">${bgUpload()}</div>
-          <h3 class="dhead">Your chapter</h3>
-          <p class="pnote">Tip: put actions between asterisks, like <b>*slams the door*</b>. Open <b>Effects</b> on a line to shake the screen, flash it red and more (they stack).</p>
-          <div id="dlines"></div>`,
+            <span class="pnote">${esc(hint)} Get the story from the chapter before into the one after.</span></details>
+          <section class="wstep open" data-wstep="1"><button type="button" class="whead" data-wgo="1" aria-expanded="true"><i class="wnum">1</i><span class="wtitle">Who's in it?</span><small id="wsum1"></small></button>
+            <div class="wbody">
+              <div class="dcastpick">${v.cast.map((c) => `<button type="button" data-dcast="${esc(c.pid)}" aria-pressed="${dCast.includes(c.pid)}"><b>${esc(c.name)}</b><span>${esc(c.look || '')}</span>${c.personality ? `<i>${esc(c.personality)}</i>` : ''}</button>`).join('')}</div>
+              <button type="button" class="ghost" data-wnext="2">Next: where does it happen? ▸</button></div></section>
+          <section class="wstep" data-wstep="2"><button type="button" class="whead" data-wgo="2" aria-expanded="false"><i class="wnum">2</i><span class="wtitle">Where?</span><small id="wsum2"></small></button>
+            <div class="wbody" hidden>
+              <div class="sfade onbg"><div class="bgpick row" id="dbgs">${bgButtons()}</div></div>
+              <div id="dbgup" class="bgup">${bgUpload()}</div>
+              <button type="button" class="ghost" data-wnext="3">Next: write the lines ▸</button></div></section>
+          <section class="wstep" data-wstep="3"><button type="button" class="whead" data-wgo="3" aria-expanded="false"><i class="wnum">3</i><span class="wtitle">Your chapter</span><small id="wsum3"></small></button>
+            <div class="wbody" hidden>
+              ${(ch.outline.find((x) => x.number === ch.number) || {}).headline ? `<p class="pnote dhl">Your headline: <b>${esc(ch.outline.find((x) => x.number === ch.number).headline)}</b></p>` : ''}
+              <p class="pnote">Tip: put actions between asterisks, like <b>*slams the door*</b>. Open <b>Effects</b> on a line to shake the screen, flash it red and more (they stack), and tap Preview to see it.</p>
+              <div id="dlines"></div></div></section>`,
         foot: '<button class="big-btn" type="button" data-act="sendchapter">Send my chapter</button>',
         after: () => {
           dJob = v;
           dMost = v.max_lines;
           redrawLines();
+          showStep(dStep);
         },
         slim: true,
         refresh: () => redrawBgs(), // someone uploaded a background
@@ -1385,12 +1456,22 @@
       dEmo = b.dataset.dtab;
       lastKey = '';
       render();
+    } else if (b.dataset.wgo || b.dataset.wnext) {
+      const n = Number(b.dataset.wgo || b.dataset.wnext);
+      if (n > 1 && dCast && !dCast.length) {
+        showStep(1);
+        return showErr("Pick who's in your chapter first.");
+      }
+      showStep(n);
+    } else if (b.dataset.lprev && dLines) {
+      previewFx(Number(b.dataset.lprev));
     } else if (b.dataset.rmbg) {
       send({ type: 'remove_bg', id: b.dataset.rmbg });
     } else if (b.dataset.bg) {
       dBg = b.dataset.bg;
       for (const x of document.querySelectorAll('[data-bg]'))
         x.setAttribute('aria-pressed', String(x.dataset.bg === dBg));
+      stepSummaries();
     } else if (b.dataset.dcast && dCast) {
       const c = b.dataset.dcast;
       if (dCast.includes(c)) dCast = dCast.filter((x) => x !== c);

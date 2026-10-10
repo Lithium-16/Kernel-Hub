@@ -678,3 +678,18 @@ def test_the_credits_have_every_mood_of_every_character():
     assert sorted(map(len, names)) == [4, 4, 4, 5]
     assert [m for m in names if len(m) == 5] == [[*EMOTIONS, "smug"]]
     assert all(m["face"] for c in chars.values() for m in c["moods"])
+
+
+def test_the_big_screen_sees_how_far_each_artist_is():
+    pids, g = to_draw(4)
+    artist = g.characters["p0"].artist
+    other = g.characters["p1"].artist
+    assert g.host_view(1.0)["progress"][artist] == {"moods": 0, "extra": 0, "ready": False}
+    g.handle(artist, {"type": "face", "emotion": "sad", "strokes": LINE}, 1.0)
+    draw_all(g, other)
+    g.handle(other, {"type": "face", "emotion": "smug", "strokes": LINE}, 1.0)
+    g.handle(other, {"type": "ready"}, 1.0)
+    prog = g.host_view(1.0)["progress"]
+    assert prog[artist] == {"moods": 1, "extra": 0, "ready": False}
+    assert prog[other] == {"moods": 4, "extra": 1, "ready": True}
+    assert '"p": [' not in json.dumps(g.host_view(1.0))  # counts only, no drawings

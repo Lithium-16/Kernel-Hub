@@ -1883,6 +1883,9 @@ class DramaClub(Game):
         if ph == "pitch_vote":
             v["themes"] = [{"pid": p, "text": t, "problem": self.problems.get(p, ""), "names": self.name_ideas.get(p, [])}
                            for p, t in self.themes.items()]
+        elif ph == "draw":  # how far along each artist is: counts only, the art stays hidden
+            v["progress"] = {c.artist: {"moods": len(set(EMOTIONS) & set(c.faces)), "extra": len(c.moods()),
+                                        "ready": c.artist in self.ready} for c in self.characters.values()}
         elif ph == "headline":
             v["outline"] = self._outline(self.relay)
             v["relay"] = {"number": self.relay + 1, "of": len(self.chapters), "part": self.part(self.relay),
