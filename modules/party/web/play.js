@@ -69,6 +69,7 @@
   let dJob = null;
   let dMost = 6;
   let dStep = 1; // writing: which of the three steps (who, where, lines) is open
+  let dNewMood = false; // drawing: the box for naming an extra mood is open
   let dMore = false; // drawing: back to the pad after saying "I'm done" (for more moods)
   let dSeenUp = null; // writing: the uploaded backgrounds this phone has already seen
 
@@ -491,7 +492,8 @@
       .map((ln, i) => {
         const h = hueOf(ln.who);
         return `<div class="dline" data-line="${i}" style="${h === null ? '' : `--hue:${h}`}">
-          <div class="lhead"><span class="lnum">Line ${i + 1}</span></div>
+          <div class="lhead"><span class="lnum">Line ${i + 1}</span>${dLines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line ${i + 1}">Remove ×</button>` : ''}</div>
+          <textarea data-ltext="${i}" maxlength="400" rows="2" autocomplete="off" aria-label="Line ${i + 1}" placeholder="${ln.who === 'n' ? 'What happens…' : 'What they say…'}">${esc(ln.text)}</textarea>
           <div class="who">${who.map((w) => `<button type="button" data-lwho="${i}:${w}" style="--hue:${hueOf(w) ?? 0}" class="${w === 'n' ? 'narr' : 'cast'}" aria-pressed="${ln.who === w}">${w === 'n' ? '' : '<i class="dot" aria-hidden="true"></i>'}${esc(speakerName(w))}</button>`).join('')}</div>
           ${
             ln.who === 'n'
@@ -510,7 +512,6 @@
                 `<button type="button" data-lfx="${i}:${k}" aria-pressed="${ln.fx.includes(k)}" aria-label="${label}" title="${label}"><span aria-hidden="true">${icon}</span>${short}</button>`,
             )
             .join('')}</div></div>${ln.fx.length ? `<button type="button" class="ghost prevbtn" data-lprev="${i}">▶ Preview</button>` : ''}</details>
-          <div class="row"><textarea data-ltext="${i}" maxlength="400" rows="1" autocomplete="off" aria-label="Line ${i + 1}" placeholder="${ln.who === 'n' ? 'What happens…' : 'What they say…'}">${esc(ln.text)}</textarea>${dLines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line ${i + 1}">×</button>` : ''}</div>
         </div>`;
       })
       .join('')}
@@ -692,6 +693,7 @@
     if (v.phase !== 'draw') {
       dEmo = null;
       dMore = false;
+      dNewMood = false;
     }
     if (v.phase === 'pitch') {
       if (v.mine)
@@ -706,8 +708,8 @@
           <p class="pnote">Pitch a theme and the problem the story is about. Then the room votes. Idea: ${esc(v.idea || 'anything dramatic')}</p>
           <div class="field"><label for="f-theme">Your theme</label><input id="f-theme" maxlength="120" autocomplete="off" placeholder="A haunted bakery"></div>
           <div class="field"><label for="f-problem">The problem: what goes wrong?</label><input id="f-problem" maxlength="160" autocomplete="off" placeholder="Someone stole every croissant"></div>
-          <div class="field"><label for="f-name0">Names for the characters <small>(${v.name_slots}: one for each player)</small></label><div class="names">${Array.from({ length: v.name_slots }, (_, i) => `<input id="f-name${i}" maxlength="24" autocomplete="off" aria-label="Character name ${i + 1}" placeholder="${NAME_IDEAS[i % NAME_IDEAS.length]}">`).join('')}</div>
-          <span class="pnote">If your pitch wins, these names are dealt out and everyone builds a character on theirs. Leave some blank and we'll fill them in.</span></div>`,
+          <details class="field namesd"><summary>Suggest character names <small>(optional · ${v.name_slots} needed)</small></summary><div class="names">${Array.from({ length: v.name_slots }, (_, i) => `<input id="f-name${i}" maxlength="24" autocomplete="off" aria-label="Character name ${i + 1}" placeholder="${NAME_IDEAS[i % NAME_IDEAS.length]}">`).join('')}</div>
+          <span class="pnote">If your pitch wins, these names are dealt out and everyone builds a character on theirs. Blanks get filled in for you.</span></details>`,
         foot: '<button class="big-btn" type="button" data-act="theme">Pitch it</button>',
         input: true,
       };
@@ -722,7 +724,7 @@
       return {
         key: base,
         main: `${top}<h2 class="ptitle">Which story should we tell?</h2>
-          ${v.themes.map((t) => `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'><span>${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? `<small class="dnames">Cast: ${t.names.map(esc).join(', ')}</small>` : ''}</span></button>`).join('')}`,
+          ${v.themes.map((t) => `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'><span>${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? `<small class="dnames">Cast: ${t.names.slice(0, 3).map(esc).join(', ')}${t.names.length > 3 ? ` +${t.names.length - 3}` : ''}</small>` : ''}</span></button>`).join('')}`,
         input: true,
       };
     }
@@ -765,26 +767,30 @@
       if (!dEmo) dEmo = Object.keys(MOODS).find((k) => !sent.includes(k)) || 'neutral';
       const names = [...Object.keys(MOODS), ...c.moods];
       if (!names.includes(dEmo)) names.push(dEmo); // a new extra mood, not saved yet
+      const canAdd = have && c.moods.length < v.max_moods;
       const tabs = `<div class="moods tabs">${names
         .map(
           (k) =>
             `<button type="button" data-dtab="${esc(k)}" aria-pressed="${k === dEmo}">${sent.includes(k) ? '✓ ' : ''}${esc(moodLabel(k))}</button>`,
         )
-        .join('')}</div>`;
+        .join('')}${canAdd ? `<button type="button" class="addtab" data-act="newmood" aria-expanded="${dNewMood}">＋ Mood</button>` : ''}</div>`;
       const extra =
-        have && c.moods.length < v.max_moods
-          ? `<div class="newmood"><input id="f-newmood" maxlength="${v.max_mood_name}" autocomplete="off" aria-label="Name an extra mood" placeholder="Extra mood: smug, sparkly…"><button class="ghost" type="button" data-act="addmood">＋ Add</button></div>`
+        canAdd && dNewMood
+          ? `<div class="newmood"><input id="f-newmood" maxlength="${v.max_mood_name}" autocomplete="off" aria-label="Name an extra mood" placeholder="Name it: smug, sparkly…"><button class="ghost" type="button" data-act="addmood">Add</button></div>`
           : '';
       const neutral = c.faces.neutral;
+      const hint = have
+        ? 'All four are in: add extra moods, or tap Done.'
+        : dEmo === 'neutral'
+          ? 'Standing, no background.'
+          : 'Change the face. From neutral helps.';
       return {
-        key: `${base}:${dEmo}:${sent.join(',')}:${c.moods.join(',')}`,
-        main: `${top}<span class="kicker">Your job: draw ${esc(c.name)} · ${esc(dEmo)}${v.ends_in === null ? ' · no time limit' : ''}</span>
-          ${charCard(c)}${tabs}${extra}
-          <p class="pnote">${dEmo === 'neutral' ? 'Full character, standing. No background: the scene goes behind them.' : 'Tap Start from neutral, then change the face.'}${have ? " The four main moods are in: add extra moods if you like (writers can pick them for this character's lines), then tap I'm done." : ''}</p>
-          ${c.moods.includes(dEmo) ? '<button class="ghost" type="button" data-act="dropmood">Remove this mood</button>' : ''}
+        key: `${base}:${dEmo}:${sent.join(',')}:${c.moods.join(',')}:${dNewMood}`,
+        main: `${top}${charCard(c)}${tabs}${extra}
+          <p class="pnote">${hint}${c.moods.includes(dEmo) ? ' <button type="button" class="linkbtn" data-act="dropmood">Remove this mood</button>' : ''}</p>
           <div id="studio"></div>`,
         flow: true,
-        foot: `<div class="footrow"><button class="big-btn" type="button" data-act="face">Save ${esc(dEmo)}</button>${dEmo !== 'neutral' && neutral ? '<button class="ghost" type="button" data-act="fromneutral">Start from neutral</button>' : ''}${have ? '<button class="ghost" type="button" data-act="drawdone">I\'m done</button>' : ''}</div>`,
+        foot: `<div class="footrow"><button class="big-btn" type="button" data-act="face">Save ${esc(dEmo)}</button>${dEmo !== 'neutral' && neutral ? '<button class="ghost" type="button" data-act="fromneutral">From neutral</button>' : ''}${have ? '<button class="ghost" type="button" data-act="drawdone">Done</button>' : ''}</div>`,
         after: () => {
           pad = D.Studio($('studio'), {
             sprite: true,
@@ -908,7 +914,7 @@
         key: `${base}:${vs.chapter}:${vs.drawing}`,
         main: `${top}<h2 class="ptitle">Vote: best chapter and best drawing</h2>
           <h3 class="dhead">Best chapter</h3>
-          ${v.chapters.map((c) => `<button class="choice" type="button" aria-pressed="${vs.chapter === c.index}" data-send='${esc(JSON.stringify({ type: 'vote', chapter: c.index }))}'><span class="dthumb">${S.svg(c.bg, '', true)}</span>Chapter ${c.number}: “${esc(c.first)}”<small>${esc(c.cast.join(' & '))}</small></button>`).join('')}
+          ${v.chapters.map((c) => `<button class="choice" type="button" aria-pressed="${vs.chapter === c.index}" data-send='${esc(JSON.stringify({ type: 'vote', chapter: c.index }))}'><span class="dthumb">${S.svg(c.bg, '', true)}</span><span class="ctext">Chapter ${c.number}: “${esc(c.first)}”<small>${esc(c.cast.join(' & '))}</small></span></button>`).join('')}
           <h3 class="dhead">Best drawing</h3>
           <div class="dgallery">${v.drawings.map((c) => `<button type="button" aria-pressed="${vs.drawing === c.pid}" data-send='${esc(JSON.stringify({ type: 'vote', drawing: c.pid }))}'>${D.artCanvas(c.face, '')}<span>${esc(c.name)}</span></button>`).join('')}</div>`,
         input: true,
@@ -1341,9 +1347,15 @@
       dEmo = Object.keys(MOODS).find((k) => !sent.has(k)) || dEmo; // on to the next main mood
       return;
     }
+    if (a === 'newmood') {
+      dNewMood = !dNewMood;
+      lastKey = '';
+      return render();
+    }
     if (a === 'addmood') {
       const name = normMood($('f-newmood').value || '');
       if (!name) return showErr('Give the mood a name.');
+      dNewMood = false;
       dEmo = name;
       lastKey = '';
       return render();
