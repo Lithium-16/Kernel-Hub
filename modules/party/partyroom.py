@@ -72,11 +72,16 @@ class Seat:
     device: str = ""  # the phone's profile token, so it signs in by itself next time
     sockets: set[web.WebSocketResponse] = field(default_factory=set)
     bot: bool = False  # a test player the host added; plays by itself
+    pfp: str = ""  # a profile picture from PFPS, or "" for the letter
 
     @property
     def connected(self) -> bool:
         return self.bot or bool(self.sockets)
 
+
+# Profile pictures players can pick (web/pfp/<key>.webp), in the order the picker shows them.
+PFPS = {"kernel": "Kernel", "user": "User", "sunny": "Sunny", "bocchi": "Bocchi", "ryo": "Ryo", "kita": "Kita",
+        "konata": "Konata", "tsukasa": "Tsukasa", "miyuki": "Miyuki", "haruhi": "Haruhi", "lucoa": "Lucoa"}
 
 # Timer speeds the host can pick per room: every timed step of every game is multiplied by it.
 TIMERS = {"fast": 0.75, "normal": 1.0, "relaxed": 1.5, "extra": 2.0}
@@ -404,6 +409,12 @@ class Room:
             self._cards[seat.profile] = self.store.profile(seat.profile)
         return self._cards[seat.profile]
 
+    def set_pfp(self, pid: str, key: Any) -> None:
+        """A player's profile picture: one of PFPS, or "" for the letter."""
+        if key != "" and key not in PFPS:
+            raise Invalid("Pick one of the pictures.")
+        self.seats[pid].pfp = key
+
     def set_pin(self, pid: str, pin: Any) -> None:
         seat = self.seats.get(pid)
         if self.store is None or seat is None or seat.profile is None:
@@ -445,6 +456,8 @@ class Room:
         is_vip = pid == self.vip
         if kind == "set_pin":
             self.set_pin(pid, msg.get("pin"))
+        elif kind == "pfp":
+            self.set_pfp(pid, msg.get("pfp"))
         elif kind == "choose" and is_vip:
             if msg.get("game") not in GAMES:
                 raise Invalid("Pick a game first.")
@@ -509,13 +522,14 @@ class Room:
             if self.intro else None,
             "max_players": self.max_players,
             "players": [
-                {"pid": p, "name": s.name, "color": s.color, "connected": s.connected, "bot": s.bot,
+                {"pid": p, "name": s.name, "color": s.color, "pfp": s.pfp, "connected": s.connected, "bot": s.bot,
                  "score": scores.get(p, 0), "night": self.night.get(p, 0),
                  "playing": self.game is None or p in self.game.pids,
                  "champ": champ is not None and s.profile == champ}
                 for p, s in self.seats.items()
             ],
             "games": [{"key": g.key, "title": g.title, "min": g.min_players, "max": g.max_players} for g in GAMES.values()],
+            "pfps": [[k, label] for k, label in PFPS.items()],
         }
 
     def host_state(self) -> dict[str, Any]:
@@ -606,6 +620,7 @@ class PartyServer:
         app.router.add_get("/health", self._health)
         app.router.add_get("/static/{name}", self._static)
         app.router.add_get("/bg/{name}", self._background)
+        app.router.add_get("/pfp/{name}", self._pfp)
         app.router.add_get("/ws", self._ws)
         app.on_startup.append(self._start_ticker)
         app.on_cleanup.append(self._stop_ticker)
@@ -717,6 +732,14 @@ class PartyServer:
             raise web.HTTPNotFound()
         return web.FileResponse(WEB / "bg" / name, headers={"Content-Type": "image/webp",
                                                              "Cache-Control": "max-age=86400"})
+
+    async def _pfp(self, request: web.Request) -> web.StreamResponse:
+        """The profile pictures, by name only."""
+        name = request.match_info["name"]
+        if name.removesuffix(".webp") not in PFPS or not name.endswith(".webp"):
+            raise web.HTTPNotFound()
+        return web.FileResponse(WEB / "pfp" / name, headers={"Content-Type": "image/webp",
+                                                              "Cache-Control": "max-age=86400"})
 
     # -- sockets --------------------------------------------------------------------------
 

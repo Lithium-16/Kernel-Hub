@@ -34,7 +34,10 @@
   const nameOf = (pid) => player(pid).name;
   const av = (pid, size = '', extra = '', off = false) => {
     const p = player(pid);
-    return `<span class="av ${size} c${p.color}${off ? ' off' : ''}" aria-hidden="true">${esc((p.name || '?')[0].toUpperCase())}${extra}</span>`;
+    const face = p.pfp
+      ? `<img src="/pfp/${esc(p.pfp)}.webp" alt="">`
+      : esc((p.name || '?')[0].toUpperCase());
+    return `<span class="av ${size} c${p.color}${p.pfp ? ' pic' : ''}${off ? ' off' : ''}" aria-hidden="true">${face}${extra}</span>`;
   };
   const bar = (title, glyph) =>
     `<div class="tvbar"><div class="logo"><i>${glyph}</i>${esc(title)}</div><div class="code">Room <b>${esc(st.room.code)}</b></div></div>`;
