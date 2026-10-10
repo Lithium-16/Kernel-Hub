@@ -233,15 +233,21 @@
         "Draw someone else's character",
         'Neutral, flustered, sad and angry. Nobody sees the drawings until the show!',
       );
-    if (v.phase === 'headline')
-      return work(
-        'One sentence per chapter',
-        "Everyone writes what happens in their chapter. Next, you'll see the headlines before and after yours.",
-      );
+    if (v.phase === 'headline') {
+      const r = v.relay;
+      const lines = v.outline
+        .map(
+          (x, i) =>
+            `<li class="${i === v.outline.length - 1 ? 'new' : ''}">${av(x.writer, 'sm')}<span><small>Chapter ${x.number}</small>${esc(x.headline)}</span></li>`,
+        )
+        .join('');
+      return `${head(step)}<h2 class="big" style="font-size:52px">The story so far</h2>${theme}
+        <ol class="doutline">${lines}<li class="next">${av(r.writer, 'sm')}<span><small>Chapter ${r.number} of ${r.of}</small><b>${esc(nameOf(r.writer))}</b> is writing what happens next…</span></li></ol>${ring()}</div>`;
+    }
     if (v.phase === 'write')
       return work(
         'One story, one chapter each',
-        'Everyone writes their chapter at the same time, bridging the headlines before and after theirs.',
+        'Everyone writes their chapter at the same time, following the outline from start to end.',
         `<div class="dstarring">Starring ${(v.cast || []).map((c) => `<b>${esc(c.name)}</b>`).join(' · ')}</div>`,
       );
     if (v.phase === 'show') {

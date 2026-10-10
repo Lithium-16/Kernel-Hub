@@ -2610,6 +2610,55 @@ body.play {
 .dpart .kicker {
   color: var(--acc);
 }
+/* host: the outline growing during the headline relay */
+.doutline {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  max-width: 1040px;
+}
+.doutline:has(li:nth-child(6)) {
+  grid-template-rows: repeat(5, auto);
+  grid-auto-flow: column;
+  grid-template-columns: 1fr 1fr;
+}
+.doutline li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 14px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--acc) 14%, transparent);
+  font-size: 24px;
+  font-weight: 700;
+}
+.doutline li small {
+  display: block;
+  font-size: 15px;
+  opacity: 0.7;
+}
+.doutline li.next {
+  background: transparent;
+  border: 3px dashed color-mix(in srgb, var(--acc) 60%, transparent);
+  font-weight: 500;
+}
+.doutline li.new {
+  animation: outline-in 0.5s ease-out;
+}
+@keyframes outline-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .doutline li.new {
+    animation: none;
+  }
+}
+
 .dheads {
   margin: 6px 0;
   padding: 0;
