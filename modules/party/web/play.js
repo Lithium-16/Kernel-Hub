@@ -404,6 +404,10 @@
       )
       .join('')}</div>`;
   }
+  /** The outline: one headline per chapter, in order; `mine` (a chapter number) is highlighted. */
+  function outlineList(items, mine) {
+    return `<ol class="dheads">${items.map((x) => `<li${x.number === mine ? ' class="me"' : ''}><small>Chapter ${x.number}${x.number === mine ? ' · yours' : ''}</small>${esc(x.headline)}</li>`).join('')}</ol>`;
+  }
   function charCard(c, extra = '') {
     return `<div class="card dchar"><b>${esc(c.name)}</b><span class="pnote">${esc(c.look || 'No description: surprise us!')}</span>${c.personality ? `<span class="pnote"><i>${esc(c.personality)}</i></span>` : ''}${extra}</div>`;
   }
@@ -545,21 +549,29 @@
     }
     if (v.phase === 'headline') {
       const ch = v.chapter;
-      if (ch.done)
+      const sofar = v.outline.length
+        ? `<h3 class="dhead">The story so far</h3>${outlineList(v.outline, 0)}`
+        : '';
+      if (ch.turn !== 'now')
         return {
-          key: base + ':done',
+          key: `${base}:${ch.turn}:${v.outline.length}`,
           main:
             top +
-            wait('Headline in!', 'Next you write the chapter, with the headlines around yours.'),
+            wait(
+              ch.turn === 'done' ? 'Headline in!' : `You're up in ${ch.turns_left}`,
+              `${esc(player(v.writer).name)} is writing chapter ${v.outline.length + 1}'s headline. Watch the story grow!`,
+            ) +
+            sofar,
           foot: skipBtn(),
         };
       const [label, hint] = PART[ch.part];
       return {
-        key: base,
-        main: `${top}<h2 class="ptitle">What happens in chapter ${ch.number} of ${ch.of}?</h2>
+        key: `${base}:now`,
+        main: `${top}<h2 class="ptitle">Your turn: what happens in chapter ${ch.number} of ${ch.of}?</h2>
           <div class="card dpart"><span class="kicker">${esc(label)}</span><span>${esc(hint)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b>. The problem: <b>${esc(v.problem)}</b></span></div>
-          <p class="pnote">One sentence. The writers before and after you will see it, so the story connects. Starring ${v.cast.map((c) => `<b>${esc(c.name)}</b>`).join(', ')}.</p>
-          <div class="field"><label for="f-headline">Your chapter's headline</label><input id="f-headline" maxlength="80" enterkeyhint="send" autocomplete="off" placeholder="Vlad gets blamed for the missing croissants"></div>`,
+          ${sofar || '<p class="pnote"><b>You start the story!</b></p>'}
+          <p class="pnote">One sentence that carries on from the story so far. Starring ${v.cast.map((c) => `<b>${esc(c.name)}</b>`).join(', ')}.</p>
+          <div class="field"><label for="f-headline">Chapter ${ch.number}'s headline</label><input id="f-headline" maxlength="80" enterkeyhint="send" autocomplete="off" placeholder="Vlad gets blamed for the missing croissants"></div>`,
         foot: '<button class="big-btn" type="button" data-act="headline">Send headline</button>',
         input: true,
       };
@@ -582,7 +594,7 @@
         key: base,
         main: `${top}<h2 class="ptitle">Write chapter ${ch.number} of ${ch.of}</h2>
           <div class="card dpart"><span class="kicker">${esc(label)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b>. The problem: <b>${esc(v.problem)}</b></span>
-            <ol class="dheads">${ch.before ? `<li><small>Before you</small>${esc(ch.before)}</li>` : '<li><small>Before you</small>The story starts with you!</li>'}<li class="me"><small>Your chapter</small>${esc(ch.headline)}</li>${ch.after ? `<li><small>After you</small>${esc(ch.after)}</li>` : '<li><small>After you</small>The end. Wrap it all up!</li>'}</ol>
+            ${outlineList(ch.outline, ch.number)}
             <span class="pnote">${esc(hint)} Get the story from the chapter before into the one after.</span></div>
           <h3 class="dhead">Who's in it? <small>(up to 2)</small></h3>
           <div class="dcastpick">${v.cast.map((c) => `<button type="button" data-dcast="${esc(c.pid)}" aria-pressed="${dCast.includes(c.pid)}"><b>${esc(c.name)}</b><span>${esc(c.look || '')}</span>${c.personality ? `<i>${esc(c.personality)}</i>` : ''}</button>`).join('')}</div>

@@ -34,7 +34,7 @@
       steps: [
         'Pitch a theme and the problem, and vote. The whole room tells one story about it.',
         "Invent a character in words. Then draw someone else's character in four moods.",
-        'Write a one-line headline for your chapter, then the chapter, bridging the headlines next to yours. The big screen plays it all!',
+        'Take turns writing one-line headlines, in order, to outline the story. Then everyone writes their chapter at once, and the big screen plays it all!',
       ],
       score:
         "Votes for best chapter pay its writer. Votes for best drawing pay the artist and the character's inventor.",

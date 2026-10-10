@@ -183,8 +183,8 @@ The games (3 to 8 players; Bluff Buffet works with 2):
 - **Shirt Showdown**: draw designs, write slogans, make shirts and battle them.
 - **Drama Club**: the room writes one visual novel together. Pitch a theme and the story's
   problem, invent a character in words, then draw someone else's character in four moods.
-  Everyone writes a one-line headline for their chapter, then the chapter itself, seeing the
-  headlines just before and after theirs so the story connects. The big screen plays the
+  Players take turns writing a one-line headline per chapter, in order, each seeing the story
+  so far; then everyone writes their chapter at once with the whole outline in view. The big screen plays the
   chapters in order. Nobody sees the drawings until the show.
 
 To try a game alone, move the mouse on the host screen and press **Add bot** (or ask the
