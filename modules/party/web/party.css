@@ -3795,3 +3795,506 @@ details.dpart[open] > summary {
 .wstep .wbody {
   grid-template-columns: minmax(0, 1fr);
 }
+
+/* =====================================================================================
+   Drama Club, cinematic: a dark theatre palette with amber light, film grain and letterbox.
+   Everything here is scoped to Drama Club's screens (data-game="drama"). It always uses the dark
+   look, whatever the device prefers: a film doesn't switch to light mode.
+   ===================================================================================== */
+:root {
+  --cin-amber: #f6b85d;
+  --cin-violet: #7b61ff;
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+#ph[data-game="drama"],
+.scene[data-game="drama"] {
+  --bg: #07060d;
+  --surface: #110e1c;
+  --surface-2: #181428;
+  --card: #120f1e;
+  --edge: #332b4f;
+  --line: #2b2544;
+  --fg: #f1ecf9;
+  --muted: #a69fc0;
+  --ink: #1b1204;
+  --acc: var(--cin-amber);
+  color-scheme: dark;
+  color: var(--fg);
+}
+body.play:has(#ph[data-game="drama"]) {
+  background:
+    radial-gradient(120% 360px at 50% -80px, rgba(246, 184, 93, 0.2), transparent 72%),
+    radial-gradient(90% 420px at 100% 100%, rgba(123, 97, 255, 0.16), transparent 70%),
+    #07060d;
+  background-attachment: fixed;
+}
+#ph[data-game="drama"]::after {
+  content: "";
+  position: fixed;
+  inset: -50%;
+  z-index: 40;
+  pointer-events: none;
+  background: var(--grain);
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+}
+/* the big screen between shows: a spotlit stage with a slow film grain */
+.scene[data-game="drama"]:not(.vn) {
+  background:
+    radial-gradient(900px 520px at 10% -12%, rgba(246, 184, 93, 0.17), transparent 62%),
+    radial-gradient(1000px 620px at 100% 115%, rgba(123, 97, 255, 0.24), transparent 62%),
+    #07060d;
+}
+.scene[data-game="drama"]:not(.vn)::before {
+  color: rgba(246, 184, 93, 0.06);
+}
+.scene[data-game="drama"]:not(.vn)::after {
+  content: "";
+  position: absolute;
+  inset: -50%;
+  z-index: 50;
+  pointer-events: none;
+  background: var(--grain);
+  opacity: 0.08;
+  mix-blend-mode: overlay;
+  animation: grain 0.8s steps(6) infinite;
+}
+@keyframes grain {
+  0% { translate: 0 0; }
+  20% { translate: -3% 2%; }
+  40% { translate: 2% -3%; }
+  60% { translate: -2% -1%; }
+  80% { translate: 3% 3%; }
+}
+.scene[data-game="drama"] .tvbar .logo {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.scene[data-game="drama"] .tag {
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  font-size: 18px;
+  color: var(--cin-amber);
+}
+.scene[data-game="drama"]:not(.vn) .big {
+  background: linear-gradient(180deg, #fff 30%, #c4b5ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 28px rgba(246, 184, 93, 0.22));
+}
+.scene[data-game="drama"] .dtheme {
+  background: rgba(246, 184, 93, 0.1);
+  border: 1px solid rgba(246, 184, 93, 0.4);
+  color: #ffe9c4;
+}
+.scene[data-game="drama"] .opt {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--fg);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+.scene[data-game="drama"] .opt small {
+  color: var(--muted);
+}
+
+/* the show: a letterboxed film frame */
+.vnstage::before {
+  content: "";
+  position: absolute;
+  inset: -50%;
+  z-index: 4;
+  pointer-events: none;
+  background: var(--grain);
+  opacity: 0.1;
+  mix-blend-mode: overlay;
+  animation: grain 0.8s steps(6) infinite;
+}
+.vnstage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: radial-gradient(ellipse 88% 78% at 50% 54%, transparent 50%, rgba(0, 0, 0, 0.66) 100%);
+}
+.vnbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 64px;
+  z-index: 7;
+  background: #000;
+  animation: barin 1.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.vnbar.t {
+  top: 0;
+  transform-origin: top;
+}
+.vnbar.b {
+  bottom: 0;
+  transform-origin: bottom;
+}
+@keyframes barin {
+  from { transform: scaleY(0); }
+}
+.vnbg {
+  transform-origin: 50% 65%;
+  animation: kenburns 32s ease-in-out infinite alternate;
+}
+@keyframes kenburns {
+  from { transform: scale(1.02); }
+  to { transform: scale(1.1) translate(-1.5%, -1%); }
+}
+.vnstage .sprite {
+  bottom: 56px;
+  transform-origin: 50% 100%;
+}
+.sprite.in {
+  animation: breathe 5.5s ease-in-out infinite;
+}
+.sprite.in.pop {
+  animation: breathe 5.5s ease-in-out infinite, hop 0.4s ease-out;
+}
+@keyframes breathe {
+  50% { scale: 1.012 1.022; }
+}
+.vnbox {
+  bottom: 88px;
+  padding: 36px 44px 26px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(22, 16, 38, 0.6), rgba(8, 6, 15, 0.84));
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  backdrop-filter: blur(16px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-left: 4px solid hsl(var(--hue, 262) 80% 65%);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  z-index: 6;
+}
+.vnbox .plate {
+  top: -27px;
+  left: 34px;
+  border-radius: 8px;
+  letter-spacing: 0.05em;
+  background: hsl(var(--hue, 262) 75% 68%);
+  color: #10091f;
+  box-shadow: 0 8px 26px hsl(var(--hue, 262) 80% 50% / 0.5);
+}
+.vnbox::after {
+  content: "▼";
+  position: absolute;
+  right: 30px;
+  bottom: 14px;
+  font-size: 20px;
+  color: hsl(var(--hue, 262) 85% 72%);
+  animation: cue 1.1s ease-in-out infinite;
+}
+@keyframes cue {
+  50% { translate: 0 6px; opacity: 0.55; }
+}
+.vnbox.narrator {
+  border-left-color: rgba(255, 255, 255, 0.28);
+}
+.vnchap,
+.vnnext {
+  z-index: 8;
+  color: #d9cfff;
+}
+.vnchap {
+  top: 18px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 15px;
+  background: none;
+}
+.vnnext {
+  bottom: 18px;
+  background: none;
+  letter-spacing: 0.1em;
+}
+/* chapter title card */
+.vncard {
+  z-index: 6;
+  gap: 14px;
+  background:
+    radial-gradient(900px 500px at 50% 46%, rgba(246, 184, 93, 0.12), transparent 70%),
+    rgba(5, 4, 10, 0.93);
+}
+.vncard::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(50% - 190px);
+  width: 2px;
+  height: 90px;
+  translate: -50% 0;
+  background: linear-gradient(transparent, var(--cin-amber));
+  transform-origin: top;
+  animation: linedrop 1.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes linedrop {
+  from { transform: scaleY(0); }
+}
+.vncard > * {
+  animation: cardrise 1s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.vncard > :nth-child(2) { animation-delay: 0.14s; }
+.vncard > :nth-child(3) { animation-delay: 0.28s; }
+.vncard > :nth-child(4) { animation-delay: 0.42s; }
+@keyframes cardrise {
+  from { opacity: 0; translate: 0 26px; filter: blur(8px); }
+}
+.vncard .big {
+  font-size: 92px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #fff 25%, #bfaeff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 30px rgba(246, 184, 93, 0.28));
+}
+.vncard .dchap {
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--cin-amber);
+}
+.vncard .dhl {
+  font-style: italic;
+  max-width: 900px;
+  margin-inline: auto;
+  color: #d9d0ee;
+}
+/* credits: a spotlight sweep, polaroid tiles */
+.vncredroll::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(520px 760px at 20% 0%, rgba(246, 184, 93, 0.2), transparent 70%) no-repeat;
+  background-size: 200% 100%;
+  animation: sweep 10s ease-in-out infinite alternate;
+}
+@keyframes sweep {
+  from { background-position: 0% 0; }
+  to { background-position: 100% 0; }
+}
+.vncredroll .tag,
+.vncredroll h3 {
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+}
+.dcastwall > div {
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+.dcastwall > div:nth-child(odd) {
+  rotate: -2.2deg;
+}
+.dcastwall > div:nth-child(even) {
+  rotate: 1.8deg;
+}
+/* a light streak sweeps across between steps */
+.wipe {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 32%,
+    rgba(246, 184, 93, 0.1) 40%,
+    rgba(255, 238, 205, 0.6) 50%,
+    rgba(246, 184, 93, 0.1) 60%,
+    transparent 68%
+  );
+  translate: -100% 0;
+  animation: wipe 0.8s cubic-bezier(0.5, 0, 0.2, 1) forwards;
+}
+@keyframes wipe {
+  to { translate: 100% 0; }
+}
+/* the last seconds: the ring goes red and pulses */
+.scene[data-game="drama"] .timer.urgent .fgc,
+#ph[data-game="drama"] .mring.urgent .fgc {
+  stroke: var(--danger);
+}
+.scene[data-game="drama"] .timer.urgent {
+  animation: urgent 0.5s ease-in-out infinite alternate;
+}
+@keyframes urgent {
+  to { scale: 1.1; }
+}
+/* the phones: a figure in each character's colour in the preview */
+.ghostsprite {
+  background:
+    radial-gradient(circle at 50% 22%, #ffd9b8 0 15%, transparent 15.5%),
+    linear-gradient(hsl(var(--hue, 262) 65% 58%), hsl(var(--hue, 262) 65% 58%)) 50% 100% / 46% 58% no-repeat;
+}
+
+/* ---- more effects ---- */
+.vnfx.fxl {
+  background: repeating-conic-gradient(from 0deg at 50% 50%, transparent 0 3deg, rgba(255, 255, 255, 0.92) 3.2deg 3.7deg, transparent 3.9deg 7deg);
+  -webkit-mask: radial-gradient(circle at 50% 50%, transparent 22%, #000 64%);
+  mask: radial-gradient(circle at 50% 50%, transparent 22%, #000 64%);
+}
+.vnstage.fx-speed .fxl {
+  animation: fxspeed 1.1s ease-out both;
+}
+@keyframes fxspeed {
+  0% { opacity: 0; scale: 1.7; }
+  15% { opacity: 1; }
+  100% { opacity: 0; scale: 1; }
+}
+.vnfx.fxg {
+  background: repeating-linear-gradient(0deg, rgba(255, 0, 90, 0.24) 0 2px, rgba(0, 255, 230, 0.2) 2px 4px, transparent 4px 7px);
+  mix-blend-mode: screen;
+}
+.vnstage.fx-glitch .fxg {
+  animation: fxglitchov 0.9s steps(1) 2;
+}
+.vnstage.fx-glitch .vnbg,
+.vnstage.fx-glitch .sprite {
+  animation: fxglitch 0.9s steps(1) 2;
+}
+@keyframes fxglitchov {
+  0%, 100% { opacity: 0; }
+  10%, 40%, 70% { opacity: 0.85; }
+  25%, 55% { opacity: 0.25; }
+}
+@keyframes fxglitch {
+  0%, 60%, 100% { translate: 0 0; filter: none; clip-path: none; }
+  10% { translate: -16px 0; filter: hue-rotate(90deg) saturate(2); }
+  20% { translate: 20px -4px; clip-path: inset(8% 0 52% 0); }
+  30% { translate: -8px 3px; clip-path: none; filter: contrast(1.7); }
+  45% { translate: 14px 0; filter: hue-rotate(-70deg); clip-path: inset(40% 0 20% 0); }
+}
+.vnparts {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+}
+.vnparts .part {
+  position: absolute;
+  font-style: normal;
+  line-height: 1;
+  animation-duration: var(--d);
+  animation-delay: var(--w);
+  animation-fill-mode: both;
+  animation-timing-function: linear;
+}
+.vnparts.hearts .part {
+  left: var(--x);
+  bottom: -50px;
+  font-size: var(--s);
+  color: #ff6fa8;
+  text-shadow: 0 0 14px rgba(255, 111, 168, 0.7);
+  animation-name: fxrise;
+}
+@keyframes fxrise {
+  0% { translate: 0 0; opacity: 0; scale: 0.6; }
+  12% { opacity: 1; }
+  100% { translate: calc(var(--k) * 90px) -820px; opacity: 0; scale: 1.15; }
+}
+.vnparts.petals .part {
+  left: var(--x);
+  top: -50px;
+  width: var(--s);
+  height: calc(var(--s) * 0.7);
+  background: linear-gradient(135deg, #ffd6e4, #ff9fc0);
+  border-radius: 150% 0 150% 0;
+  animation-name: fxfall;
+}
+@keyframes fxfall {
+  0% { translate: 0 0; rotate: var(--r); opacity: 0; }
+  10% { opacity: 0.95; }
+  100% { translate: calc(var(--k) * 160px - 120px) 840px; rotate: 560deg; opacity: 0.8; }
+}
+.vnparts.rain .part {
+  left: var(--x);
+  top: -90px;
+  width: 2px;
+  height: calc(var(--s) * 2.6);
+  background: linear-gradient(transparent, rgba(190, 215, 255, 0.8));
+  rotate: 8deg;
+  animation-name: fxrain;
+  animation-iteration-count: 8;
+}
+@keyframes fxrain {
+  0% { translate: 0 0; opacity: 0; }
+  10% { opacity: 1; }
+  100% { translate: -90px 880px; opacity: 0.6; }
+}
+.vnparts.sparkle .part {
+  left: var(--x);
+  top: var(--y);
+  font-size: var(--s);
+  color: #ffe9a8;
+  text-shadow: 0 0 12px #ffd36b;
+  animation-name: fxtwinkle;
+}
+@keyframes fxtwinkle {
+  0%, 100% { scale: 0; opacity: 0; rotate: 0deg; }
+  50% { scale: 1.1; opacity: 1; rotate: 90deg; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vnstage::before,
+  .scene[data-game="drama"]:not(.vn)::after,
+  .vnbg,
+  .sprite.in,
+  .vnbox::after,
+  .vncredroll::before {
+    animation: none;
+  }
+  .wipe {
+    display: none;
+  }
+}
+
+/* polish: no light edges behind the dark scenes, a centred title card, readable pitch cards */
+html:has(#ph[data-game="drama"]),
+html:has(.scene[data-game="drama"]),
+body:has(.scene[data-game="drama"]) {
+  background: #07060d;
+}
+.vncard > * {
+  justify-self: center;
+  text-align: center;
+}
+.scene[data-game="drama"] .opt small {
+  color: #cfc7e6;
+  font-family: var(--body);
+  font-weight: 700;
+  font-size: 20px;
+}
+.scene[data-game="drama"] .opt small.dnames {
+  color: var(--cin-amber);
+}
+
+/* the light-mode input styling must not leak into the dark theatre */
+#ph[data-game="drama"] .field input,
+#ph[data-game="drama"] .field textarea,
+#ph[data-game="drama"] .dline input,
+#ph[data-game="drama"] .dline textarea,
+#ph[data-game="drama"] .newmood input {
+  background: color-mix(in srgb, var(--bg) 70%, var(--surface));
+  color: var(--fg);
+  box-shadow: inset 0 3px 0 color-mix(in srgb, #000 35%, transparent);
+}
+#ph[data-game="drama"] input::placeholder,
+#ph[data-game="drama"] textarea::placeholder {
+  color: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+.newmood .ghost {
+  width: auto;
+  flex: none;
+  padding-inline: 18px;
+}
+.vncard::before {
+  top: 90px;
+  height: 70px;
+}

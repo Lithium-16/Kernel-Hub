@@ -1263,7 +1263,8 @@ BACKGROUNDS = PHOTO_BACKGROUNDS + ("classroom", "rooftop", "cafe", "bedroom", "p
                                    "festival", "castle", "spaceship", "haunted")
 NARRATOR = -1  # a line's speaker: a position in the chapter's cast (0, 1, …), or -1 for the narrator
 # Effects a line can set off on the big screen, any number at once (web/host.js plays them).
-EFFECTS = ("shake", "flash_red", "flash_white", "blackout", "zoom", "blur", "sepia", "hop")
+EFFECTS = ("shake", "flash_red", "flash_white", "blackout", "zoom", "blur", "sepia", "hop",
+           "speed", "sparkle", "hearts", "petals", "rain", "glitch")
 MAX_CUSTOM, MAX_MOOD = 6, 16  # extra moods an artist can add to a character, and their name length
 # Backgrounds players upload: a picture (checked by its first bytes), kept in memory for the game.
 MAX_BG_BYTES, MAX_UPLOADS_EACH, MAX_UPLOADS, MAX_BG_NAME = 150_000, 2, 12, 24

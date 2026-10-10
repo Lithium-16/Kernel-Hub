@@ -440,6 +440,12 @@
     blur: ['🌫️', 'Blur', 'Dizzy blur'],
     sepia: ['🎞️', 'Old', 'Flashback'],
     hop: ['⬆️', 'Jump', 'Jump'],
+    speed: ['💨', 'Speed', 'Speed lines'],
+    sparkle: ['✨', 'Sparkle', 'Sparkles'],
+    hearts: ['💗', 'Hearts', 'Floating hearts'],
+    petals: ['🌸', 'Petals', 'Falling petals'],
+    rain: ['🌧️', 'Rain', 'Rain'],
+    glitch: ['📺', 'Glitch', 'Glitch'],
   };
   const NAME_IDEAS = ['Vlad', 'Mimi', 'Captain Pickles', 'Dr. Moon', 'Sir Toast', 'Aiko', 'Big Gary', 'Luna'];
   const PART = {
@@ -543,27 +549,43 @@
     fadeCheck();
     document.querySelector(`[data-wstep="${n}"]`).scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
-  /** Sets the effect classes on a stage (the big screen's own CSS plays them); used by the preview. */
-  function applyFx(stage, list) {
-    const all = Object.keys(FX).map((k) => `fx-${k}`);
-    stage.classList.remove(...all);
-    void stage.offsetWidth; // restart the animations
-    stage.classList.add(...list.filter((k) => k in FX).map((k) => `fx-${k}`));
-  }
-  /** A small stand-in for the big screen: the chosen background, a figure, and the line's effects. */
+  /** A small stand-in for the big screen: the chosen background, the cast as figures in their colours, and the line's effects. */
   function previewFx(i) {
     const ln = dLines[i];
     const det = document.querySelector(`[data-line="${i}"] .dfx`);
     if (!ln || !det) return;
+    const S = window.PartyScenes;
     let box = det.querySelector('.fxprev');
     if (!box) {
       box = document.createElement('div');
       box.className = 'fxprev';
-      box.innerHTML = `<div class="vnstage">${window.PartyScenes.svg(dBg, 'vnbg')}<div class="sprite c in ghostsprite"></div><div class="vnfx fxr"></div><div class="vnfx fxw"></div><div class="vnfx fxk"></div><div class="vnfx fxs"></div><div class="vnbox"><div class="plate">${esc(speakerName(ln.who))}</div><p>${esc(ln.text.trim() || 'Your line shows up here…')}</p></div></div>`;
+      const n = dCast.length;
+      const figs = dCast
+        .map((c, k) => {
+          const spot = n === 1 ? 'c' : n === 2 ? (k ? 'r' : 'l') : 'n';
+          const w = n > 2 ? Math.max(210, Math.min(380, 1180 / n)) : 0;
+          const pos = n > 2 ? ` style="left:${Math.round((1280 - n * w) / (n + 1) + k * (w + (1280 - n * w) / (n + 1)))}px;width:${Math.round(w)}px;height:${Math.round(w)}px;--hue:${hueOf(c)}"` : ` style="--hue:${hueOf(c)}"`;
+          return `<div class="sprite ${spot} in ghostsprite"${pos}></div>`;
+        })
+        .join('');
+      box.innerHTML = `<div class="vnstage">${S.svg(dBg, 'vnbg')}${figs}${S.fxLayers}<div class="vnbar t"></div><div class="vnbar b"></div><div class="vnbox"><div class="plate"></div><p></p></div></div>`;
       det.append(box);
     }
     box.style.setProperty('--k', String(box.clientWidth / 1280));
-    applyFx(box.querySelector('.vnstage'), ln.fx);
+    syncPreview(i);
+    S.playFx(box.querySelector('.vnstage'), ln.fx);
+  }
+  /** Keeps an open preview in step with what's typed (and who's speaking). */
+  function syncPreview(i) {
+    const box = document.querySelector(`[data-line="${i}"] .fxprev`);
+    const ln = dLines[i];
+    if (!box || !ln) return;
+    const vb = box.querySelector('.vnbox');
+    const narr = ln.who === 'n';
+    vb.classList.toggle('narrator', narr);
+    vb.style.setProperty('--hue', String(hueOf(ln.who) ?? 0));
+    box.querySelector('.plate').textContent = narr ? '' : speakerName(ln.who);
+    box.querySelector('p').textContent = ln.text.trim() || 'Your line shows up here…';
   }
   function redrawLines() {
     const box = $('dlines');
@@ -1156,6 +1178,7 @@
     if (!ring || deadline === null) return;
     const left = Math.max(0, deadline - performance.now() / 1000);
     ring.style.strokeDashoffset = String(100.5 * (1 - left / total));
+    ring.closest('.mring').classList.toggle('urgent', left > 0 && left <= 5 && total > 8);
     const secs = String(Math.ceil(left));
     if ($('left').textContent !== secs) {
       $('left').textContent = secs;
@@ -1531,6 +1554,7 @@
       const ln = dLines[Number(e.target.dataset.ltext)];
       if (ln) ln.text = e.target.value;
       syncSend();
+      syncPreview(Number(e.target.dataset.ltext));
     }
     if (e.target.id === 'f-ans') $('cnt').textContent = `${e.target.value.length}/80`;
     if (e.target.id === 'f-code') e.target.value = e.target.value.toUpperCase();
