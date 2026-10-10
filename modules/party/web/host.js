@@ -223,7 +223,7 @@
     const T = 'Drama Club';
     const step = `Step ${v.step} of ${v.steps.length} · ${v.steps[v.step - 1]}`;
     const head = (tag) =>
-      `<div class="scene" data-game="drama"><div class="aurora" aria-hidden="true"></div>${bar(T, 'D')}<span class="tag">${tag}</span>`;
+      `<div class="scene" data-game="drama"><div class="confetti" aria-hidden="true"></div>${bar(T, 'D')}<span class="tag">${tag}</span>`;
     const theme = v.theme
       ? `<span class="dtheme">${esc(v.theme)}</span>${v.problem ? `<p class="dproblem">The problem: <b>${esc(v.problem)}</b></p>` : ''}`
       : '';
