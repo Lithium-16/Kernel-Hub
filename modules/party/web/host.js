@@ -227,9 +227,12 @@
     const theme = v.theme
       ? `<span class="dtheme">${esc(v.theme)}</span>${v.problem ? `<p class="dproblem">The problem: <b>${esc(v.problem)}</b></p>` : ''}`
       : '';
-    /** A pitch's character names, the first few (the phones have them all). */
-    const cast = (names) =>
-      names.slice(0, 4).map(esc).join(' · ') + (names.length > 4 ? ` · +${names.length - 4}` : '');
+    /** A pitch's character names as separate chips: the first few (the phones have them all). */
+    const cast = (names, max) =>
+      `<span class="dcast"><span class="lbl">Cast</span>${names
+        .slice(0, max)
+        .map((n) => `<span class="cn">${esc(n)}</span>`)
+        .join('')}${names.length > max ? `<span class="cn more">+${names.length - max}</span>` : ''}</span>`;
     const work = (title, sub, extra = '', rows = doneRow(v.waiting)) =>
       `${head(step)}<h2 class="big" style="font-size:64px">${title}</h2>${theme}<p class="sub">${sub}</p>${extra}${rows}${ring()}</div>`;
     // Drawing: each artist's moods so far (four pips), their extra moods, and when they're done
@@ -247,7 +250,7 @@
         'Write a theme, the problem and a name for every character on your phone. Then everyone votes.',
       );
     if (v.phase === 'pitch_vote')
-      return `${head(step)}<div class="dthemes${v.themes.length > 6 ? ' dense denser' : v.themes.length > 4 ? ' dense' : ''}">${v.themes.map((t) => `<div class="opt">${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? `<small class="dnames">Cast: ${cast(t.names)}</small>` : ''}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
+      return `${head(step)}<div class="dthemes${v.themes.length > 6 ? ' dense denser' : v.themes.length > 4 ? ' dense' : ''}">${v.themes.map((t) => `<div class="opt">${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? cast(t.names, v.themes.length > 6 ? 2 : v.themes.length > 4 ? 3 : 5) : ''}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
     if (v.phase === 'create')
       return work(
         'Everyone invents a character',

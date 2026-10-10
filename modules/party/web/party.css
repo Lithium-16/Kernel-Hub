@@ -4726,6 +4726,107 @@ body.play:has(#ph[data-game="drama"]) {
 .dthemes.denser .opt small {
   font-size: 15px;
 }
-.dthemes.dense .opt small.dnames {
+
+/* the cast on the vote screens: each character is its own chip, with room between them */
+.dcast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-top: 8px;
+  font-family: var(--body);
+}
+.dcast .lbl {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(26, 18, 48, 0.7);
+  margin-right: 2px;
+}
+.dcast .cn {
+  display: inline-block;
+  padding: 3px 12px;
+  border: 2px solid var(--ol);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ol);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+.dcast .cn.more {
+  background: transparent;
+  border-style: dashed;
+}
+.scene[data-game="drama"]:not(.vn) .dthemes .dcast .cn {
+  font-size: 18px;
+  padding: 4px 14px;
+}
+.scene[data-game="drama"]:not(.vn) .dthemes.dense .dcast .cn {
+  font-size: 15px;
+  padding: 2px 11px;
+}
+.scene[data-game="drama"]:not(.vn) .dthemes.denser .dcast .lbl {
+  display: none;
+}
+#ph[data-game="drama"] .choice .dcast .cn {
+  font-size: 12px;
+  padding: 2px 9px;
+}
+#ph[data-game="drama"] .choice .dcast .lbl {
+  font-size: 11px;
+}
+
+/* audit round 3: readable label, a full room's vote clears the timer, a long name on a narrow phone */
+.dcast .lbl {
+  color: #1a1230;
+}
+.dthemes.denser {
+  margin-bottom: 96px;
+}
+.dthemes.denser .opt {
+  font-size: 20px;
+  padding: 10px 12px;
+}
+.dthemes.denser .opt small {
+  font-size: 14px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+@media (max-width: 380px) {
+  .phtop {
+    gap: 6px;
+    padding-inline: 10px;
+  }
+  .phtop .aa,
+  .phtop .leave {
+    min-width: 40px;
+    width: 40px;
+    padding: 0;
+  }
+  .phtop .pt {
+    font-size: 12px;
+    gap: 6px;
+  }
+  .phtop .who {
+    flex: 1 1 0;
+    min-width: 56px;
+  }
+  .phtop .av {
+    width: 38px;
+    height: 38px;
+    font-size: 18px;
+  }
+}
+
+/* a full room's vote: the timer shrinks out of the last card's way; the hint (off-screen anyway) goes */
+.dthemes.denser ~ .timer {
+  scale: 0.62;
+  transform-origin: bottom right;
+}
+.dthemes.denser ~ .sub {
   display: none;
 }
