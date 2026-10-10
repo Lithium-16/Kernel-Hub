@@ -3797,13 +3797,14 @@ details.dpart[open] > summary {
 }
 
 /* =====================================================================================
-   Drama Club, cinematic: a dark theatre palette with amber light and letterbox.
+   Drama Club, cinematic: a dark theatre palette with amber light, letterbox and (in the show only) film grain.
    Everything here is scoped to Drama Club's screens (data-game="drama"). It always uses the dark
    look, whatever the device prefers: a film doesn't switch to light mode.
    ===================================================================================== */
 :root {
   --cin-amber: #f6b85d;
   --cin-violet: #7b61ff;
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 #ph[data-game="drama"],
 .scene[data-game="drama"] {
@@ -3868,7 +3869,25 @@ body.play:has(#ph[data-game="drama"]) {
   color: var(--muted);
 }
 
-/* the show: a letterboxed film frame */
+/* the show: a letterboxed film frame, with a slow film grain */
+@keyframes grain {
+  0% { translate: 0 0; }
+  20% { translate: -3% 2%; }
+  40% { translate: 2% -3%; }
+  60% { translate: -2% -1%; }
+  80% { translate: 3% 3%; }
+}
+.vnstage::before {
+  content: "";
+  position: absolute;
+  inset: -50%;
+  z-index: 4;
+  pointer-events: none;
+  background: var(--grain);
+  opacity: 0.1;
+  mix-blend-mode: overlay;
+  animation: grain 0.8s steps(6) infinite;
+}
 .vnstage::after {
   content: "";
   position: absolute;
@@ -3922,7 +3941,9 @@ body.play:has(#ph[data-game="drama"]) {
   bottom: 88px;
   padding: 36px 44px 26px;
   border-radius: 20px;
-  background: #0f0b1a;
+  background: linear-gradient(180deg, rgba(22, 16, 38, 0.6), rgba(8, 6, 15, 0.84));
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  backdrop-filter: blur(16px) saturate(1.3);
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-left: 4px solid hsl(var(--hue, 262) 80% 65%);
   box-shadow:
@@ -4001,7 +4022,7 @@ body.play:has(#ph[data-game="drama"]) {
 .vncard > :nth-child(3) { animation-delay: 0.28s; }
 .vncard > :nth-child(4) { animation-delay: 0.42s; }
 @keyframes cardrise {
-  from { opacity: 0; translate: 0 26px; }
+  from { opacity: 0; translate: 0 26px; filter: blur(8px); }
 }
 .vncard .big {
   font-size: 92px;
@@ -4011,6 +4032,7 @@ body.play:has(#ph[data-game="drama"]) {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  filter: drop-shadow(0 0 30px rgba(246, 184, 93, 0.28));
 }
 .vncard .dchap {
   letter-spacing: 0.34em;
@@ -4197,6 +4219,7 @@ body.play:has(#ph[data-game="drama"]) {
   50% { scale: 1.1; opacity: 1; rotate: 90deg; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .vnstage::before,
   .vnbg,
   .sprite.in,
   .vnbox::after,
