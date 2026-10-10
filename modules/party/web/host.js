@@ -4,7 +4,13 @@
   const KEY = new URLSearchParams(location.search).get('key') || '';
   const GLYPH = { quip: 'Q', bluff: 'B', shirt: 'T', drama: 'D' };
   // Timer speeds the host can pick (the server's TIMERS).
-  const TIMERS = { fast: 'Fast', normal: 'Normal', relaxed: 'Relaxed', extra: 'Extra time' };
+  const TIMERS = {
+    fast: 'Fast',
+    normal: 'Normal',
+    relaxed: 'Relaxed',
+    extra: 'Extra time',
+    artist: 'Artist (no drawing limit)',
+  };
   const $ = (id) => document.getElementById(id);
   const esc = (s) =>
     String(s ?? '').replace(
@@ -42,7 +48,9 @@
   const bar = (title, glyph) =>
     `<div class="tvbar"><div class="logo"><i>${glyph}</i>${esc(title)}</div><div class="code">Room <b>${esc(st.room.code)}</b></div></div>`;
   const ring = () =>
-    `<div class="timer"><svg viewBox="0 0 100 100"><circle class="bgc" cx="50" cy="50" r="44"/><circle class="fgc" id="ring" cx="50" cy="50" r="44" stroke-dasharray="276.5" stroke-dashoffset="0"/></svg><span id="left"></span></div>`;
+    st.view && st.view.ends_in === null && st.view.phase === 'draw'
+      ? '<div class="untimed" role="status">Take your time ✎<small>No time limit</small></div>'
+      : `<div class="timer"><svg viewBox="0 0 100 100"><circle class="bgc" cx="50" cy="50" r="44"/><circle class="fgc" id="ring" cx="50" cy="50" r="44" stroke-dasharray="276.5" stroke-dashoffset="0"/></svg><span id="left"></span></div>`;
   const doneRow = (waiting) => {
     const w = new Set(waiting || []);
     const players = st.room.players.filter((p) => p.playing);
@@ -84,7 +92,7 @@
     const rows = v.standings || [];
     const max = Math.max(1, ...rows.map((s) => s.score));
     return `<div class="scene" data-game="${v.game}">${bar(title, GLYPH[v.game])}<span class="tag">${v.phase === 'over' ? 'Final scores' : 'Scores'}</span>
-      <div class="board">${rows
+      <div class="board${rows.length > 6 ? ' dense' : ''}">${rows
         .map(
           (
             s,
@@ -215,19 +223,36 @@
     const T = 'Drama Club';
     const step = `Step ${v.step} of ${v.steps.length} · ${v.steps[v.step - 1]}`;
     const head = (tag) =>
-      `<div class="scene" data-game="drama">${bar(T, 'D')}<span class="tag">${tag}</span>`;
+      `<div class="scene" data-game="drama"><div class="confetti" aria-hidden="true"></div>${bar(T, 'D')}<span class="tag">${tag}</span>`;
     const theme = v.theme
       ? `<span class="dtheme">${esc(v.theme)}</span>${v.problem ? `<p class="dproblem">The problem: <b>${esc(v.problem)}</b></p>` : ''}`
       : '';
-    const work = (title, sub, extra = '') =>
-      `${head(step)}<h2 class="big" style="font-size:64px">${title}</h2>${theme}<p class="sub">${sub}</p>${extra}${doneRow(v.waiting)}${ring()}</div>`;
+    /** A pitch's character names as separate chips: the first few (the phones have them all). */
+    const cast = (names, max) =>
+      `<span class="dcast"><span class="lbl">Cast</span>${names
+        .slice(0, max)
+        .map((n) => `<span class="cn">${esc(n)}</span>`)
+        .join(
+          '',
+        )}${names.length > max ? `<span class="cn more">+${names.length - max}</span>` : ''}</span>`;
+    const work = (title, sub, extra = '', rows = doneRow(v.waiting)) =>
+      `${head(step)}<h2 class="big" style="font-size:64px">${title}</h2>${theme}<p class="sub">${sub}</p>${extra}${rows}${ring()}</div>`;
+    // Drawing: each artist's moods so far (four pips), their extra moods, and when they're done
+    const progressRow = () =>
+      `<div class="dprog">${st.room.players
+        .filter((p) => p.playing && v.progress && v.progress[p.pid])
+        .map((p) => {
+          const g = v.progress[p.pid];
+          return `<div class="dp ${g.ready ? 'ready' : ''}">${av(p.pid, '')}<span class="pips" role="img" aria-label="${g.moods} of 4 moods drawn">${[0, 1, 2, 3].map((k) => `<i class="${k < g.moods ? 'on' : ''}"></i>`).join('')}</span><small>${g.ready ? 'Ready ✓' : g.moods < 4 ? `${g.moods}/4 moods` : 'Extra moods?'}${g.extra ? ` · +${g.extra}` : ''}</small></div>`;
+        })
+        .join('')}</div>`;
     if (v.phase === 'pitch')
       return work(
         "What's tonight's story about?",
-        'Write a theme on your phone. Then everyone votes.',
+        'Write a theme, the problem and a name for every character on your phone. Then everyone votes.',
       );
     if (v.phase === 'pitch_vote')
-      return `${head(step)}<div class="dthemes">${v.themes.map((t) => `<div class="opt">${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
+      return `${head(step)}<div class="dthemes${v.themes.length > 6 ? ' dense denser' : v.themes.length > 4 ? ' dense' : ''}">${v.themes.map((t) => `<div class="opt">${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${t.names.length ? cast(t.names, v.themes.length > 6 ? 2 : v.themes.length > 4 ? 3 : 5) : ''}</div>`).join('')}</div><p class="sub">Vote on your phone (not for your own).</p>${ring()}</div>`;
     if (v.phase === 'create')
       return work(
         'Everyone invents a character',
@@ -236,7 +261,9 @@
     if (v.phase === 'draw')
       return work(
         "Draw someone else's character",
-        'Neutral, flustered, sad and angry. Nobody sees the drawings until the show!',
+        'Neutral, flustered, sad and angry, plus any extra moods you like. Nobody sees the drawings until the show!',
+        '',
+        progressRow(),
       );
     if (v.phase === 'headline') {
       const r = v.relay;
@@ -264,6 +291,8 @@
           : `<span class="tag">${esc(v.theme)}</span><h2 class="big">Chapter ${ch.index + 1}</h2>${PART[ch.part] ? `<p class="sub dchap">${PART[ch.part]}</p>` : ''}${hl}`;
       return `<div class="scene vn" data-game="drama"><div class="vnstage">${S.svg(ch.bg, 'vnbg')}
         ${ch.cast.map((_, k) => `<canvas class="sprite ${spot(k, ch.cast.length)}" width="400" height="400" id="sp${k}"${crowd(k, ch.cast.length)}></canvas>`).join('')}
+        ${S.fxLayers}
+        <div class="vnbar t" aria-hidden="true"></div><div class="vnbar b" aria-hidden="true"></div>
         <div class="vnbox" id="vnbox" hidden><div class="plate" id="vnplate"></div><p id="vntext"></p></div>
         <div class="vnchap" aria-hidden="true">Ch. ${ch.index + 1} of ${ch.of}</div>
         <div class="vnnext" aria-hidden="true">Click or press Space ▸</div>
@@ -275,14 +304,14 @@
       return `<div class="scene vn" data-game="drama"><div class="vncredroll"><div class="roll">
         <span class="tag">The end</span><h2 class="big">${esc(v.theme)}</h2>
         <h3>Starring</h3>
-        <div class="dcastwall">${cr.characters.map((c) => `<div>${D.artCanvas(c.face, '')}<b>${esc(c.name)}</b><small>invented by ${esc(nameOf(c.creator))}<br>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>
+        <div class="dcastwall">${cr.characters.map((c, i) => `<div><div class="moodstage"><canvas class="art on" width="400" height="400" data-cycle="${i}"></canvas><canvas class="art" width="400" height="400" data-cycle2="${i}"></canvas></div><span class="moodtag" data-moodtag="${i}"></span><b>${esc(c.name)}</b><small>invented by ${esc(nameOf(c.creator))}<br>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>
         <h3>Written by</h3>
         <p class="sub">${cr.writers.map((w, i) => `Chapter ${i + 1}: <b>${esc(nameOf(w))}</b>`).join(' · ')}</p>
       </div></div></div>`;
     }
     if (v.phase === 'vote')
       return `${head(step)}<h2 class="big" style="font-size:52px">Vote: best chapter and best drawing</h2>
-        <div class="dcastwall">${(v.gallery || []).map((c) => `<div>${D.artCanvas(c.face, '')}<b>${esc(c.name)}</b><small>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>${doneRow(v.waiting)}${ring()}</div>`;
+        <div class="dcastwall${(v.gallery || []).length > 6 ? ' dense' : ''}">${(v.gallery || []).map((c) => `<div>${D.artCanvas(c.face, '')}<b>${esc(c.name)}</b><small>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>${doneRow(v.waiting)}${ring()}</div>`;
     return scores(v, T);
   }
 
@@ -328,6 +357,52 @@
     }
     return html;
   }
+  // The credits: each character cycles through every mood the artist drew, like a little gif.
+  let creditsTimer = null;
+  function stopCredits() {
+    clearInterval(creditsTimer);
+    creditsTimer = null;
+  }
+  function playCredits(cr) {
+    stopCredits();
+    const D = window.PartyDraw;
+    const tiles = cr.characters.map((c, i) => ({
+      canvases: [
+        document.querySelector(`canvas[data-cycle="${i}"]`),
+        document.querySelector(`canvas[data-cycle2="${i}"]`),
+      ],
+      tag: document.querySelector(`[data-moodtag="${i}"]`),
+      moods: c.moods && c.moods.length ? c.moods : [{ name: 'neutral', face: c.face }],
+      at: i, // start on different moods, so they don't all change at once
+      front: 0,
+    }));
+    // each change draws the next mood on the hidden canvas, then fades it in over the other one
+    const show = (t, first) => {
+      const m = t.moods[t.at % t.moods.length];
+      if (!first) t.front = 1 - t.front;
+      const [on, off] = [t.canvases[t.front], t.canvases[1 - t.front]];
+      if (on) D.render(on, m.face);
+      on?.classList.add('on');
+      off?.classList.remove('on');
+      if (t.tag) t.tag.textContent = t.moods.length > 1 ? m.name : '';
+    };
+    tiles.forEach((t) => show(t, true));
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    creditsTimer = setInterval(() => {
+      if (!document.querySelector('canvas[data-cycle]')) return stopCredits();
+      for (const t of tiles) {
+        t.at++;
+        show(t, false);
+      }
+    }, 1100);
+  }
+  // A line's effects (screen shake, flashes, hearts…) are set when the line appears and stay
+  // until the next one, so Flashback lasts as long as the line (the CSS is in party.css).
+  function playFx(list) {
+    const stage = document.querySelector('.vnstage');
+    if (!stage) return;
+    for (const k of window.PartyScenes.playFx(stage, list)) S().effect(k);
+  }
   function playVN(ch) {
     vn = { ch, line: -2, cur: ch.cast.map(() => 'neutral') };
     vnLine(ch.line);
@@ -342,12 +417,12 @@
     // everyone's mood as of this line (the page may have been reloaded mid-chapter)
     const cur = ch.cast.map(() => 'neutral');
     for (const ln of ch.lines.slice(0, Math.max(0, line + 1)))
-      if (ln.who !== 2 && cur[ln.who] !== undefined) cur[ln.who] = ln.emotion;
+      if (ln.who >= 0 && cur[ln.who] !== undefined) cur[ln.who] = ln.emotion;
     const moved =
       vn.line >= -1 &&
       line >= 0 &&
       ch.lines[line] &&
-      ch.lines[line].who !== 2 &&
+      ch.lines[line].who >= 0 &&
       vn.cur[ch.lines[line].who] !== cur[ch.lines[line].who];
     vn.line = line;
     vn.cur = cur;
@@ -360,6 +435,7 @@
     if (line < 0) {
       card?.classList.remove('gone');
       if (box) box.hidden = true;
+      playFx([]);
       return;
     }
     card?.classList.add('gone');
@@ -367,13 +443,15 @@
     const ln = ch.lines[line];
     if (!ln || !box) return;
     box.hidden = false;
-    const narr = ln.who === 2;
+    playFx(ln.fx);
+    const narr = ln.who < 0;
     const segs = parts(ln.text);
     const len = segs.reduce((n, sg) => n + sg.t.length, 0);
     box.classList.toggle('narrator', narr);
     box.classList.toggle('long', len > 120);
     box.classList.toggle('longer', len > 240);
     $('vnplate').textContent = narr ? '' : ch.cast[ln.who].name;
+    box.style.setProperty('--hue', String(narr ? 0 : (ln.who * 57 + 262) % 360));
     ch.cast.forEach((_, k) => {
       const c = $(`sp${k}`);
       if (!c) return;
@@ -586,9 +664,14 @@
       const sc = $('tvc').firstElementChild;
       $('tvc').dataset.game = sc.dataset.game || 'none';
       if (entering) sc.classList.add('enter');
+      if (entering && lastScene && v && v.game === 'drama' && v.phase !== 'show') wipe();
       if (entering && scene === 'results') confetti();
-      if (entering) stopVN();
+      if (entering) {
+        stopVN();
+        stopCredits();
+      }
       if (entering && v && v.game === 'drama' && v.phase === 'show') playVN(v.chapter);
+      if (entering && v && v.game === 'drama' && v.phase === 'credits') playCredits(v.credits);
       lastContent = content;
       lastScene = scene;
     }
@@ -599,10 +682,20 @@
   }
 
   let lastTick = null;
+  /** A light streak sweeps across between Drama Club's steps. */
+  function wipe() {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const w = document.createElement('div');
+    w.className = 'wipe';
+    w.setAttribute('aria-hidden', 'true');
+    w.addEventListener('animationend', () => w.remove());
+    $('tvc').append(w);
+  }
   function paintTimer() {
     const ring = $('ring');
     if (!ring || deadline === null) return;
     const left = Math.max(0, deadline - performance.now() / 1000);
+    ring.closest('.timer')?.classList.toggle('urgent', left > 0 && left <= 5 && total > 8);
     ring.style.strokeDashoffset = String(276.5 * (1 - left / total));
     const secs = Math.ceil(left);
     $('left').textContent = String(secs);
@@ -748,6 +841,20 @@
         .map(([k, label]) => btn(label + (r.timer === k ? ' ✓' : ''), { type: 'timer', timer: k }))
         .join('')}`,
     );
+    const ups =
+      (r.state === 'playing' && st.view && st.view.phase === 'write' && st.view.uploads) || [];
+    if (ups.length)
+      rows.push(
+        ups
+          .map((u) =>
+            btn(
+              `Remove background “${u.name}” (${nameOf(u.by)})`,
+              { type: 'remove_bg', id: u.id },
+              'kick',
+            ),
+          )
+          .join(''),
+      );
     if (r.guest) rows.push(btn('Close this room', { type: 'close' }, 'kick'));
     const P = S().prefs || {};
     rows.push(
