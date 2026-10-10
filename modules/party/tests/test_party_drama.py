@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from partydraw import BadDrawing, check_drawing
-from partygames import BACKGROUNDS, EMOTIONS, Content, DramaClub, Invalid
+from partygames import BACKGROUNDS, EMOTIONS, NARRATOR, Content, DramaClub, Invalid
 
 HERE = Path(__file__).resolve().parent.parent
 LINE = [{"c": 0, "w": 3, "p": [10, 10, 200, 200]}]
@@ -15,25 +15,30 @@ def content():
     return Content.load(HERE / "content")
 
 
-def drama(n, **kw):
+def drama(n, seed=None):
     pids = [f"p{i}" for i in range(n)]
-    return pids, DramaClub(pids, content(), random.Random(n), 0.0, **kw)
+    return pids, DramaClub(pids, content(), random.Random(n if seed is None else seed), 0.0)
 
 
 def play_to(g, phase):
     """Every player does their job until the game reaches `phase`."""
-    for _ in range(40):
+    for _ in range(60):
         if g.phase == phase:
             return
         for p in g.pids:
             msg = g.bot_move(p)
             while msg is not None:
                 g.handle(p, msg, 1.0)
-                msg = g.bot_move(p) if g.phase == "cast" else None
+                msg = g.bot_move(p) if g.phase == "draw" else None
         g.tick(1.0)
-        while g.phase == "show" and phase != "show":
+        while g.phase in ("show", "credits") and phase not in ("show", "credits"):
             g.skip(1.0)
     raise AssertionError(f"never reached {phase}, stuck in {g.phase}")
+
+
+def chapter(cast, lines=None, bg="cafe"):
+    return {"type": "chapter", "bg": bg, "cast": cast,
+            "lines": lines or [{"who": 0, "emotion": "angry", "text": "Who ate my cake?"}]}
 
 
 def test_sprites_cant_have_a_fill():
@@ -45,128 +50,176 @@ def test_sprites_cant_have_a_fill():
 def test_theme_pitch_and_vote():
     pids, g = drama(4)
     assert g.phase == "pitch" and g.player_view("p0", 1.0)["idea"]
+    assert g.player_view("p0", 1.0)["step"] == 1
     for p in pids:
-        g.handle(p, {"type": "theme", "text": f"theme {p}"}, 1.0)
+        g.handle(p, {"type": "theme", "text": f"theme {p}", "problem": f"problem {p}"}, 1.0)
     g.tick(1.0)
     assert g.phase == "pitch_vote"
+    assert {"pid": "p1", "text": "theme p1", "problem": "problem p1"} in g.player_view("p0", 1.0)["themes"]
     with pytest.raises(Invalid, match="someone else"):
         g.handle("p0", {"type": "vote", "choice": "p0"}, 1.0)
     for p in ("p0", "p2", "p3"):
         g.handle(p, {"type": "vote", "choice": "p1"}, 1.0)
     g.handle("p1", {"type": "vote", "choice": "p0"}, 1.0)
     g.tick(1.0)
-    assert g.theme == "theme p1" and g.phase == "cast" and g.scores["p1"] == DramaClub.THEME_PTS
+    assert g.theme == "theme p1" and g.problem == "problem p1"
+    assert g.phase == "create" and g.scores["p1"] == DramaClub.THEME_PTS
+    assert g.player_view("p2", 1.0)["problem"] == "problem p1"
 
 
-def test_nobody_sees_a_character_before_the_show():
-    pids, g = drama(5)
-    play_to(g, "script")
-    secret = json.dumps(g.characters["p0"].faces["neutral"])
-    for ph in ("script", "twist"):
-        assert g.phase == ph
-        assert secret not in json.dumps(g.host_view(1.0))
-        for p in pids:
-            view = json.dumps(g.player_view(p, 1.0))
-            assert secret not in view and '"faces"' not in view
-            job = g.player_view(p, 1.0)["job"]
-            assert job and [c["name"] for c in job["cast"]]  # names and bios only
-        for p in pids:
-            msg = g.bot_move(p)
-            if msg:
-                g.handle(p, msg, 1.0)
-        g.tick(1.0)
-    assert g.phase == "show" and secret in json.dumps(g.host_view(1.0))  # the reveal
-
-
-def test_while_drawing_you_only_see_your_own_character():
+def test_a_pitch_without_a_problem_gets_one():
     pids, g = drama(3)
-    play_to(g, "cast")
-    g.handle("p0", {"type": "character", "name": "Vlad", "bio": "nervous vampire baker"}, 1.0)
-    g.handle("p0", {"type": "face", "emotion": "neutral", "strokes": LINE}, 1.0)
-    assert g.player_view("p0", 1.0)["character"]["faces"]["neutral"] == LINE
-    assert "Vlad" not in json.dumps(g.player_view("p1", 1.0)) and "Vlad" not in json.dumps(g.host_view(1.0))
-    with pytest.raises(Invalid):
-        g.handle("p0", {"type": "face", "emotion": "smug", "strokes": LINE}, 1.0)
+    g.handle("p0", {"type": "theme", "text": "Space prom"}, 1.0)
+    g.tick(1000.0)
+    g.tick(2000.0)
+    assert g.phase == "create" and g.problem
 
 
 @pytest.mark.parametrize("n", range(3, 9))
-def test_every_step_gives_each_player_one_job(n):
+def test_everyone_draws_someone_elses_character(n):
     pids, g = drama(n)
-    play_to(g, "script")
-    for st in g.stories:
-        assert not st.writers() & set(st.cast) and st.cast[0] != st.cast[1]
-        assert st.twist_by != st.script_by
-    for role in ("script_by",) + (("twist_by",) if n >= 4 else ()):
-        assert sorted(getattr(st, role) for st in g.stories) == sorted(pids)
-    assert g.has_twist() == (n >= 4)
+    artists = [c.artist for c in g.characters.values()]
+    assert sorted(artists) == sorted(pids)  # one character each to draw
+    assert all(c.artist != c.creator for c in g.characters.values())
+    assert sorted(ch.writer for ch in g.chapters) == sorted(pids)  # one chapter each
+    assert [g.part(i) for i in range(n)] == ["beginning"] + ["middle"] * (n - 2) + ["ending"]
 
 
-def test_scripts_are_checked_and_late_players_get_fallbacks():
+def test_create_then_draw_the_card_you_were_dealt():
     pids, g = drama(4)
-    play_to(g, "cast")
-    g.handle("p0", {"type": "character", "name": "Vlad"}, 1.0)
-    g.handle("p0", {"type": "face", "emotion": "neutral", "strokes": LINE}, 1.0)
-    g.skip(1.0)  # time's up for everyone else
-    vlad = g.characters["p0"]
-    assert all(vlad.faces[e] == LINE for e in EMOTIONS)  # missing moods copy the neutral one
-    assert all(c.name and len(c.faces) == 4 for c in g.characters.values())
-    assert g.phase == "script"
-    writer = g.job("p2")
-    good = [{"who": 1, "emotion": "flustered", "text": "B-baka!"}]
-    with pytest.raises(Invalid, match="background"):
-        g.handle("p2", {"type": "script", "bg": "moon", "premise": "x", "lines": good}, 1.0)
-    with pytest.raises(Invalid, match="title"):
-        g.handle("p2", {"type": "script", "bg": "onsen", "premise": " ", "lines": good}, 1.0)
-    bad = [{"who": 0, "emotion": "smug", "text": "hi"}]
-    with pytest.raises(Invalid):
-        g.handle("p2", {"type": "script", "bg": "onsen", "premise": "x", "lines": bad}, 1.0)
-    with pytest.raises(Invalid, match="At most"):
-        g.handle("p2", {"type": "script", "bg": "onsen", "premise": "x",
-                        "lines": [{"who": 0, "emotion": "sad", "text": "x"}] * 9}, 1.0)
-    g.handle("p2", {"type": "script", "bg": "onsen", "premise": "Only one cupcake left", "lines": good}, 1.0)
-    g.skip(1.0)
-    assert writer.lines[0]["text"] == "B-baka!" and writer.bg == "onsen" and writer.premise == "Only one cupcake left"
-    assert all(s.lines and s.bg in BACKGROUNDS and s.premise for s in g.stories)  # late writers get fallbacks
-    assert g.phase == "twist" and g.player_view("p0", 1.0)["job"]["lines"]  # the twist writer reads the scene
+    play_to(g, "create")
+    assert g.player_view("p0", 1.0)["step"] == 2
+    g.handle("p0", {"type": "character", "name": "Vlad", "look": "tall, cape, flour on his face",
+                    "personality": "nervous about everything"}, 1.0)
+    with pytest.raises(Invalid, match="already took"):
+        g.handle("p1", {"type": "character", "name": "vlad"}, 1.0)
+    with pytest.raises(Invalid, match="name"):
+        g.handle("p1", {"type": "character", "name": "  "}, 1.0)
+    g.tick(100.0)  # time's up: the rest get stand-in names
+    assert g.phase == "draw" and all(c.name for c in g.characters.values())
+    artist = g.characters["p0"].artist
+    card = g.player_view(artist, 101.0)["drawing"]
+    assert card["name"] == "Vlad" and card["look"] == "tall, cape, flour on his face"
+    g.handle(artist, {"type": "face", "emotion": "neutral", "strokes": LINE}, 101.0)
+    assert g.characters["p0"].faces["neutral"] == LINE
+    with pytest.raises(Invalid, match="mood"):
+        g.handle(artist, {"type": "face", "emotion": "smug", "strokes": LINE}, 101.0)
+    assert g.waiting_on() == set(pids)  # 3 moods to go for this artist, 4 for the others
 
 
-def test_votes_score_every_role():
+def test_no_peeking_before_the_show():
     pids, g = drama(5)
-    play_to(g, "vote")
-    st = g.stories[0]
-    with pytest.raises(Invalid, match="didn't write"):
-        g.handle(st.script_by, {"type": "vote", "scene": 0}, 1.0)
-    with pytest.raises(Invalid, match="someone else"):
-        g.handle("p1", {"type": "vote", "character": "p1"}, 1.0)
-    voters = [p for p in pids if p not in st.writers()]
-    before = dict(g.scores)
-    for p in voters:
-        g.handle(p, {"type": "vote", "scene": 0}, 1.0)
-    fans = [p for p in pids if p != st.cast[0]]
-    for p in fans:
-        g.handle(p, {"type": "vote", "character": st.cast[0]}, 1.0)
+    play_to(g, "write")
+    blob = json.dumps(g.host_view(1.0)) + "".join(json.dumps(g.player_view(p, 1.0)) for p in pids)
+    assert '"faces"' not in blob and '"p": [' not in blob
+    play_to(g, "show")
+    assert g.host_view(1.0)["chapter"]["cast"][0]["faces"]
+
+
+def test_headlines_hand_off_between_chapters():
+    pids, g = drama(4)
+    play_to(g, "headline")
+    v = g.player_view("p0", 1.0)
+    assert v["step"] == 4 and v["chapter"]["part"] == g.part(g.chapter_of("p0")) and not v["chapter"]["done"]
+    with pytest.raises(Invalid, match="one sentence"):
+        g.handle("p0", {"type": "headline", "text": " "}, 1.0)
+    for p in pids:
+        g.handle(p, {"type": "headline", "text": f"{p} happens"}, 1.0)
+    g.tick(1.0)
+    assert g.phase == "write"
+    order = [ch.writer for ch in g.chapters]
+    first, mid, last = (g.player_view(order[k], 1.0)["chapter"] for k in (0, 1, 3))
+    assert first["before"] is None and first["after"] == f"{order[1]} happens"
+    assert mid["before"] == f"{order[0]} happens" and mid["headline"] == f"{order[1]} happens"
+    assert last["after"] is None
+    play_to(g, "show")
+    assert g.host_view(1.0)["chapter"]["headline"] == f"{order[0]} happens"
+
+
+def test_writing_a_chapter():
+    pids, g = drama(3)
+    play_to(g, "write")
+    v = g.player_view("p0", 1.0)
+    assert v["step"] == 4 and v["chapter"]["of"] == 3 and len(v["cast"]) == 3
+    assert v["chapter"]["part"] == g.part(g.chapter_of("p0"))
+    with pytest.raises(Invalid, match="background"):
+        g.handle("p0", chapter(["p1"], bg="moon"), 1.0)
+    with pytest.raises(Invalid, match="one or two"):
+        g.handle("p0", chapter(["p1", "p2", "p0"]), 1.0)
+    with pytest.raises(Invalid, match="one or two"):
+        g.handle("p0", chapter(["p1", "p1"]), 1.0)
+    with pytest.raises(Invalid, match="who says"):  # one character: speaker 1 doesn't exist
+        g.handle("p0", chapter(["p1"], [{"who": 1, "emotion": "sad", "text": "hi"}]), 1.0)
+    with pytest.raises(Invalid, match="At most"):
+        g.handle("p0", chapter(["p1"], [{"who": 0, "emotion": "sad", "text": "hi"}] * 7), 1.0)
+    g.handle("p0", chapter(["p2", "p1"], [{"who": NARRATOR, "emotion": "neutral", "text": "Midnight."},
+                                         {"who": 1, "emotion": "flustered", "text": "Oh no."}]), 1.0)
+    ch = g.chapters[g.chapter_of("p0")]
+    assert ch.cast == ["p2", "p1"] and ch.bg == "cafe" and len(ch.lines) == 2
+    assert g.player_view("p0", 1.0)["chapter"]["done"]
+
+
+def test_missing_work_gets_filled_in():
+    pids, g = drama(4)
+    for _ in range(12):  # nobody does anything: every timer runs out
+        if g.phase == "show":
+            break
+        g.tick(10_000.0 * (_ + 1))
+    assert g.phase == "show"
+    for c in g.characters.values():
+        assert c.name and set(c.faces) == set(EMOTIONS)
+    for ch in g.chapters:
+        assert ch.headline and ch.bg in BACKGROUNDS and 1 <= len(ch.cast) <= 2 and ch.lines
+
+
+def test_the_show_plays_every_chapter_in_order_then_credits():
+    pids, g = drama(4)
+    play_to(g, "show")
+    seen = []
+    while g.phase == "show":
+        seen.append(g.host_view(1.0)["chapter"]["index"])
+        g.skip(1.0)
+    assert seen == [0, 1, 2, 3] and g.phase == "credits"
+    cr = g.host_view(1.0)["credits"]
+    assert len(cr["characters"]) == 4 and cr["writers"] == [ch.writer for ch in g.chapters]
     g.skip(1.0)
-    gain = {p: g.scores[p] - before[p] for p in pids}
-    n = len(voters)
-    assert gain[st.script_by] >= 550 * n and gain[st.twist_by] >= 300 * n
-    assert gain[st.cast[0]] >= 75 * n + 500 * len(fans) and gain[st.cast[1]] >= 75 * n
-    assert ("leading_role" in {b for _, b in g.feats}) and g.hits[0]["kind"] == "scene"
-    assert g.hits[0]["scene"]["bg"] == st.bg and len(g.hits[0]["scene"]["faces"]) == 2
+    assert g.phase == "vote"
+
+
+def test_votes_and_scores():
+    pids, g = drama(4)
+    play_to(g, "vote")
+    v = g.player_view("p0", 1.0)
+    mine = g.chapter_of("p0")
+    assert mine not in [c["index"] for c in v["chapters"]] and len(v["chapters"]) == 3
+    drew = g.drawing_for("p0").creator
+    assert {"p0", drew}.isdisjoint(d["pid"] for d in v["drawings"])
+    with pytest.raises(Invalid, match="didn't write"):
+        g.handle("p0", {"type": "vote", "chapter": mine}, 1.0)
+    with pytest.raises(Invalid, match="didn't draw"):
+        g.handle("p0", {"type": "vote", "drawing": drew}, 1.0)
+    before = dict(g.scores)
+    target = next(i for i in range(4) if g.chapters[i].writer != "p0")
+    star = next(p for p in pids if p not in ("p0", drew))
+    g.handle("p0", {"type": "vote", "chapter": target, "drawing": star}, 1.0)
+    for p in pids[1:]:
+        g.handle(p, {"type": "vote"}, 1.0)
+    g.skip(1.0)
     assert g.phase == "scores"
+    gained = {p: g.scores[p] - before[p] for p in pids}
+    expect = dict.fromkeys(pids, 0)
+    expect[g.chapters[target].writer] += DramaClub.CHAPTER_PTS
+    expect[g.characters[star].artist] += DramaClub.ARTIST_PTS
+    expect[star] += DramaClub.CREATOR_PTS
+    assert gained == expect
     g.skip(1.0)
     assert g.done
 
 
-def test_three_players_have_no_twist_and_two_rounds_keep_the_cast():
-    pids, g = drama(3, rounds=2)
-    play_to(g, "show")
-    assert not g.has_twist() and all(s.twist_by is None for s in g.stories)
-    first = {p: c.name for p, c in g.characters.items()}
+@pytest.mark.parametrize("n", range(3, 9))
+def test_bots_play_a_whole_game(n):
+    pids, g = drama(n)
     play_to(g, "scores")
-    g.skip(1.0)
-    assert g.round == 2 and g.phase == "pitch"
-    play_to(g, "script")  # straight from the theme to writing: no drawing again
-    assert {p: c.name for p, c in g.characters.items()} == first
-    play_to(g, "scores")
+    assert g.counts and g.hits
     g.skip(1.0)
     assert g.done

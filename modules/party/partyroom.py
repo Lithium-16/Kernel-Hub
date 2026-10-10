@@ -298,8 +298,6 @@ class Room:
             options["questions"] = int(self.settings.get("bluff_questions", 5))
         elif cls.key == "shirt":
             options["rounds"] = int(self.settings.get("shirt_rounds", 2))
-        elif cls.key == "drama":
-            options["rounds"] = int(self.settings.get("drama_rounds", 1))
         self.game = cls(pids, self.content, self.rng, now, scale, names, **options)
         self.choice, self.state, self.results = key, "playing", None
         self.emit("game.started", f"{cls.title} started with {', '.join(names[p] for p in pids)}", game=cls.title)

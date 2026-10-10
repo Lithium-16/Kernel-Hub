@@ -1,4 +1,4 @@
-# Drama Club premises: one line about what's happening, used when a stage player runs out of time.
+# Drama Club premises: one line about what's happening, a bot's opening narration for its chapter.
 Two strangers, one umbrella, and it's pouring.
 They both ordered the last slice of cake.
 Someone left a love letter with no name on it.

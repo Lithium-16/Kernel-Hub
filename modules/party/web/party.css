@@ -184,11 +184,14 @@ body.host {
   background: var(--frame);
 }
 .tvc {
-  position: relative;
+  /* centered by hand: a grid can't center a 1280px stage in a narrower window */
+  position: absolute;
+  left: 50%;
+  top: 50%;
   width: 1280px;
   height: 720px;
   flex: none;
-  transform: scale(var(--s, 1));
+  transform: translate(-50%, -50%) scale(var(--s, 1));
   overflow: hidden;
   font-size: 22px;
   background:
@@ -2492,6 +2495,172 @@ body.play {
 .bgpick.row button {
   flex: 0 0 34%;
   scroll-snap-align: start;
+}
+
+.sprite.c {
+  left: calc(50% - 235px);
+  transform: translateY(60px);
+}
+.sprite.c.in {
+  transform: none;
+}
+.vnchap {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  padding: 6px 14px;
+  border-radius: 12px;
+  background: rgba(21, 14, 36, 0.72);
+  color: #fff;
+  font-weight: 800;
+  font-size: 20px;
+}
+.vncard .dchap {
+  font-family: var(--display);
+  font-size: 40px;
+  color: var(--acc);
+}
+.dstarring {
+  margin: 4px 0 14px;
+  font-size: 26px;
+}
+.vncredroll {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #150e24;
+  color: #fff;
+  text-align: center;
+}
+.vncredroll .roll {
+  padding: 60px 80px;
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+  animation: roll 10s linear both;
+}
+.vncredroll h3 {
+  margin: 18px 0 0;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 34px;
+  color: var(--acc);
+}
+@keyframes roll {
+  from {
+    transform: translateY(18%);
+  }
+  to {
+    transform: translateY(-12%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vncredroll .roll {
+    animation: none;
+  }
+}
+
+.dproblem {
+  margin: 0 0 8px;
+  font-size: 24px;
+}
+.dthemes .opt small {
+  display: block;
+  margin-top: 6px;
+  font-size: 20px;
+  font-weight: 700;
+  opacity: 0.75;
+}
+.vncard .dhl {
+  margin-top: 14px;
+  font-size: 30px;
+  font-style: italic;
+}
+
+/* Drama Club phones: the step bar, cards and the cast picker */
+.dsteps {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.dsteps span {
+  height: 8px;
+  flex: 1;
+  border-radius: 99px;
+  background: var(--line);
+}
+.dsteps span.done {
+  background: color-mix(in srgb, var(--acc) 55%, var(--line));
+}
+.dsteps span.now {
+  flex: 4;
+  height: auto;
+  padding: 3px 10px;
+  background: var(--acc);
+  color: #150e24;
+  font-weight: 800;
+  font-size: 13px;
+  text-align: center;
+}
+.dchar,
+.dpart {
+  gap: 2px;
+}
+.dpart .kicker {
+  color: var(--acc);
+}
+.dheads {
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+.dheads li {
+  padding: 8px 10px;
+  border-radius: 12px;
+  border: 2px dashed var(--line);
+  font-size: 14px;
+  font-weight: 700;
+}
+.dheads li.me {
+  border: 2px solid var(--acc);
+}
+.dheads small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.dcastpick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.dcastpick button {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+}
+.dcastpick button b {
+  font-size: 16px;
+}
+.dcastpick button i {
+  color: var(--muted);
+}
+.dcastpick button[aria-pressed="true"] {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 22%, var(--surface));
 }
 
 /* how-to-play card */
