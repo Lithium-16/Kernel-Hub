@@ -491,13 +491,13 @@
                   )
                   .join('')}</div>`
           }
-          <details class="dfx"${ln.fxOpen ? ' open' : ''}><summary>Effects${ln.fx.length ? `<span class="fxon" aria-label="${ln.fx.map((k) => FX[k][2]).join(', ')}">${ln.fx.map((k) => FX[k][0]).join(' ')}</span>` : ''}</summary><div class="fxrow">${Object.entries(FX)
+          <details class="dfx"${ln.fxOpen ? ' open' : ''}><summary>Effects${ln.fx.length ? `<span class="fxon" aria-label="${ln.fx.map((k) => FX[k][2]).join(', ')}">${ln.fx.map((k) => FX[k][0]).join(' ')}</span>` : ''}</summary><div class="sfade"><div class="fxrow">${Object.entries(FX)
             .filter(([k]) => dJob.effects.includes(k))
             .map(
               ([k, [icon, short, label]]) =>
                 `<button type="button" data-lfx="${i}:${k}" aria-pressed="${ln.fx.includes(k)}" aria-label="${label}" title="${label}"><span aria-hidden="true">${icon}</span>${short}</button>`,
             )
-            .join('')}</div></details>
+            .join('')}</div></div></details>
           <div class="row"><textarea data-ltext="${i}" maxlength="400" rows="1" autocomplete="off" aria-label="Line ${i + 1}" placeholder="${ln.who === 'n' ? 'What happens…' : 'What they say…'}">${esc(ln.text)}</textarea>${dLines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line ${i + 1}">×</button>` : ''}</div>
         </div>`,
       )
@@ -509,7 +509,32 @@
     if (box) box.innerHTML = lineRows();
     for (const b of document.querySelectorAll('[data-dcast]'))
       b.setAttribute('aria-pressed', String(dCast.includes(b.dataset.dcast)));
+    fadeCheck();
+    syncSend();
   }
+  /** The send button says what's still missing (it stays tappable: tapping explains). */
+  function syncSend() {
+    const b = document.querySelector('[data-act="sendchapter"]');
+    if (!b || !dLines) return;
+    const why = !dCast.length
+      ? "Pick who's in it first"
+      : dLines.some((ln) => !ln.text.trim())
+        ? 'Fill in every line'
+        : '';
+    b.textContent = why || 'Send my chapter';
+    b.classList.toggle('pending', !!why);
+  }
+  /** Scrolling rows fade out on the side with more to see; the fade goes at the end of the row. */
+  function fadeCheck() {
+    for (const w of document.querySelectorAll('.sfade')) {
+      const r = w.firstElementChild;
+      w.classList.toggle(
+        'end',
+        r.scrollWidth - r.clientWidth < 4 || r.scrollLeft + r.clientWidth >= r.scrollWidth - 4,
+      );
+    }
+  }
+  document.addEventListener('scroll', (e) => e.target.parentElement?.classList?.contains('sfade') && fadeCheck(), true);
   /** The "Where?" row: the preset backgrounds, then the ones players uploaded. */
   function bgButtons() {
     const S = window.PartyScenes;
@@ -541,6 +566,7 @@
       dBg = dJob.backgrounds[0];
     row.innerHTML = bgButtons();
     $('dbgup').innerHTML = bgUpload();
+    fadeCheck();
   }
   /** Shrinks a picked picture to a 16:9 JPEG that fits what the server accepts, and sends it. */
   async function sendBackground(file) {
@@ -739,7 +765,7 @@
           <h3 class="dhead">Who's in it? <small>(as many as you like)</small></h3>
           <div class="dcastpick">${v.cast.map((c) => `<button type="button" data-dcast="${esc(c.pid)}" aria-pressed="${dCast.includes(c.pid)}"><b>${esc(c.name)}</b><span>${esc(c.look || '')}</span>${c.personality ? `<i>${esc(c.personality)}</i>` : ''}</button>`).join('')}</div>
           <h3 class="dhead">Where?</h3>
-          <div class="bgpick row" id="dbgs">${bgButtons()}</div>
+          <div class="sfade onbg"><div class="bgpick row" id="dbgs">${bgButtons()}</div></div>
           <div id="dbgup" class="bgup">${bgUpload()}</div>
           <h3 class="dhead">Your chapter</h3>
           <p class="pnote">Tip: put actions between asterisks, like <b>*slams the door*</b>. Open <b>Effects</b> on a line to shake the screen, flash it red and more (they stack).</p>
@@ -750,6 +776,7 @@
           dMost = v.max_lines;
           redrawLines();
         },
+        slim: true,
         refresh: () => redrawBgs(), // someone uploaded a background
         keep: true,
         input: true,
@@ -1024,6 +1051,7 @@
       $('foot').innerHTML = s.foot || '';
       $('foot').hidden = !s.foot;
       $('foot').classList.toggle('flow', !!s.flow);
+      $('foot').classList.toggle('slim', !!s.slim);
       if (s.after) s.after();
       if (s.input && pid) buzz();
       if (s.key.split(':')[0] !== lastKey.split(':')[0] || !s.keep) announce();
@@ -1421,6 +1449,7 @@
     if (e.target.dataset.ltext !== undefined && dLines) {
       const ln = dLines[Number(e.target.dataset.ltext)];
       if (ln) ln.text = e.target.value;
+      syncSend();
     }
     if (e.target.id === 'f-ans') $('cnt').textContent = `${e.target.value.length}/80`;
     if (e.target.id === 'f-code') e.target.value = e.target.value.toUpperCase();
