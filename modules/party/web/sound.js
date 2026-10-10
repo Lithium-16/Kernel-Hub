@@ -152,6 +152,62 @@
       play((t) =>
         tone(520 + voice * 140 + Math.random() * 30, t, 0.035, { type: 'square', vol: 0.035 }),
       ),
+    /** A line's screen effect (shake, flash…) goes off: each has its own little sound. */
+    effect: (name) =>
+      play((t) => {
+        const note = (semis, at, dur, o = {}) => tone(hz(semis, C5), t + at, dur, o);
+        if (name === 'shake') {
+          duck(0.9);
+          noise(t, 0.35, { vol: 0.3, freq: 160, q: 0.6, sweep: 0.4 });
+          tone(58, t, 0.45, { type: 'sine', vol: 0.35, glide: 0.5 });
+        } else if (name === 'flash_red') {
+          duck(1);
+          tone(220, t, 0.7, { type: 'sawtooth', vol: 0.07 });
+          tone(233, t, 0.7, { type: 'sawtooth', vol: 0.07 });
+          tone(1400, t, 0.15, { type: 'square', vol: 0.05 });
+        } else if (name === 'flash_white') {
+          noise(t, 0.5, { vol: 0.18, freq: 1200, q: 0.5, sweep: 6 });
+          tone(880, t, 0.5, { type: 'sine', vol: 0.08, glide: 2 });
+        } else if (name === 'blackout') {
+          duck(1.8);
+          tone(110, t, 1.4, { type: 'sawtooth', vol: 0.09, glide: 0.35 });
+          noise(t, 1.4, { vol: 0.08, freq: 400, q: 0.7, sweep: 0.25 });
+        } else if (name === 'zoom') {
+          tone(200, t, 0.5, { type: 'triangle', vol: 0.12, glide: 4 });
+          noise(t + 0.3, 0.2, { vol: 0.16, freq: 800, q: 0.7 });
+        } else if (name === 'blur') {
+          [0, 0.18, 0.36].forEach((a, i) =>
+            note(i % 2 ? 7 : 0, a, 0.5, { type: 'sine', vol: 0.07, glide: 0.97 }),
+          );
+        } else if (name === 'sepia') {
+          [7, 12, 16, 12].forEach((s, i) =>
+            note(s, i * 0.18, 0.5, { type: 'triangle', vol: 0.09 }),
+          );
+        } else if (name === 'hop') {
+          note(12, 0, 0.1, { type: 'square', vol: 0.06 });
+          note(19, 0.12, 0.12, { type: 'square', vol: 0.06 });
+        } else if (name === 'speed') {
+          noise(t, 0.45, { vol: 0.25, freq: 3000, q: 0.5, sweep: 0.2 });
+          tone(1200, t, 0.3, { type: 'sawtooth', vol: 0.05, glide: 0.3 });
+        } else if (name === 'sparkle') {
+          [19, 24, 28, 31, 36].forEach((s, i) =>
+            note(s, i * 0.07, 0.4, { type: 'sine', vol: 0.07 }),
+          );
+        } else if (name === 'hearts') {
+          note(12, 0, 0.5, { type: 'sine', vol: 0.09 });
+          note(16, 0.14, 0.6, { type: 'sine', vol: 0.09 });
+        } else if (name === 'petals') {
+          noise(t, 1.2, { vol: 0.05, freq: 5000, q: 0.4, sweep: 0.5 });
+          [12, 19, 24].forEach((s, i) => note(s, 0.2 + i * 0.25, 0.7, { type: 'sine', vol: 0.04 }));
+        } else if (name === 'rain') {
+          noise(t, 2.2, { vol: 0.07, freq: 6000, q: 0.3 });
+        } else if (name === 'glitch') {
+          for (let i = 0; i < 7; i++) {
+            tone(300 + Math.random() * 1800, t + i * 0.06, 0.05, { type: 'square', vol: 0.05 });
+            noise(t + i * 0.06, 0.04, { vol: 0.12, freq: 4000 * Math.random() + 500, q: 2 });
+          }
+        }
+      }),
     /** A sprite changes mood. */
     whoosh: () => play((t) => noise(t, 0.25, { vol: 0.08, freq: 500, q: 0.8, sweep: 4 })),
   };

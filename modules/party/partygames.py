@@ -12,8 +12,11 @@ count down on their own.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import random
 import re
+import secrets
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -149,6 +152,7 @@ class Game:
     title = ""
     min_players = 3
     max_players = 8
+    untimed: tuple[str, ...] = ()  # phases with no time limit when the room's timer is "Artist"
 
     def __init__(
         self,
@@ -172,6 +176,7 @@ class Game:
         self.phase = ""
         self.deadline: float | None = None
         self.done = False
+        self.artist = False  # the room's "Artist" timer: the steps in `untimed` have no time limit
         self.hits: list[dict[str, Any]] = []  # standout answers, for the greatest hits
         self.duels: list[tuple[str, str, str]] = []  # (winner, loser, kind), for rivalries
         self.feats: list[tuple[str, str]] = []  # (player, badge key), for badges
@@ -180,6 +185,8 @@ class Game:
 
     def _go(self, phase: str, now: float, seconds: float | None, scaled: bool = True) -> None:
         self.phase = phase
+        if self.artist and phase in self.untimed:
+            seconds = None
         self.deadline = None if seconds is None else now + seconds * (self.scale if scaled else 1)
 
     def ends_in(self, now: float) -> float | None:
@@ -1254,7 +1261,13 @@ PHOTO_BACKGROUNDS = ("classroom_day", "school_hallway", "bedroom_day", "livingro
                      "restaurant", "city_afternoon", "spring_street", "train_beach", "onsen")  # web/bg/*.webp
 BACKGROUNDS = PHOTO_BACKGROUNDS + ("classroom", "rooftop", "cafe", "bedroom", "park", "beach", "street", "train",
                                    "festival", "castle", "spaceship", "haunted")
-NARRATOR = 2  # a line's speaker: 0 and 1 are the chapter's characters, 2 the narrator
+NARRATOR = -1  # a line's speaker: a position in the chapter's cast (0, 1, …), or -1 for the narrator
+# Effects a line can set off on the big screen, any number at once (web/host.js plays them).
+EFFECTS = ("shake", "flash_red", "flash_white", "blackout", "zoom", "blur", "sepia", "hop",
+           "speed", "sparkle", "hearts", "petals", "rain", "glitch")
+MAX_CUSTOM, MAX_MOOD = 6, 16  # extra moods an artist can add to a character, and their name length
+# Backgrounds players upload: a picture (checked by its first bytes), kept in memory for the game.
+MAX_BG_BYTES, MAX_UPLOADS_EACH, MAX_UPLOADS, MAX_BG_NAME = 150_000, 2, 12, 24
 # Generous ceilings, only so a pasted wall of text can't break the big screen.
 MAX_LINE, MAX_NAME_C, MAX_LOOK, MAX_PERSONALITY, MAX_THEME, MAX_PROBLEM, MAX_HEADLINE = 400, 24, 200, 160, 120, 160, 200
 FALLBACK_NAMES = ["Mystery Guest", "The New Kid", "Someone Shady", "A Stranger", "The Understudy",
@@ -1275,11 +1288,17 @@ class Character:
     name: str = ""
     look: str = ""
     personality: str = ""
+    suggested: str = ""  # the name the pitch gave this character, for its creator to build on
     faces: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
+    def moods(self) -> list[str]:
+        """The extra moods the artist added, beyond the four everyone draws."""
+        return [k for k in self.faces if k not in EMOTIONS]
+
     def card(self) -> dict[str, Any]:
-        """What players may see before the show: the description, never the art."""
-        return {"pid": self.creator, "name": self.name, "look": self.look, "personality": self.personality}
+        """What players may see before the show: the description (and mood names), never the art."""
+        return {"pid": self.creator, "name": self.name, "look": self.look, "personality": self.personality,
+                "moods": self.moods()}
 
     def full(self) -> dict[str, Any]:
         return self.card() | {"artist": self.artist, "faces": self.faces}
@@ -1295,6 +1314,25 @@ class Chapter:
     lines: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass
+class Upload:
+    by: str
+    name: str
+    mime: str
+    data: bytes
+
+
+def picture_type(data: bytes) -> str | None:
+    """The image type of these bytes (only JPEG, PNG and WebP are accepted), or None."""
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
 class DramaClub(Game):
     """One visual novel, written by the whole room. Everyone pitches a theme and the story's
     problem, and the room picks one. Everyone invents a character in words, then draws someone
@@ -1307,6 +1345,7 @@ class DramaClub(Game):
 
     key = "drama"
     title = "Drama Club"
+    untimed = ("draw",)
     PITCH_S, PITCH_VOTE_S, CREATE_S, DRAW_S, RELAY_S, WRITE_S, VOTE_S, SCORES_S, CREDITS_S = 50, 20, 60, 240, 25, 210, 30, 8, 10
     MAX_LINES = 40
     CHAPTER_PTS, ARTIST_PTS, CREATOR_PTS, THEME_PTS = 600, 400, 200, 250
@@ -1330,6 +1369,9 @@ class DramaClub(Game):
         self.used = used if used is not None else set()
         self.themes: dict[str, str] = {}
         self.problems: dict[str, str] = {}  # each pitch's problem: what the story is about solving
+        self.name_ideas: dict[str, list[str]] = {}  # each pitch's suggested character names
+        self.ready: set[str] = set()  # artists who say they're done drawing (extra moods included)
+        self.uploads: dict[str, Upload] = {}  # custom backgrounds, by id
         self.theme_votes: dict[str, str] = {}
         self.theme = ""
         self.theme_by: str | None = None
@@ -1367,7 +1409,8 @@ class DramaClub(Game):
         if ph == "create":
             return {p for p, c in self.characters.items() if not c.name}
         if ph == "draw":
-            return {c.artist for c in self.characters.values() if set(EMOTIONS) - set(c.faces)}
+            return {c.artist for c in self.characters.values()
+                    if set(EMOTIONS) - set(c.faces) or c.artist not in self.ready}
         if ph == "headline":
             ch = self.chapters[self.relay]
             return set() if ch.headline else {ch.headliner}
@@ -1386,13 +1429,15 @@ class DramaClub(Game):
         if ph == "pitch":
             for p in self.pids:  # an unsent pitch counts as sent
                 d = self._draft(p)
-                if p not in self.themes and (text := clean(d.get("text") or "", MAX_THEME)):
+                if p not in self.themes and (text := self._text(d, "text", MAX_THEME)):
                     self.themes[p] = text
-                    self.problems[p] = clean(d.get("problem") or "", MAX_PROBLEM)
+                    self.problems[p] = self._text(d, "problem", MAX_PROBLEM)
+                    self.name_ideas[p] = self._names(d.get("names"))
             for p in self.pids:  # a blank pitch gets an idea from the box
                 if p not in self.themes and self.content.drama_themes and self.rng.random() < 0.5:
                     self.themes[p] = self._idea(self.content.drama_themes)
                     self.problems[p] = self._idea(self.content.drama_premises)[:MAX_PROBLEM]
+                    self.name_ideas[p] = []
             if len(self.themes) >= 2:
                 self._go("pitch_vote", now, self.PITCH_VOTE_S)
             else:
@@ -1404,27 +1449,28 @@ class DramaClub(Game):
         elif ph == "create":
             for p, c in self.characters.items():  # a half-made character joins as it is
                 d = self._draft(p)
-                name = clean(d.get("name") or "", MAX_NAME_C)
+                name = self._text(d, "name", MAX_NAME_C)
                 if not c.name and name and all(o.name.lower() != name.lower() for o in self.characters.values()):
                     c.name = name
-                    c.look = clean(d.get("look") or "", MAX_LOOK)
-                    c.personality = clean(d.get("personality") or "", MAX_PERSONALITY)
+                    c.look = self._text(d, "look", MAX_LOOK)
+                    c.personality = self._text(d, "personality", MAX_PERSONALITY)
             self._fill_names()
             self._go("draw", now, self.DRAW_S)
         elif ph == "draw":
             for c in self.characters.values():  # the mood still on someone's pad is kept
                 d = self._draft(c.artist)
-                if d.get("emotion") in EMOTIONS and d["emotion"] not in c.faces:
-                    try:
-                        c.faces[d["emotion"]] = check_drawing(d.get("strokes"), sprite=True)
-                    except BadDrawing:
-                        pass
+                try:
+                    mood = self._mood_for(c, d.get("emotion"))
+                    if mood not in c.faces:
+                        c.faces[mood] = check_drawing(d.get("strokes"), sprite=True)
+                except (Invalid, BadDrawing):
+                    pass
             self._fill_faces()
             self.relay = 0
             self._go("headline", now, self.RELAY_S)
         elif ph == "headline":  # the relay: one headline at a time, in chapter order
             ch = self.chapters[self.relay]
-            typed = clean(self._draft(ch.headliner).get("text") or "", MAX_HEADLINE)
+            typed = self._text(self._draft(ch.headliner), "text", MAX_HEADLINE)
             ch.headline = ch.headline or typed or self.rng.choice(LOST_HEADLINE)
             if self.relay + 1 < len(self.chapters):
                 self.relay += 1
@@ -1437,6 +1483,7 @@ class DramaClub(Game):
                     self._draft_chapter(ch)
                 if not ch.lines:
                     self._fill_chapter(ch, i)
+                ch.bg = ch.bg or self.rng.choice(BACKGROUNDS)  # lines without a picked background
             self.showing, self.line = 0, -1
             self._go("show", now, None)  # the host clicks through it
         elif ph == "show":
@@ -1472,10 +1519,37 @@ class DramaClub(Game):
             self.theme = self._idea(self.content.drama_themes) or "A very dramatic afternoon"
             self.theme_by = None
         self.problem = self.problem or self._idea(self.content.drama_premises)[:MAX_PROBLEM] or "Nobody knows what's going on."
+        self._deal_names()
+
+    def _deal_names(self) -> None:
+        """The winning pitch's character names go to the characters at random; any missing are filled in."""
+        names = list(self.name_ideas.get(self.theme_by or "", []))[: len(self.characters)]
+        spare = [n for n in FALLBACK_NAMES if n.lower() not in {x.lower() for x in names}]
+        self.rng.shuffle(spare)
+        names += spare[: len(self.characters) - len(names)]
+        while len(names) < len(self.characters):
+            names.append(f"Extra #{len(names) + 1}")
+        self.rng.shuffle(names)
+        for c, name in zip(self.characters.values(), names):
+            c.suggested = name
+
+    def _names(self, raw: Any) -> list[str]:
+        """Suggested character names from a pitch or its draft: clean, no repeats, at most one per player."""
+        out: list[str] = []
+        for x in raw if isinstance(raw, list) else []:
+            name = clean(x, MAX_NAME_C) if isinstance(x, str) else ""
+            if name and name.lower() not in {o.lower() for o in out}:
+                out.append(name)
+        return out[: len(self.pids)]
 
     def _draft(self, pid: str) -> dict[str, Any]:
         """This player's unsent work in the current step, or {}."""
         return self.drafts.get((self.phase, pid), {})
+
+    @staticmethod
+    def _text(d: dict[str, Any], key: str, limit: int) -> str:
+        """A draft's text field, cleaned; drafts aren't checked when sent, so a non-string counts as empty."""
+        return clean(d[key], limit) if isinstance(d.get(key), str) else ""
 
     def _draft_chapter(self, ch: Chapter) -> None:
         """A chapter whose writer ran out of time: whatever lines they'd written, made valid."""
@@ -1484,22 +1558,26 @@ class DramaClub(Game):
         cast = list(dict.fromkeys(c for c in raw if isinstance(c, str) and c in self.characters))
         lines = []
         for x in d.get("lines") if isinstance(d.get("lines"), list) else []:
-            if not isinstance(x, dict) or not (text := clean(x.get("text") or "", MAX_LINE)):
+            if not isinstance(x, dict) or not (text := self._text(x, "text", MAX_LINE)):
                 continue
             who = x.get("who")
-            who = who if isinstance(who, int) and not isinstance(who, bool) and 0 <= who < len(cast) else NARRATOR
-            emotion = x.get("emotion") if x.get("emotion") in EMOTIONS else "neutral"
-            lines.append({"who": who, "emotion": emotion, "text": text})
+            who = who if type(who) is int and 0 <= who < len(cast) else NARRATOR
+            emotion = x.get("emotion") if self._emotion_ok(cast, who, x.get("emotion")) else "neutral"
+            fx = [e for e in dict.fromkeys(x.get("fx") if isinstance(x.get("fx"), list) else []) if e in EFFECTS]
+            lines.append({"who": who, "emotion": emotion, "text": text, "fx": fx})
         if lines:
             ch.lines = lines[: self.MAX_LINES]
             ch.cast = cast
-            ch.bg = d.get("bg") if d.get("bg") in BACKGROUNDS else ""
+            ch.bg = d["bg"] if self._bg_ok(d.get("bg")) else ""
 
     def _fill_names(self) -> None:
-        names = [n for n in FALLBACK_NAMES if n not in {c.name for c in self.characters.values()}]
+        taken = {c.name.lower() for c in self.characters.values()}
+        names = [n for n in FALLBACK_NAMES if n.lower() not in taken]
         for c in self.characters.values():
-            if not c.name:
-                c.name = names.pop(0) if names else "Mystery Guest"
+            if not c.name:  # the pitch's name for them, unless someone else took it
+                c.name = c.suggested if c.suggested and c.suggested.lower() not in taken else (
+                    names.pop(0) if names else "Mystery Guest")
+                taken.add(c.name.lower())
 
     def _fill_faces(self) -> None:
         for c in self.characters.values():
@@ -1510,7 +1588,7 @@ class DramaClub(Game):
     def _fill_chapter(self, ch: Chapter, i: int) -> None:
         ch.bg = ch.bg or self.rng.choice(BACKGROUNDS)
         ch.cast = ch.cast or self.rng.sample(list(self.characters), min(2, len(self.characters)))
-        ch.lines = [{"who": NARRATOR, "emotion": "neutral", "text": self.rng.choice(LOST_CHAPTER)}]
+        ch.lines = [{"who": NARRATOR, "emotion": "neutral", "text": self.rng.choice(LOST_CHAPTER), "fx": []}]
 
     def next_line(self, now: float) -> None:
         """The host clicked during the show: the next line, or after the last one the next
@@ -1523,7 +1601,74 @@ class DramaClub(Game):
 
     # -- messages ----------------------------------------------------------------------------
 
-    def _lines(self, raw: Any, speakers: int) -> list[dict[str, Any]]:
+    def _bg_ok(self, bg: Any) -> bool:
+        return isinstance(bg, str) and (bg in BACKGROUNDS or (bg.startswith("u:") and bg[2:] in self.uploads))
+
+    def _emotion_ok(self, cast: list[str], who: Any, emotion: Any) -> bool:
+        """A line's mood: one of the four everyone draws, or an extra mood its speaker's artist added."""
+        if not isinstance(emotion, str):
+            return False
+        if emotion in EMOTIONS:
+            return True
+        return type(who) is int and 0 <= who < len(cast) and emotion in self.characters[cast[who]].faces
+
+    def _mood_for(self, c: Character, raw: Any) -> str:
+        """The mood a face message is for: a preset, or a new or existing extra mood (cleaned)."""
+        if not isinstance(raw, str):
+            raise Invalid("Pick a mood to draw.")
+        if raw in EMOTIONS:
+            return raw
+        name = re.sub(r"\s+", " ", re.sub(r"[^\w '\-]", "", raw)).strip().lower()[:MAX_MOOD].strip()
+        if not name:
+            raise Invalid("Give the mood a name.")
+        if name in EMOTIONS:
+            return name
+        if name not in c.faces and len(c.moods()) >= MAX_CUSTOM:
+            raise Invalid(f"At most {MAX_CUSTOM} extra moods per character.")
+        return name
+
+    def _add_upload(self, pid: str, msg: dict[str, Any]) -> None:
+        data, name = msg.get("data"), msg.get("name")
+        if not isinstance(data, str) or len(data) > MAX_BG_BYTES * 4 // 3 + 8:
+            raise Invalid("That picture is too big. Try a smaller one.")
+        try:
+            raw = base64.b64decode(data, validate=True)
+        except (binascii.Error, ValueError):
+            raise Invalid("That picture didn't come through. Try again.") from None
+        if len(raw) > MAX_BG_BYTES:
+            raise Invalid("That picture is too big. Try a smaller one.")
+        mime = picture_type(raw)
+        if mime is None:
+            raise Invalid("Backgrounds must be a JPEG, PNG or WebP picture.")
+        if sum(u.by == pid for u in self.uploads.values()) >= MAX_UPLOADS_EACH:
+            raise Invalid(f"You can add {MAX_UPLOADS_EACH} backgrounds each.")
+        if len(self.uploads) >= MAX_UPLOADS:
+            raise Invalid("The room has all the custom backgrounds it can hold.")
+        label = clean(name, MAX_BG_NAME) if isinstance(name, str) else ""
+        self.uploads[secrets.token_hex(6)] = Upload(pid, label or "Custom", mime, raw)
+
+    def remove_upload(self, key: Any, by: str | None = None) -> None:
+        """Takes a custom background out (the VIP or host can remove any; a player only their own)."""
+        key = key[2:] if isinstance(key, str) and key.startswith("u:") else key
+        up = self.uploads.get(key) if isinstance(key, str) else None
+        if up is None:
+            raise Invalid("That background is already gone.")
+        if by is not None and up.by != by:
+            raise Invalid("You can only remove your own backgrounds.")
+        del self.uploads[key]
+        for ch in self.chapters:  # a chapter that picked it gets another one when the show starts
+            if ch.bg == f"u:{key}":
+                ch.bg = ""
+
+    def _fx(self, raw: Any) -> list[str]:
+        if raw is None:
+            return []
+        if not isinstance(raw, list) or not all(isinstance(e, str) and e in EFFECTS for e in raw):
+            raise Invalid("That effect isn't available.")
+        return list(dict.fromkeys(raw))
+
+    def _lines(self, raw: Any, cast: list[str]) -> list[dict[str, Any]]:
+        speakers = len(cast)
         if not isinstance(raw, list) or not raw:
             raise Invalid("Write at least one line.")
         if len(raw) > self.MAX_LINES:
@@ -1533,11 +1678,12 @@ class DramaClub(Game):
             if not isinstance(x, dict):
                 raise Invalid("That chapter didn't come through. Try again.")
             who, emotion, text = x.get("who"), x.get("emotion"), clean(x.get("text"), MAX_LINE)
-            if isinstance(who, bool) or who not in (*range(speakers), NARRATOR) or emotion not in EMOTIONS:
+            if type(who) is not int or who not in (*range(speakers), NARRATOR) or not (
+                    emotion in EMOTIONS if who == NARRATOR else self._emotion_ok(cast, who, emotion)):
                 raise Invalid("Pick who says each line and how they feel.")
             if not text:
                 raise Invalid("A line is empty: write something or remove it.")
-            out.append({"who": who, "emotion": emotion, "text": text})
+            out.append({"who": who, "emotion": emotion, "text": text, "fx": self._fx(x.get("fx"))})
         return out
 
     def handle(self, pid: str, msg: dict[str, Any], now: float) -> None:
@@ -1546,11 +1692,15 @@ class DramaClub(Game):
             text = clean(msg.get("text"), MAX_THEME)
             if not text:
                 raise Invalid("Write a theme first.")
+            names = msg.get("names")
+            if names is not None and (not isinstance(names, list) or not all(isinstance(x, str) for x in names)):
+                raise Invalid("Those names didn't come through. Try again.")
             if pid not in self.themes:
                 self.themes[pid] = text
                 self.problems[pid] = clean(msg.get("problem") or "", MAX_PROBLEM)
+                self.name_ideas[pid] = self._names(names)
         elif ph == "pitch_vote" and kind == "vote":
-            if msg.get("choice") not in self._theme_choices(pid):
+            if not isinstance(msg.get("choice"), str) or msg["choice"] not in self._theme_choices(pid):
                 raise Invalid("Vote for someone else's theme.")
             self.theme_votes.setdefault(pid, msg["choice"])
         elif ph == "create" and kind == "character":
@@ -1564,13 +1714,22 @@ class DramaClub(Game):
             c.look = clean(msg.get("look") or "", MAX_LOOK)
             c.personality = clean(msg.get("personality") or "", MAX_PERSONALITY)
         elif ph == "draw" and kind == "face":
-            emotion = msg.get("emotion")
-            if emotion not in EMOTIONS:
-                raise Invalid("Pick a mood to draw.")
+            c = self.drawing_for(pid)
+            emotion = self._mood_for(c, msg.get("emotion"))
             try:
-                self.drawing_for(pid).faces[emotion] = check_drawing(msg.get("strokes"), sprite=True)
+                c.faces[emotion] = check_drawing(msg.get("strokes"), sprite=True)
             except BadDrawing as e:
                 raise Invalid(str(e)) from None
+        elif ph == "draw" and kind == "unface":  # take back an extra mood
+            c = self.drawing_for(pid)
+            emotion = self._mood_for(c, msg.get("emotion"))
+            if emotion in EMOTIONS:
+                raise Invalid("The four main moods stay: redraw one instead.")
+            c.faces.pop(emotion, None)
+        elif ph == "draw" and kind == "ready":
+            if set(EMOTIONS) - set(self.drawing_for(pid).faces):
+                raise Invalid("Draw all four main moods first.")
+            self.ready.add(pid)
         elif ph == "headline" and kind == "headline":
             text = clean(msg.get("text"), MAX_HEADLINE)
             if not text:
@@ -1582,13 +1741,18 @@ class DramaClub(Game):
         elif ph == "write" and kind == "chapter":
             ch = self.chapters[self.chapter_of(pid)]
             bg, cast = msg.get("bg"), msg.get("cast")
-            if bg not in BACKGROUNDS:
+            if not self._bg_ok(bg):
                 raise Invalid("Pick a background.")
-            if (not isinstance(cast, list) or not cast or len(set(cast)) != len(cast)
+            if (not isinstance(cast, list) or not cast or not all(isinstance(c, str) for c in cast)
+                    or len(set(cast)) != len(cast)
                     or any(c not in self.characters for c in cast)):
                 raise Invalid("Pick who's in your chapter.")
-            ch.lines = self._lines(msg.get("lines"), len(cast))
+            ch.lines = self._lines(msg.get("lines"), cast)
             ch.bg, ch.cast = bg, list(cast)
+        elif ph == "write" and kind == "upload_bg":
+            self._add_upload(pid, msg)
+        elif ph == "write" and kind == "remove_bg":
+            self.remove_upload(msg.get("id"), by=pid)
         elif kind == "draft":
             # unsent work, saved as it's typed; it only counts if time runs out first (and one
             # that lands just after the step changed is simply dropped)
@@ -1597,11 +1761,11 @@ class DramaClub(Game):
         elif ph == "vote" and kind == "vote":
             chapter, drawing = msg.get("chapter"), msg.get("drawing")
             if chapter is not None:
-                if chapter not in self._chapter_choices(pid):
+                if type(chapter) is not int or chapter not in self._chapter_choices(pid):
                     raise Invalid("Vote for a chapter you didn't write.")
                 self.chapter_votes[pid] = chapter
             if drawing is not None:
-                if drawing not in self._drawing_choices(pid):
+                if not isinstance(drawing, str) or drawing not in self._drawing_choices(pid):
                     raise Invalid("Vote for a drawing you didn't draw or invent.")
                 self.drawing_votes[pid] = drawing
         else:
@@ -1614,7 +1778,6 @@ class DramaClub(Game):
         return [p for p, c in self.characters.items() if pid not in (c.creator, c.artist)]
 
     def _score_votes(self) -> None:
-        self.gained = {}
         counts = [0] * len(self.chapters)
         for i in self.chapter_votes.values():
             counts[i] += 1
@@ -1637,7 +1800,7 @@ class DramaClub(Game):
             first = next((x["text"] for x in ch.lines if x["who"] != NARRATOR), ch.lines[0]["text"])
             self.hits.append({"kind": "scene", "prompt": self.theme, "text": first,
                               "pid": ch.writer, "votes": counts[best], "of": voters,
-                              "scene": {"bg": ch.bg, "names": [self.characters[a].name for a in ch.cast],
+                              "scene": {"bg": ch.bg if ch.bg in BACKGROUNDS else "classroom", "names": [self.characters[a].name for a in ch.cast],
                                         "faces": [self.characters[a].faces.get("neutral", []) for a in ch.cast],
                                         "line": first}})
         if drawings and max(drawings.values()) >= 2:
@@ -1654,27 +1817,38 @@ class DramaClub(Game):
         ph = self.phase
         if ph == "pitch":
             return {"type": "theme", "text": self._idea(self.content.drama_themes) or self._bot_line(),
-                    "problem": self._idea(self.content.drama_premises)[:MAX_PROBLEM]}
+                    "problem": self._idea(self.content.drama_premises)[:MAX_PROBLEM],
+                    "names": self.rng.sample(FALLBACK_NAMES, min(len(self.pids), len(FALLBACK_NAMES)))}
         if ph == "pitch_vote" and (ch := self._theme_choices(pid)):
             return {"type": "vote", "choice": self.rng.choice(ch)}
         if ph == "create" and not self.characters[pid].name:
             names = [n for n in FALLBACK_NAMES if n not in {x.name for x in self.characters.values()}]
-            return {"type": "character", "name": self.rng.choice(names or ["Extra " + pid[-2:]]),
+            return {"type": "character", "name": self.characters[pid].suggested or self.rng.choice(names or ["Extra " + pid[-2:]]),
                     "look": self._bot_line()[:MAX_LOOK], "personality": self._bot_line()[:MAX_PERSONALITY]}
         if ph == "draw":
-            missing = [e for e in EMOTIONS if e not in self.drawing_for(pid).faces]
+            c = self.drawing_for(pid)
+            missing = [e for e in EMOTIONS if e not in c.faces]
             if missing:
                 return {"type": "face", "emotion": missing[0], "strokes": doodle(self.rng, sprite=True)}
-            return None
+            if pid in self.ready:
+                return None
+            if not c.moods() and self.rng.random() < 0.3:  # now and then a bot adds an extra mood
+                return {"type": "face", "emotion": self.rng.choice(["smug", "blushing", "scheming", "sleepy"]),
+                        "strokes": doodle(self.rng, sprite=True)}
+            return {"type": "ready"}
         if ph == "headline" and (ch := self.chapters[self.relay]).headliner == pid and not ch.headline:
             return {"type": "headline", "text": self._bot_line()[:MAX_HEADLINE]}
         if ph == "write" and not self.chapters[self.chapter_of(pid)].lines:
             cast = self.rng.sample(list(self.characters), min(2, len(self.characters)))
-            lines = [{"who": NARRATOR, "emotion": "neutral",
+            lines = [{"who": NARRATOR, "emotion": "neutral", "fx": [],
                       "text": (self._idea(self.content.drama_premises) or self._bot_line())[:MAX_LINE]}]
-            lines += [{"who": i % len(cast), "emotion": self.rng.choice(EMOTIONS), "text": self._bot_line()[:MAX_LINE]}
-                      for i in range(self.rng.randint(2, 4))]
-            return {"type": "chapter", "bg": self.rng.choice(BACKGROUNDS), "cast": cast, "lines": lines}
+            for i in range(self.rng.randint(2, 4)):
+                who = i % len(cast)
+                moods = list(EMOTIONS) + self.characters[cast[who]].moods()
+                lines.append({"who": who, "emotion": self.rng.choice(moods), "text": self._bot_line()[:MAX_LINE],
+                              "fx": [self.rng.choice(EFFECTS)] if self.rng.random() < 0.3 else []})
+            bgs = list(BACKGROUNDS) + [f"u:{u}" for u in self.uploads]
+            return {"type": "chapter", "bg": self.rng.choice(bgs), "cast": cast, "lines": lines}
         if ph == "vote":
             out: dict[str, Any] = {"type": "vote"}
             if pid not in self.chapter_votes and (cc := self._chapter_choices(pid)):
@@ -1708,18 +1882,26 @@ class DramaClub(Game):
         if ph in ("pitch", "pitch_vote", "create", "draw", "headline", "write", "vote"):
             v["waiting"] = sorted(self.waiting_on() or set())
         if ph == "pitch_vote":
-            v["themes"] = [{"pid": p, "text": t, "problem": self.problems.get(p, "")} for p, t in self.themes.items()]
+            v["themes"] = [{"pid": p, "text": t, "problem": self.problems.get(p, ""), "names": self.name_ideas.get(p, [])}
+                           for p, t in self.themes.items()]
+        elif ph == "draw":  # how far along each artist is: counts only, the art stays hidden
+            v["progress"] = {c.artist: {"moods": len(set(EMOTIONS) & set(c.faces)), "extra": len(c.moods()),
+                                        "ready": c.artist in self.ready} for c in self.characters.values()}
         elif ph == "headline":
             v["outline"] = self._outline(self.relay)
             v["relay"] = {"number": self.relay + 1, "of": len(self.chapters), "part": self.part(self.relay),
                           "writer": self.chapters[self.relay].headliner}
         elif ph == "write":
             v["cast"] = [c.card() for c in self.characters.values()]  # names only: still no art
+            v["uploads"] = [{"id": f"u:{i}", "name": u.name, "by": u.by} for i, u in self.uploads.items()]
         elif ph == "show":
             v["chapter"] = self._chapter_full(self.showing)
         elif ph == "credits":
             v["credits"] = {"characters": [{"name": c.name, "creator": c.creator, "artist": c.artist,
-                                            "face": c.faces.get("neutral", [])} for c in self.characters.values()],
+                                            "face": c.faces.get("neutral", []),
+                                            "moods": [{"name": k, "face": c.faces[k]}  # the credits cycle through these
+                                                      for k in (*EMOTIONS, *c.moods()) if k in c.faces]}
+                                           for c in self.characters.values()],
                             "writers": [ch.writer for ch in self.chapters]}
         elif ph == "vote":
             v["gallery"] = [{"pid": p, "name": c.name, "artist": c.artist, "face": c.faces.get("flustered", [])}
@@ -1734,17 +1916,21 @@ class DramaClub(Game):
         ph = self.phase
         if ph == "pitch":
             v["mine"] = self.themes.get(pid)
+            v["name_slots"] = len(self.pids)  # one suggested name per character in the story
             ideas = self.content.drama_themes
             v["idea"] = ideas[(self.pids.index(pid) * 7) % len(ideas)] if ideas else ""
         elif ph == "pitch_vote":
-            v["themes"] = [{"pid": p, "text": self.themes[p], "problem": self.problems.get(p, "")}
-                           for p in self._theme_choices(pid)]
+            v["themes"] = [{"pid": p, "text": self.themes[p], "problem": self.problems.get(p, ""),
+                            "names": self.name_ideas.get(p, [])} for p in self._theme_choices(pid)]
             v["voted"] = self.theme_votes.get(pid)
         elif ph == "create":
             v["character"] = self.characters[pid].card()
+            v["suggested"] = self.characters[pid].suggested
         elif ph == "draw":
             c = self.drawing_for(pid)
             v["drawing"] = c.card() | {"faces": c.faces}  # only the art you're making
+            v["ready"] = pid in self.ready
+            v["max_moods"], v["max_mood_name"] = MAX_CUSTOM, MAX_MOOD
         elif ph == "headline":
             i = next(k for k, ch in enumerate(self.chapters) if ch.headliner == pid)  # the headline you write
             turn = "done" if i < self.relay or self.chapters[i].headline else "now" if i == self.relay else "waiting"
@@ -1761,6 +1947,9 @@ class DramaClub(Game):
                             "outline": self._outline(len(chs))}
             v["cast"] = [c.card() for c in self.characters.values()]
             v["backgrounds"] = list(BACKGROUNDS)
+            v["uploads"] = [{"id": f"u:{i}", "name": u.name, "by": u.by} for i, u in self.uploads.items()]
+            v["uploads_left"] = max(0, MAX_UPLOADS_EACH - sum(u.by == pid for u in self.uploads.values()))
+            v["effects"] = list(EFFECTS)
             v["max_lines"] = self.MAX_LINES
         elif ph == "show":
             v["number"], v["of"] = self.showing + 1, len(self.chapters)

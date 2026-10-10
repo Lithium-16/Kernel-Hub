@@ -68,6 +68,10 @@
   let dLines = null;
   let dJob = null;
   let dMost = 6;
+  let dStep = 1; // writing: which of the three steps (who, where, lines) is open
+  let dNewMood = false; // drawing: the box for naming an extra mood is open
+  let dMore = false; // drawing: back to the pad after saying "I'm done" (for more moods)
+  let dSeenUp = null; // writing: the uploaded backgrounds this phone has already seen
 
   $('ph').innerHTML =
     `<div id="top"></div><main class="phmain" id="main"></main><div class="phfoot" id="foot" hidden></div>`;
@@ -161,7 +165,13 @@
   }
 
   // Timer speeds the host can pick (the server's TIMERS): every timed step is multiplied.
-  const TIMERS = { fast: 'Fast', normal: 'Normal', relaxed: 'Relaxed', extra: 'Extra time' };
+  const TIMERS = {
+    fast: 'Fast',
+    normal: 'Normal',
+    relaxed: 'Relaxed',
+    extra: 'Extra time',
+    artist: 'Artist (no drawing limit)',
+  };
   const timerRow = () =>
     `<h3 class="dhead">Timers</h3><div class="timers" role="group" aria-label="Timer speed">${Object.entries(
       TIMERS,
@@ -411,6 +421,43 @@
 
   // -- Drama Club ------------------------------------------------------------------------
   const MOODS = { neutral: 'Neutral', flustered: 'Flustered', sad: 'Sad', angry: 'Angry' };
+  const moodLabel = (k) => MOODS[k] || k.charAt(0).toUpperCase() + k.slice(1);
+  /** An extra mood's name the way the server will keep it. */
+  const normMood = (t) =>
+    t
+      .replace(/[^\p{L}\p{N}_ '-]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase()
+      .slice(0, 16)
+      .trim();
+  /** Effects a line can set off on the big screen (stackable). */
+  const FX = {
+    shake: ['💥', 'Shake', 'Screen shake'],
+    flash_red: ['🔴', 'Red', 'Red flash'],
+    flash_white: ['⚪', 'White', 'White flash'],
+    blackout: ['⚫', 'Black', 'Blackout'],
+    zoom: ['🔍', 'Zoom', 'Zoom punch'],
+    blur: ['🌫️', 'Blur', 'Dizzy blur'],
+    sepia: ['🎞️', 'Old', 'Flashback'],
+    hop: ['⬆️', 'Jump', 'Jump'],
+    speed: ['💨', 'Speed', 'Speed lines'],
+    sparkle: ['✨', 'Sparkle', 'Sparkles'],
+    hearts: ['💗', 'Hearts', 'Floating hearts'],
+    petals: ['🌸', 'Petals', 'Falling petals'],
+    rain: ['🌧️', 'Rain', 'Rain'],
+    glitch: ['📺', 'Glitch', 'Glitch'],
+  };
+  const NAME_IDEAS = [
+    'Vlad',
+    'Mimi',
+    'Captain Pickles',
+    'Dr. Moon',
+    'Sir Toast',
+    'Aiko',
+    'Big Gary',
+    'Luna',
+  ];
   const PART = {
     beginning: ['the beginning', 'Start the story. Bring in some characters and set things up.'],
     middle: [
@@ -439,34 +486,235 @@
   /** The chapter editor: who says each line, how they feel, and what they say. */
   const speakerName = (who) =>
     who === 'n' ? 'Narrator' : (dJob.cast.find((c) => c.pid === who) || { name: '?' }).name;
+  /** The moods a character's lines can use: the four everyone draws, plus any the artist added. */
+  const moodsOf = (who) =>
+    who === 'n'
+      ? []
+      : [...Object.keys(MOODS), ...((dJob.cast.find((c) => c.pid === who) || {}).moods || [])];
+  const MOOD_ICON = { neutral: '😐', flustered: '😳', sad: '😢', angry: '😠' };
+  /** Each character in the chapter gets its own colour: on their chips and down the side of their lines. */
+  const hueOf = (who) => (who === 'n' ? null : (dCast.indexOf(who) * 57 + 262) % 360);
   function lineRows() {
     if (!dCast.length) return '<p class="pnote">Pick who\'s in your chapter first.</p>';
     const who = [...dCast, 'n'];
     return `${dLines
-      .map(
-        (ln, i) => `<div class="dline">
-          <div class="who">${who.map((w) => `<button type="button" data-lwho="${i}:${w}" aria-pressed="${ln.who === w}">${esc(speakerName(w))}</button>`).join('')}</div>
+      .map((ln, i) => {
+        const h = hueOf(ln.who);
+        return `<div class="dline" data-line="${i}" style="${h === null ? '' : `--hue:${h}`}">
+          <div class="lhead"><span class="lnum">Line ${i + 1}</span>${dLines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line ${i + 1}">Remove ×</button>` : ''}</div>
+          <textarea data-ltext="${i}" maxlength="400" rows="2" autocomplete="off" aria-label="Line ${i + 1}" placeholder="${ln.who === 'n' ? 'What happens…' : 'What they say…'}">${esc(ln.text)}</textarea>
+          <div class="who">${who.map((w) => `<button type="button" data-lwho="${i}:${w}" style="--hue:${hueOf(w) ?? 0}" class="${w === 'n' ? 'narr' : 'cast'}" aria-pressed="${ln.who === w}">${w === 'n' ? '' : '<i class="dot" aria-hidden="true"></i>'}${esc(speakerName(w))}</button>`).join('')}</div>
           ${
             ln.who === 'n'
               ? ''
-              : `<div class="moods">${Object.entries(MOODS)
+              : `<div class="moods mood">${moodsOf(ln.who)
                   .map(
-                    ([k, label]) =>
-                      `<button type="button" data-lemo="${i}:${k}" aria-pressed="${ln.emotion === k}">${label}</button>`,
+                    (k) =>
+                      `<button type="button" data-lemo="${i}:${esc(k)}" aria-pressed="${ln.emotion === k}"><span aria-hidden="true">${MOOD_ICON[k] || '✨'}</span>${esc(moodLabel(k))}</button>`,
                   )
                   .join('')}</div>`
           }
-          <div class="row"><textarea data-ltext="${i}" maxlength="400" rows="1" autocomplete="off" aria-label="Line ${i + 1}" placeholder="${ln.who === 'n' ? 'What happens…' : 'What they say…'}">${esc(ln.text)}</textarea>${dLines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line ${i + 1}">×</button>` : ''}</div>
-        </div>`,
-      )
+          <details class="dfx"${ln.fxOpen ? ' open' : ''}><summary>Effects${ln.fx.length ? `<span class="fxon" aria-label="${ln.fx.map((k) => FX[k][2]).join(', ')}">${ln.fx.map((k) => FX[k][0]).join(' ')}</span>` : ''}</summary><div class="sfade"><div class="fxrow">${Object.entries(
+            FX,
+          )
+            .filter(([k]) => dJob.effects.includes(k))
+            .map(
+              ([k, [icon, short, label]]) =>
+                `<button type="button" data-lfx="${i}:${k}" aria-pressed="${ln.fx.includes(k)}" aria-label="${label}" title="${label}"><span aria-hidden="true">${icon}</span>${short}</button>`,
+            )
+            .join(
+              '',
+            )}</div></div>${ln.fx.length ? `<button type="button" class="ghost prevbtn" data-lprev="${i}">▶ Preview</button>` : ''}</details>
+        </div>`;
+      })
       .join('')}
       ${dLines.length < dMost ? '<button class="ghost" type="button" data-act="addline">+ Add a line</button>' : ''}`;
+  }
+  // -- the write step's three parts: who, where, lines (one open at a time, the others a summary)
+  function stepSummaries() {
+    if (!dJob || !$('wsum1')) return;
+    const bgName = dBg.startsWith('u:')
+      ? (dJob.uploads.find((u) => u.id === dBg) || { name: 'Custom' }).name
+      : window.PartyScenes.LABELS[dBg] || dBg;
+    $('wsum1').textContent = dCast.length
+      ? dCast.map((c) => (dJob.cast.find((x) => x.pid === c) || { name: '?' }).name).join(', ')
+      : 'Pick at least one';
+    $('wsum2').textContent = bgName;
+    const empty = dLines ? dLines.filter((ln) => !ln.text.trim()).length : 0;
+    $('wsum3').textContent = !dCast.length
+      ? 'After you pick who is in it'
+      : `${dLines.length} line${dLines.length === 1 ? '' : 's'}${empty ? ` · ${empty} to fill` : ' · ready'}`;
+    document.querySelector('[data-wstep="1"]').classList.toggle('done', dCast.length > 0);
+    document.querySelector('[data-wstep="2"]').classList.toggle('done', dCast.length > 0);
+    document.querySelector('[data-wstep="3"]').classList.toggle('done', dCast.length > 0 && !empty);
+  }
+  function showStep(n) {
+    dStep = n;
+    for (const k of [1, 2, 3]) {
+      const sec = document.querySelector(`[data-wstep="${k}"]`);
+      if (!sec) return;
+      sec.classList.toggle('open', k === n);
+      sec.querySelector('.wbody').hidden = k !== n;
+      sec.querySelector('.whead').setAttribute('aria-expanded', String(k === n));
+    }
+    const story = $('dstory');
+    if (story && n > 1) story.open = false; // the story card gets out of the way (tap it to read again)
+    stepSummaries();
+    fadeCheck();
+    document
+      .querySelector(`[data-wstep="${n}"]`)
+      .scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+  /** A small stand-in for the big screen: the chosen background, the cast as figures in their colours, and the line's effects. */
+  function previewFx(i) {
+    const ln = dLines[i];
+    const det = document.querySelector(`[data-line="${i}"] .dfx`);
+    if (!ln || !det) return;
+    const S = window.PartyScenes;
+    let box = det.querySelector('.fxprev');
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'fxprev';
+      const n = dCast.length;
+      const figs = dCast
+        .map((c, k) => {
+          const spot = n === 1 ? 'c' : n === 2 ? (k ? 'r' : 'l') : 'n';
+          const w = n > 2 ? Math.max(210, Math.min(380, 1180 / n)) : 0;
+          const pos =
+            n > 2
+              ? ` style="left:${Math.round((1280 - n * w) / (n + 1) + k * (w + (1280 - n * w) / (n + 1)))}px;width:${Math.round(w)}px;height:${Math.round(w)}px;--hue:${hueOf(c)}"`
+              : ` style="--hue:${hueOf(c)}"`;
+          return `<div class="sprite ${spot} in ghostsprite"${pos}></div>`;
+        })
+        .join('');
+      box.innerHTML = `<div class="vnstage">${S.svg(dBg, 'vnbg')}${figs}${S.fxLayers}<div class="vnbar t"></div><div class="vnbar b"></div><div class="vnbox"><div class="plate"></div><p></p></div></div>`;
+      det.append(box);
+    }
+    box.style.setProperty('--k', String(box.clientWidth / 1280));
+    syncPreview(i);
+    S.playFx(box.querySelector('.vnstage'), ln.fx);
+  }
+  /** Keeps an open preview in step with what's typed (and who's speaking). */
+  function syncPreview(i) {
+    const box = document.querySelector(`[data-line="${i}"] .fxprev`);
+    const ln = dLines[i];
+    if (!box || !ln) return;
+    const vb = box.querySelector('.vnbox');
+    const narr = ln.who === 'n';
+    vb.classList.toggle('narrator', narr);
+    vb.style.setProperty('--hue', String(hueOf(ln.who) ?? 0));
+    box.querySelector('.plate').textContent = narr ? '' : speakerName(ln.who);
+    box.querySelector('p').textContent = ln.text.trim() || 'Your line shows up here…';
   }
   function redrawLines() {
     const box = $('dlines');
     if (box) box.innerHTML = lineRows();
     for (const b of document.querySelectorAll('[data-dcast]'))
       b.setAttribute('aria-pressed', String(dCast.includes(b.dataset.dcast)));
+    fadeCheck();
+    syncSend();
+    stepSummaries();
+  }
+  /** The send button says what's still missing (it stays tappable: tapping explains). */
+  function syncSend() {
+    const b = document.querySelector('[data-act="sendchapter"]');
+    if (!b || !dLines) return;
+    const why = !dCast.length
+      ? "Pick who's in it first"
+      : dLines.some((ln) => !ln.text.trim())
+        ? 'Fill in every line'
+        : '';
+    b.textContent = why || 'Send my chapter';
+    b.classList.toggle('pending', !!why);
+  }
+  /** Scrolling rows fade out on the side with more to see; the fade goes at the end of the row. */
+  function fadeCheck() {
+    for (const w of document.querySelectorAll('.sfade')) {
+      const r = w.firstElementChild;
+      w.classList.toggle(
+        'end',
+        r.scrollWidth - r.clientWidth < 4 || r.scrollLeft + r.clientWidth >= r.scrollWidth - 4,
+      );
+    }
+  }
+  document.addEventListener(
+    'scroll',
+    (e) => e.target.parentElement?.classList?.contains('sfade') && fadeCheck(),
+    true,
+  );
+  /** The "Where?" row: the preset backgrounds, then the ones players uploaded. */
+  function bgButtons() {
+    const S = window.PartyScenes;
+    const presets = dJob.backgrounds.map(
+      (b) =>
+        `<button type="button" data-bg="${b}" aria-pressed="${b === dBg}" aria-label="${esc(S.LABELS[b])}">${S.svg(b, '', true)}<span>${esc(S.LABELS[b])}</span></button>`,
+    );
+    // an uploaded background: its owner (and the VIP) can take it back out
+    const mine = dJob.uploads.map(
+      (u) =>
+        `<div class="bgtile"><button type="button" data-bg="${esc(u.id)}" aria-pressed="${u.id === dBg}" aria-label="${esc(u.name)}">${S.svg(u.id, '', true)}<span>${esc(u.name)}<small>by ${esc(player(u.by).name)}</small></span></button>${u.by === pid || isVip() ? `<button type="button" class="bgx" data-rmbg="${esc(u.id)}" aria-label="Remove ${esc(u.name)}">×</button>` : ''}</div>`,
+    );
+    return [...mine, ...presets].join('');
+  }
+  function bgUpload() {
+    return dJob.uploads_left > 0
+      ? `<label class="bgupl" role="button">＋ Add your own background (${dJob.uploads_left} left)<input type="file" id="f-bgfile" accept="image/*" hidden></label><p class="pnote">Everyone writing can pick it. Only share pictures you're happy to put on the big screen.</p>`
+      : '<p class="pnote">You added your backgrounds. Anyone can pick them.</p>';
+  }
+  function redrawBgs() {
+    const row = $('dbgs');
+    if (!row || !dJob) return;
+    for (const u of dJob.uploads)
+      if (u.by === pid && !dSeenUp.has(u.id)) {
+        dSeenUp.add(u.id); // your new upload is picked for you
+        dBg = u.id;
+      }
+    if (!dJob.backgrounds.includes(dBg) && !dJob.uploads.some((u) => u.id === dBg))
+      dBg = dJob.backgrounds[0];
+    row.innerHTML = bgButtons();
+    $('dbgup').innerHTML = bgUpload();
+    fadeCheck();
+    stepSummaries();
+  }
+  /** Shrinks a picked picture to a 16:9 JPEG that fits what the server accepts, and sends it. */
+  async function sendBackground(file) {
+    try {
+      const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() =>
+        createImageBitmap(file),
+      );
+      const canvas = document.createElement('canvas');
+      const g = canvas.getContext('2d');
+      for (const [w, q] of [
+        [960, 0.82],
+        [960, 0.7],
+        [960, 0.55],
+        [800, 0.5],
+        [640, 0.45],
+        [480, 0.4],
+      ]) {
+        const h = Math.round((w * 9) / 16);
+        canvas.width = w;
+        canvas.height = h;
+        const k = Math.max(w / bmp.width, h / bmp.height); // fill the frame, cropping the edges
+        g.fillStyle = '#fff';
+        g.fillRect(0, 0, w, h);
+        g.drawImage(
+          bmp,
+          (w - bmp.width * k) / 2,
+          (h - bmp.height * k) / 2,
+          bmp.width * k,
+          bmp.height * k,
+        );
+        const data = canvas.toDataURL('image/jpeg', q).split(',')[1];
+        if ((data.length * 3) / 4 <= 140000) {
+          const name = file.name.replace(/\.[^.]+$/, '').slice(0, 24);
+          return send({ type: 'upload_bg', name, data });
+        }
+      }
+      showErr('That picture is too detailed. Try another one.');
+    } catch {
+      showErr("That picture can't be opened. Try a JPEG or PNG.");
+    }
   }
   function dramaScreen(v) {
     const D = window.PartyDraw;
@@ -477,7 +725,11 @@
       dLines = null;
       dCast = null;
     }
-    if (v.phase !== 'draw') dEmo = null;
+    if (v.phase !== 'draw') {
+      dEmo = null;
+      dMore = false;
+      dNewMood = false;
+    }
     if (v.phase === 'pitch') {
       if (v.mine)
         return {
@@ -490,7 +742,9 @@
         main: `${top}<h2 class="ptitle">What's tonight's story about?</h2>
           <p class="pnote">Pitch a theme and the problem the story is about. Then the room votes. Idea: ${esc(v.idea || 'anything dramatic')}</p>
           <div class="field"><label for="f-theme">Your theme</label><input id="f-theme" maxlength="120" autocomplete="off" placeholder="A haunted bakery"></div>
-          <div class="field"><label for="f-problem">The problem: what goes wrong?</label><input id="f-problem" maxlength="160" autocomplete="off" placeholder="Someone stole every croissant"></div>`,
+          <div class="field"><label for="f-problem">The problem: what goes wrong?</label><input id="f-problem" maxlength="160" autocomplete="off" placeholder="Someone stole every croissant"></div>
+          <details class="field namesd"><summary>Suggest character names <small>(optional · ${v.name_slots} needed)</small></summary><div class="names">${Array.from({ length: v.name_slots }, (_, i) => `<input id="f-name${i}" maxlength="24" autocomplete="off" aria-label="Character name ${i + 1}" placeholder="${NAME_IDEAS[i % NAME_IDEAS.length]}">`).join('')}</div>
+          <span class="pnote">If your pitch wins, these names are dealt out and everyone builds a character on theirs. Blanks get filled in for you.</span></details>`,
         foot: '<button class="big-btn" type="button" data-act="theme">Pitch it</button>',
         input: true,
       };
@@ -505,7 +759,21 @@
       return {
         key: base,
         main: `${top}<h2 class="ptitle">Which story should we tell?</h2>
-          ${v.themes.map((t) => `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'><span>${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}</span></button>`).join('')}`,
+          ${v.themes
+            .map(
+              (t) =>
+                `<button class="choice" type="button" data-send='${esc(JSON.stringify({ type: 'vote', choice: t.pid }))}'><span>${esc(t.text)}${t.problem ? `<small>${esc(t.problem)}</small>` : ''}${
+                  t.names.length
+                    ? `<span class="dcast"><span class="lbl">Cast</span>${t.names
+                        .slice(0, 4)
+                        .map((n) => `<span class="cn">${esc(n)}</span>`)
+                        .join(
+                          '',
+                        )}${t.names.length > 4 ? `<span class="cn more">+${t.names.length - 4}</span>` : ''}</span>`
+                    : ''
+                }</span></button>`,
+            )
+            .join('')}`,
         input: true,
       };
     }
@@ -526,7 +794,8 @@
         key: base,
         main: `${top}<h2 class="ptitle">Invent a character</h2>
           <p class="pnote">Don't draw them: describe them. Someone else draws them, and you'll see the result in the show. Theme: <b>${esc(v.theme)}</b></p>
-          <div class="field"><label for="f-cname">Name</label><input id="f-cname" maxlength="24" autocomplete="off" placeholder="Vlad"></div>
+          ${v.suggested ? `<p class="pnote">The winning pitch named your character <b>${esc(v.suggested)}</b>. Build on it: a title, a surname or a nickname is fine.</p>` : ''}
+          <div class="field"><label for="f-cname">Name</label><input id="f-cname" maxlength="24" autocomplete="off" value="${esc(v.suggested || '')}" placeholder="Vlad"></div>
           <div class="field"><label for="f-clook">What they look like</label><input id="f-clook" maxlength="200" autocomplete="off" placeholder="tall vampire, tiny chef hat, flour everywhere"></div>
           <div class="field"><label for="f-cpers">Personality</label><input id="f-cpers" maxlength="160" autocomplete="off" placeholder="nervous about literally everything"></div>`,
         foot: '<button class="big-btn" type="button" data-act="create">Send them in</button>',
@@ -535,33 +804,44 @@
     }
     if (v.phase === 'draw') {
       const c = v.drawing;
-      const sent = Object.keys(c.faces);
-      const all = Object.keys(MOODS).every((k) => sent.includes(k));
-      // dEmo: the mood being drawn, or '__done' once all four are in and the player is happy
-      if (dEmo === '__done' && !all) dEmo = null;
-      if (dEmo !== '__done' && !(dEmo in MOODS))
-        dEmo = Object.keys(MOODS).find((k) => !sent.includes(k)) || 'neutral';
-      if (all && dEmo === '__done')
+      if (v.ready && !dMore)
         return {
           key: base + ':all',
           main: top + wait(`${esc(c.name)} is ready!`, 'Nobody sees them until the show. Shh!'),
-          foot: skipBtn(),
+          foot: `<button class="ghost" type="button" data-act="drawmore">Draw more moods</button>${skipBtn()}`,
         };
-      const tabs = `<div class="moods tabs">${Object.entries(MOODS)
+      const sent = Object.keys(c.faces);
+      const have = Object.keys(MOODS).every((k) => sent.includes(k));
+      // dEmo: the mood on the pad: one of the four, an extra mood, or a new extra mood's name
+      if (!dEmo) dEmo = Object.keys(MOODS).find((k) => !sent.includes(k)) || 'neutral';
+      const names = [...Object.keys(MOODS), ...c.moods];
+      if (!names.includes(dEmo)) names.push(dEmo); // a new extra mood, not saved yet
+      const canAdd = have && c.moods.length < v.max_moods;
+      const tabs = `<div class="moods tabs">${names
         .map(
-          ([k, label]) =>
-            `<button type="button" data-dtab="${k}" aria-pressed="${k === dEmo}">${sent.includes(k) ? '✓ ' : ''}${label}</button>`,
+          (k) =>
+            `<button type="button" data-dtab="${esc(k)}" aria-pressed="${k === dEmo}">${sent.includes(k) ? '✓ ' : ''}${esc(moodLabel(k))}</button>`,
         )
-        .join('')}</div>`;
+        .join(
+          '',
+        )}${canAdd ? `<button type="button" class="addtab" data-act="newmood" aria-expanded="${dNewMood}">＋ Mood</button>` : ''}</div>`;
+      const extra =
+        canAdd && dNewMood
+          ? `<div class="newmood"><input id="f-newmood" maxlength="${v.max_mood_name}" autocomplete="off" aria-label="Name an extra mood" placeholder="Name it: smug, sparkly…"><button class="ghost" type="button" data-act="addmood">Add</button></div>`
+          : '';
       const neutral = c.faces.neutral;
+      const hint = have
+        ? 'All four are in: add extra moods, or tap Done.'
+        : dEmo === 'neutral'
+          ? 'Standing, no background.'
+          : 'Change the face. From neutral helps.';
       return {
-        key: `${base}:${dEmo}:${sent.join(',')}`,
-        main: `${top}<span class="kicker">Your job: draw ${esc(c.name)} · ${MOODS[dEmo].toLowerCase()}</span>
-          ${charCard(c)}${tabs}
-          <p class="pnote">${dEmo === 'neutral' ? 'Full character, standing. No background: the scene goes behind them.' : 'Tap Start from neutral, then change the face.'}</p>
+        key: `${base}:${dEmo}:${sent.join(',')}:${c.moods.join(',')}:${dNewMood}`,
+        main: `${top}${charCard(c)}${tabs}${extra}
+          <p class="pnote">${hint}${c.moods.includes(dEmo) ? ' <button type="button" class="linkbtn" data-act="dropmood">Remove this mood</button>' : ''}</p>
           <div id="studio"></div>`,
         flow: true,
-        foot: `<div class="footrow"><button class="big-btn" type="button" data-act="face">${all ? 'Save' : `Save ${MOODS[dEmo].toLowerCase()}`}</button>${dEmo !== 'neutral' && neutral ? '<button class="ghost" type="button" data-act="fromneutral">Start from neutral</button>' : all ? '<button class="ghost" type="button" data-act="drawdone">Done</button>' : ''}</div>`,
+        foot: `<div class="footrow"><button class="big-btn" type="button" data-act="face">Save ${esc(dEmo)}</button>${dEmo !== 'neutral' && neutral ? '<button class="ghost" type="button" data-act="fromneutral">From neutral</button>' : ''}${have ? '<button class="ghost" type="button" data-act="drawdone">Done</button>' : ''}</div>`,
         after: () => {
           pad = D.Studio($('studio'), {
             sprite: true,
@@ -610,31 +890,45 @@
           main: top + wait('Chapter sent!', 'Waiting for the other writers. The show starts soon!'),
           foot: skipBtn(),
         };
+      dJob = v;
       if (!dLines) {
-        dLines = [{ who: 'n', emotion: 'neutral', text: '' }];
+        dLines = [{ who: 'n', emotion: 'neutral', text: '', fx: [] }];
         dCast = [];
+        dStep = 1;
+        dSeenUp = new Set(v.uploads.filter((u) => u.by === pid).map((u) => u.id));
       }
-      if (!v.backgrounds.includes(dBg)) dBg = v.backgrounds[0];
+      if (!v.backgrounds.includes(dBg) && !v.uploads.some((u) => u.id === dBg))
+        dBg = v.backgrounds[0];
       const [label, hint] = PART[ch.part];
       return {
         key: base,
         main: `${top}<h2 class="ptitle">Write chapter ${ch.number} of ${ch.of}</h2>
-          <div class="card dpart"><span class="kicker">${esc(label)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b>. The problem: <b>${esc(v.problem)}</b></span>
+          <details class="card dpart" id="dstory" open><summary><span class="kicker">${esc(label)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b></span></summary><span class="pnote">The problem: <b>${esc(v.problem)}</b></span>
             ${outlineList(ch.outline, ch.number)}
-            <span class="pnote">${esc(hint)} Get the story from the chapter before into the one after.</span></div>
-          <h3 class="dhead">Who's in it? <small>(as many as you like)</small></h3>
-          <div class="dcastpick">${v.cast.map((c) => `<button type="button" data-dcast="${esc(c.pid)}" aria-pressed="${dCast.includes(c.pid)}"><b>${esc(c.name)}</b><span>${esc(c.look || '')}</span>${c.personality ? `<i>${esc(c.personality)}</i>` : ''}</button>`).join('')}</div>
-          <h3 class="dhead">Where?</h3>
-          <div class="bgpick row">${v.backgrounds.map((b) => `<button type="button" data-bg="${b}" aria-pressed="${b === dBg}" aria-label="${esc(S.LABELS[b])}">${S.svg(b, '', true)}<span>${esc(S.LABELS[b])}</span></button>`).join('')}</div>
-          <h3 class="dhead">Your chapter</h3>
-          <p class="pnote">Tip: put actions between asterisks, like <b>*slams the door*</b>.</p>
-          <div id="dlines"></div>`,
+            <span class="pnote">${esc(hint)} Get the story from the chapter before into the one after.</span></details>
+          <section class="wstep open" data-wstep="1"><button type="button" class="whead" data-wgo="1" aria-expanded="true"><i class="wnum">1</i><span class="wtitle">Who's in it?</span><small id="wsum1"></small></button>
+            <div class="wbody">
+              <div class="dcastpick">${v.cast.map((c) => `<button type="button" data-dcast="${esc(c.pid)}" aria-pressed="${dCast.includes(c.pid)}"><b>${esc(c.name)}</b><span>${esc(c.look || '')}</span>${c.personality ? `<i>${esc(c.personality)}</i>` : ''}</button>`).join('')}</div>
+              <button type="button" class="ghost" data-wnext="2">Next: where does it happen? ▸</button></div></section>
+          <section class="wstep" data-wstep="2"><button type="button" class="whead" data-wgo="2" aria-expanded="false"><i class="wnum">2</i><span class="wtitle">Where?</span><small id="wsum2"></small></button>
+            <div class="wbody" hidden>
+              <div class="sfade onbg"><div class="bgpick row" id="dbgs">${bgButtons()}</div></div>
+              <div id="dbgup" class="bgup">${bgUpload()}</div>
+              <button type="button" class="ghost" data-wnext="3">Next: write the lines ▸</button></div></section>
+          <section class="wstep" data-wstep="3"><button type="button" class="whead" data-wgo="3" aria-expanded="false"><i class="wnum">3</i><span class="wtitle">Your chapter</span><small id="wsum3"></small></button>
+            <div class="wbody" hidden>
+              ${(ch.outline.find((x) => x.number === ch.number) || {}).headline ? `<p class="pnote dhl">Your headline: <b>${esc(ch.outline.find((x) => x.number === ch.number).headline)}</b></p>` : ''}
+              <p class="pnote">Tip: put actions between asterisks, like <b>*slams the door*</b>. Open <b>Effects</b> on a line to shake the screen, flash it red and more (they stack), and tap Preview to see it.</p>
+              <div id="dlines"></div></div></section>`,
         foot: '<button class="big-btn" type="button" data-act="sendchapter">Send my chapter</button>',
         after: () => {
           dJob = v;
           dMost = v.max_lines;
           redrawLines();
+          showStep(dStep);
         },
+        slim: true,
+        refresh: () => redrawBgs(), // someone uploaded a background
         keep: true,
         input: true,
       };
@@ -672,7 +966,7 @@
         key: `${base}:${vs.chapter}:${vs.drawing}`,
         main: `${top}<h2 class="ptitle">Vote: best chapter and best drawing</h2>
           <h3 class="dhead">Best chapter</h3>
-          ${v.chapters.map((c) => `<button class="choice" type="button" aria-pressed="${vs.chapter === c.index}" data-send='${esc(JSON.stringify({ type: 'vote', chapter: c.index }))}'><span class="dthumb">${S.svg(c.bg, '', true)}</span>Chapter ${c.number}: “${esc(c.first)}”<small>${esc(c.cast.join(' & '))}</small></button>`).join('')}
+          ${v.chapters.map((c) => `<button class="choice" type="button" aria-pressed="${vs.chapter === c.index}" data-send='${esc(JSON.stringify({ type: 'vote', chapter: c.index }))}'><span class="dthumb">${S.svg(c.bg, '', true)}</span><span class="ctext">Chapter ${c.number}: “${esc(c.first)}”<span class="dcast"><span class="lbl">Cast</span>${c.cast.map((n) => `<span class="cn">${esc(n)}</span>`).join('')}</span></span></button>`).join('')}
           <h3 class="dhead">Best drawing</h3>
           <div class="dgallery">${v.drawings.map((c) => `<button type="button" aria-pressed="${vs.drawing === c.pid}" data-send='${esc(JSON.stringify({ type: 'vote', drawing: c.pid }))}'>${D.artCanvas(c.face, '')}<span>${esc(c.name)}</span></button>`).join('')}</div>`,
         input: true,
@@ -908,11 +1202,12 @@
       $('foot').innerHTML = s.foot || '';
       $('foot').hidden = !s.foot;
       $('foot').classList.toggle('flow', !!s.flow);
+      $('foot').classList.toggle('slim', !!s.slim);
       if (s.after) s.after();
       if (s.input && pid) buzz();
       if (s.key.split(':')[0] !== lastKey.split(':')[0] || !s.keep) announce();
       lastKey = s.key;
-    }
+    } else if (s.refresh) s.refresh();
     paintTimer();
     wakeLock(st && st.room.state === 'playing');
   }
@@ -941,6 +1236,7 @@
     if (!ring || deadline === null) return;
     const left = Math.max(0, deadline - performance.now() / 1000);
     ring.style.strokeDashoffset = String(100.5 * (1 - left / total));
+    ring.closest('.mring').classList.toggle('urgent', left > 0 && left <= 5 && total > 8);
     const secs = String(Math.ceil(left));
     if ($('left').textContent !== secs) {
       $('left').textContent = secs;
@@ -979,15 +1275,18 @@
   // Drama Club: what's typed or drawn but not sent yet goes to the server every so often, so
   // if time runs out it's used as it is instead of a stand-in.
   let lastDraft = '';
+  /** The character names typed on the pitch screen. */
+  const pitchNames = () =>
+    [...document.querySelectorAll('[id^="f-name"]')].map((x) => x.value.trim()).filter(Boolean);
   function draftNow() {
     const v = st && st.room.state === 'playing' && st.view;
     if (!v || v.game !== 'drama') return null;
     const val = (id) => ($(id) ? $(id).value.trim() : '');
     if (v.phase === 'pitch' && !v.mine && val('f-theme'))
-      return { text: val('f-theme'), problem: val('f-problem') };
+      return { text: val('f-theme'), problem: val('f-problem'), names: pitchNames() };
     if (v.phase === 'create' && !v.character.name && val('f-cname'))
       return { name: val('f-cname'), look: val('f-clook'), personality: val('f-cpers') };
-    if (v.phase === 'draw' && pad && !pad.empty() && dEmo in MOODS)
+    if (v.phase === 'draw' && pad && !pad.empty() && dEmo)
       return { emotion: dEmo, strokes: pad.strokes() };
     if (v.phase === 'headline' && v.chapter.turn === 'now' && val('f-headline'))
       return { text: val('f-headline') };
@@ -996,9 +1295,10 @@
         bg: dBg,
         cast: dCast || [],
         lines: dLines.map((ln) => ({
-          who: ln.who === 'n' ? 2 : (dCast || []).indexOf(ln.who),
+          who: ln.who === 'n' ? -1 : (dCast || []).indexOf(ln.who),
           emotion: ln.emotion,
           text: ln.text.trim(),
+          fx: ln.fx,
         })),
       };
     return null;
@@ -1070,7 +1370,12 @@
     if (a === 'theme') {
       const t = ($('f-theme').value || '').trim();
       if (!t) return showErr('Write a theme first.');
-      return send({ type: 'theme', text: t, problem: ($('f-problem').value || '').trim() });
+      return send({
+        type: 'theme',
+        text: t,
+        problem: ($('f-problem').value || '').trim(),
+        names: pitchNames(),
+      });
     }
     if (a === 'headline') {
       const t = ($('f-headline').value || '').trim();
@@ -1092,7 +1397,25 @@
       const v = st.view;
       send({ type: 'face', emotion: dEmo, strokes: pad.strokes() });
       const sent = new Set([...Object.keys(v.drawing.faces), dEmo]);
-      dEmo = Object.keys(MOODS).find((k) => !sent.has(k)) || '__done';
+      dEmo = Object.keys(MOODS).find((k) => !sent.has(k)) || dEmo; // on to the next main mood
+      return;
+    }
+    if (a === 'newmood') {
+      dNewMood = !dNewMood;
+      lastKey = '';
+      return render();
+    }
+    if (a === 'addmood') {
+      const name = normMood($('f-newmood').value || '');
+      if (!name) return showErr('Give the mood a name.');
+      dNewMood = false;
+      dEmo = name;
+      lastKey = '';
+      return render();
+    }
+    if (a === 'dropmood') {
+      send({ type: 'unface', emotion: dEmo });
+      dEmo = 'neutral';
       return;
     }
     if (a === 'fromneutral') {
@@ -1101,7 +1424,11 @@
       return;
     }
     if (a === 'drawdone') {
-      dEmo = '__done';
+      dMore = false;
+      return send({ type: 'ready' });
+    }
+    if (a === 'drawmore') {
+      dMore = true;
       lastKey = '';
       return render();
     }
@@ -1109,15 +1436,16 @@
       const said = dLines.filter((ln) => ln.who !== 'n');
       const last = said.length ? said[said.length - 1].who : null;
       const next = dCast.find((w) => w !== last) || dCast[0];
-      dLines.push({ who: next, emotion: 'neutral', text: '' });
+      dLines.push({ who: next, emotion: 'neutral', text: '', fx: [] });
       return redrawLines();
     }
     if (a === 'sendchapter' && dLines) {
       if (!dCast.length) return showErr("Pick who's in your chapter first.");
       const lines = dLines.map((ln) => ({
-        who: ln.who === 'n' ? 2 : dCast.indexOf(ln.who),
+        who: ln.who === 'n' ? -1 : dCast.indexOf(ln.who),
         emotion: ln.emotion,
         text: ln.text.trim(),
+        fx: ln.fx,
       }));
       if (lines.some((ln) => !ln.text))
         return showErr('A line is empty: write something or remove it.');
@@ -1187,9 +1515,31 @@
     }
   }
 
+  document.addEventListener('change', (e) => {
+    if (e.target.id === 'f-bgfile' && e.target.files[0]) {
+      sendBackground(e.target.files[0]);
+      e.target.value = '';
+    }
+  });
+  /** Drama Club: a little burst of confetti from a main button you press. */
+  function burst(el) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const r = el.getBoundingClientRect();
+    const colors = ['#ff5fa2', '#ffd23f', '#2fd1b4', '#ff8a3d', '#4d8dff'];
+    for (let i = 0; i < 16; i++) {
+      const c = document.createElement('i');
+      const ang = Math.random() * Math.PI * 2;
+      const d = 60 + Math.random() * 90;
+      c.className = 'cf';
+      c.style.cssText = `left:${r.left + r.width / 2}px;top:${r.top + r.height / 2}px;background:${colors[i % colors.length]};--dx:${Math.cos(ang) * d}px;--dy:${Math.sin(ang) * d - 40}px;--rot:${Math.round(Math.random() * 720 - 360)}deg`;
+      c.addEventListener('animationend', () => c.remove());
+      document.body.append(c);
+    }
+  }
   document.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b || b.disabled || b.closest('.studio')) return;
+    if (b.classList.contains('big-btn') && $('ph').dataset.game === 'drama') burst(b);
     if (b.dataset.act) act(b.dataset.act);
     else if (b.dataset.pickd && sel) {
       sel.drawing = Number(b.dataset.pickd);
@@ -1210,10 +1560,22 @@
       dEmo = b.dataset.dtab;
       lastKey = '';
       render();
+    } else if (b.dataset.wgo || b.dataset.wnext) {
+      const n = Number(b.dataset.wgo || b.dataset.wnext);
+      if (n > 1 && dCast && !dCast.length) {
+        showStep(1);
+        return showErr("Pick who's in your chapter first.");
+      }
+      showStep(n);
+    } else if (b.dataset.lprev && dLines) {
+      previewFx(Number(b.dataset.lprev));
+    } else if (b.dataset.rmbg) {
+      send({ type: 'remove_bg', id: b.dataset.rmbg });
     } else if (b.dataset.bg) {
       dBg = b.dataset.bg;
       for (const x of document.querySelectorAll('[data-bg]'))
         x.setAttribute('aria-pressed', String(x.dataset.bg === dBg));
+      stepSummaries();
     } else if (b.dataset.dcast && dCast) {
       const c = b.dataset.dcast;
       if (dCast.includes(c)) dCast = dCast.filter((x) => x !== c);
@@ -1221,13 +1583,25 @@
       // lines spoken by someone who left go to whoever's still here
       for (const ln of dLines)
         if (ln.who !== 'n' && !dCast.includes(ln.who)) ln.who = dCast[0] || 'n';
+      for (const ln of dLines) if (!moodsOf(ln.who).includes(ln.emotion)) ln.emotion = 'neutral';
       if (dCast.length === 1 && dLines.length === 1 && !dLines[0].text)
-        dLines.push({ who: dCast[0], emotion: 'neutral', text: '' });
+        dLines.push({ who: dCast[0], emotion: 'neutral', text: '', fx: [] });
       redrawLines();
-    } else if ((b.dataset.lwho || b.dataset.lemo || b.dataset.ldel) && dLines && dJob) {
+    } else if (
+      (b.dataset.lwho || b.dataset.lemo || b.dataset.ldel || b.dataset.lfx) &&
+      dLines &&
+      dJob
+    ) {
       if (b.dataset.lwho) {
         const [i, w] = b.dataset.lwho.split(':');
-        dLines[Number(i)].who = w;
+        const ln = dLines[Number(i)];
+        ln.who = w;
+        if (!moodsOf(w).includes(ln.emotion)) ln.emotion = 'neutral'; // that mood belongs to another character
+      } else if (b.dataset.lfx) {
+        const [i, e] = b.dataset.lfx.split(':');
+        const ln = dLines[Number(i)];
+        ln.fxOpen = true;
+        ln.fx = ln.fx.includes(e) ? ln.fx.filter((x) => x !== e) : [...ln.fx, e];
       } else if (b.dataset.lemo) {
         const [i, e] = b.dataset.lemo.split(':');
         dLines[Number(i)].emotion = e;
@@ -1264,6 +1638,8 @@
     if (e.target.dataset.ltext !== undefined && dLines) {
       const ln = dLines[Number(e.target.dataset.ltext)];
       if (ln) ln.text = e.target.value;
+      syncSend();
+      syncPreview(Number(e.target.dataset.ltext));
     }
     if (e.target.id === 'f-ans') $('cnt').textContent = `${e.target.value.length}/80`;
     if (e.target.id === 'f-code') e.target.value = e.target.value.toUpperCase();

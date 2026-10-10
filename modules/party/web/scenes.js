@@ -303,15 +303,74 @@
     train_beach: 'Train by the sea',
     onsen: 'Hot spring',
   };
-  /** The scene as an <svg> string (falls back to the classroom). small: a thumbnail, for phones. */
+  /** The scene as an <svg> string (falls back to the classroom). small: a thumbnail, for phones. A key like u:<id> is an uploaded picture. */
   const svg = (key, cls = '', small = false) => {
-    const inner =
-      key in PHOTOS
+    const inner = key.startsWith('u:') // a background a player uploaded (the id is hex)
+      ? `<image href="/ubg/${key.slice(2).replace(/[^0-9a-f]/g, '')}" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>`
+      : key in PHOTOS
         ? `<image href="/bg/${key}${small ? '.thumb' : ''}.webp" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>`
         : (SCENES[key] || SCENES.classroom)();
     return `<svg class="${cls}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${inner}</svg>`;
   };
+  // -- effects: a line's screen effects play as classes on a stage (CSS in party.css), plus a few
+  // made of particles (hearts, petals, rain, sparkles). The big screen and the phones' previews
+  // share this.
+  const FX_KEYS = [
+    'shake',
+    'flash_red',
+    'flash_white',
+    'blackout',
+    'zoom',
+    'blur',
+    'sepia',
+    'hop',
+    'speed',
+    'sparkle',
+    'hearts',
+    'petals',
+    'rain',
+    'glitch',
+  ];
+  const PARTS = {
+    hearts: { glyph: '♥', n: 24, life: [2.6, 4.2] },
+    petals: { glyph: '', n: 24, life: [4, 6.5] },
+    rain: { glyph: '', n: 70, life: [0.5, 0.9] },
+    sparkle: { glyph: '✦', n: 34, life: [1.2, 2.4] },
+  };
+  /** The layers effects draw on, inside a stage. */
+  const fxLayers =
+    '<div class="vnfx fxr" aria-hidden="true"></div><div class="vnfx fxw" aria-hidden="true"></div><div class="vnfx fxk" aria-hidden="true"></div><div class="vnfx fxs" aria-hidden="true"></div><div class="vnfx fxg" aria-hidden="true"></div><div class="vnfx fxl" aria-hidden="true"></div>';
+  function particles(stage, kind) {
+    const cfg = PARTS[kind];
+    const layer = document.createElement('div');
+    layer.className = `vnparts ${kind}`;
+    layer.setAttribute('aria-hidden', 'true');
+    for (let i = 0; i < cfg.n; i++) {
+      const p = document.createElement('i');
+      const life = cfg.life[0] + Math.random() * (cfg.life[1] - cfg.life[0]);
+      p.className = 'part';
+      p.textContent = cfg.glyph;
+      p.style.cssText = `--x:${(Math.random() * 100).toFixed(1)}%;--y:${(Math.random() * 90).toFixed(1)}%;--d:${life.toFixed(2)}s;--w:${(Math.random() * 0.9).toFixed(2)}s;--s:${(26 + Math.random() * 40).toFixed(0)}px;--r:${(Math.random() * 360).toFixed(0)}deg;--k:${(Math.random() * 2 - 1).toFixed(2)}`;
+      layer.append(p);
+    }
+    stage.append(layer);
+    setTimeout(() => layer.remove(), 9000);
+  }
+  /** Plays a line's effects on a stage (any number at once); returns the ones that exist. */
+  function playFx(stage, list) {
+    stage.classList.remove(...FX_KEYS.map((k) => `fx-${k}`));
+    for (const n of stage.querySelectorAll('.vnparts')) n.remove();
+    const on = (list || []).filter((k) => FX_KEYS.includes(k));
+    if (!on.length) return on;
+    void stage.offsetWidth; // restart the animations
+    stage.classList.add(...on.map((k) => `fx-${k}`));
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches)
+      for (const k of on) if (PARTS[k]) particles(stage, k);
+    return on;
+  }
   window.PartyScenes = {
+    playFx,
+    fxLayers,
     svg,
     LABELS: { ...PHOTOS, ...LABELS },
     KEYS: [...Object.keys(PHOTOS), ...Object.keys(SCENES)],

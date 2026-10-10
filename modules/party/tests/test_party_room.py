@@ -687,3 +687,65 @@ async def test_profile_pictures_are_served_by_name_only():
             assert (await client.get(f"/pfp/{bad}")).status == 404
     finally:
         await client.close()
+
+
+def test_the_artist_timer_only_lifts_the_drawing_limit():
+    r, _ = room()
+    a, b, c = connect(r, "Ann"), connect(r, "Bo"), connect(r, "Cy")
+    r.handle(a.pid, {"type": "timer", "timer": "artist"})
+    assert r.room_view()["timer"] == "artist"
+    r.handle(a.pid, {"type": "start", "game": "drama"})
+    g = r.game
+    assert g.artist and g.scale == 1.0 and g.deadline == pytest.approx(r.clock() + g.PITCH_S)
+    g.phase = "draw"
+    g._go("draw", r.clock(), g.DRAW_S)
+    assert g.deadline is None
+    r.host_command({"type": "timer", "timer": "normal"})  # back to normal from the next step on
+    assert not g.artist
+    g._go("draw", r.clock(), g.DRAW_S)
+    assert g.deadline is not None
+
+
+async def test_uploaded_backgrounds_are_served_from_the_game_only():
+    import base64
+
+    r, _ = room()
+    for n in ("Ann", "Bo", "Cy"):
+        connect(r, n)
+    r.host_command({"type": "start", "game": "drama"})
+    g = r.game
+    jpeg = b"\xff\xd8\xff\xe0" + b"1" * 50
+    g.phase = "write"
+    g.handle(g.pids[0], {"type": "upload_bg", "name": "Attic", "data": base64.b64encode(jpeg).decode()}, 1.0)
+    key = next(iter(g.uploads))
+    server, client = await client_for(r)
+    try:
+        resp = await client.get(f"/ubg/{key}")
+        assert resp.status == 200 and resp.headers["Content-Type"] == "image/jpeg"
+        assert resp.headers["X-Content-Type-Options"] == "nosniff" and await resp.read() == jpeg
+        for bad in ("nothere", "../play.js", "0" * 12):
+            assert (await client.get(f"/ubg/{bad}")).status == 404
+    finally:
+        await client.close()
+
+
+def test_the_vip_and_the_host_can_remove_any_uploaded_background():
+    import base64
+
+    r, _ = room()
+    a, b, c = connect(r, "Ann"), connect(r, "Bo"), connect(r, "Cy")
+    with pytest.raises(Invalid, match="no background"):
+        r.handle(a.pid, {"type": "remove_bg", "id": "u:x"})
+    r.handle(a.pid, {"type": "start", "game": "drama"})
+    g = r.game
+    g.phase = "write"
+    jpeg = base64.b64encode(b"\xff\xd8\xff\xe0" + b"1" * 50).decode()
+    for s in (b, c):
+        r.handle(s.pid, {"type": "upload_bg", "name": "x", "data": jpeg})
+    k1, k2 = list(g.uploads)
+    with pytest.raises(Invalid, match="your own"):
+        r.handle(c.pid, {"type": "remove_bg", "id": k1})  # a player: own only
+    r.handle(a.pid, {"type": "remove_bg", "id": f"u:{k1}"})  # the VIP: anyone's
+    r.host_command({"type": "remove_bg", "id": k2})  # the host screen too
+    assert not g.uploads
+    assert [u["id"] for u in g.host_view(1.0)["uploads"]] == []

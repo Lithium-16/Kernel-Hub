@@ -84,7 +84,8 @@ PFPS = {"kernel": "Kernel", "user": "User", "sunny": "Sunny", "bocchi": "Bocchi"
         "konata": "Konata", "tsukasa": "Tsukasa", "miyuki": "Miyuki", "haruhi": "Haruhi", "lucoa": "Lucoa"}
 
 # Timer speeds the host can pick per room: every timed step of every game is multiplied by it.
-TIMERS = {"fast": 0.75, "normal": 1.0, "relaxed": 1.5, "extra": 2.0}
+# "artist" is normal speed, except that Drama Club's drawing step has no time limit at all.
+TIMERS = {"fast": 0.75, "normal": 1.0, "relaxed": 1.5, "extra": 2.0, "artist": 1.0}
 
 
 class Room:
@@ -306,6 +307,13 @@ class Room:
             if self.game.done:
                 self._finish()
 
+    def remove_background(self, key: Any) -> None:
+        """Drama Club: the VIP or the host takes a player's uploaded background out of the game."""
+        remove = getattr(self.game, "remove_upload", None)
+        if remove is None:
+            raise Invalid("There's no background to remove.")
+        remove(key)
+
     def set_timer(self, key: Any) -> None:
         """Changes the timer speed. A game already on uses it from its next step."""
         if key not in TIMERS:
@@ -313,6 +321,7 @@ class Room:
         self.timer = key
         if self.game is not None:
             self.game.scale = TIMERS[key]
+            self.game.artist = key == "artist"
 
     def _end_intro(self) -> None:
         intro, self.intro = self.intro, None
@@ -338,6 +347,7 @@ class Room:
         elif cls.key == "shirt":
             options["rounds"] = int(self.settings.get("shirt_rounds", 2))
         self.game = cls(pids, self.content, self.rng, now, scale, names, **options)
+        self.game.artist = self.timer == "artist"
         self.choice, self.state, self.results = key, "playing", None
         self.emit("game.started", f"{cls.title} started with {', '.join(names[p] for p in pids)}", game=cls.title)
 
@@ -492,6 +502,8 @@ class Room:
             self.set_timer(msg.get("timer"))
         elif kind == "next" and is_vip:
             self.next_line()
+        elif kind == "remove_bg" and is_vip:
+            self.remove_background(msg.get("id"))
         elif kind in ("choose", "start", "skip", "lobby", "timer", "next"):
             raise Invalid("Only the VIP can do that.")
         elif self.intro is not None:
@@ -523,6 +535,8 @@ class Room:
             self.set_timer(msg.get("timer"))
         elif kind == "next":
             self.next_line()
+        elif kind == "remove_bg":
+            self.remove_background(msg.get("id"))
         elif kind == "add_bot":
             self.add_bot()
         elif kind == "remove_bots":
@@ -644,6 +658,7 @@ class PartyServer:
         app.router.add_get("/health", self._health)
         app.router.add_get("/static/{name}", self._static)
         app.router.add_get("/bg/{name}", self._background)
+        app.router.add_get("/ubg/{id}", self._uploaded_background)
         app.router.add_get("/pfp/{name}", self._pfp)
         app.router.add_get("/ws", self._ws)
         app.on_startup.append(self._start_ticker)
@@ -757,6 +772,17 @@ class PartyServer:
         return web.FileResponse(WEB / "bg" / name, headers={"Content-Type": "image/webp",
                                                              "Cache-Control": "max-age=86400"})
 
+    async def _uploaded_background(self, request: web.Request) -> web.StreamResponse:
+        """A background a player uploaded in Drama Club: only pictures that passed the game's checks."""
+        key = request.match_info["id"]
+        for room in self.rooms:
+            up = getattr(room.game, "uploads", {}).get(key)
+            if up is not None:
+                return web.Response(body=up.data, content_type=up.mime, headers={
+                    "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff",
+                    "Content-Security-Policy": "default-src 'none'; sandbox"})
+        raise web.HTTPNotFound()
+
     async def _pfp(self, request: web.Request) -> web.StreamResponse:
         """The profile pictures, by name only."""
         name = request.match_info["name"]
@@ -774,7 +800,7 @@ class PartyServer:
             raise web.HTTPForbidden()
         if len(self.sockets) >= self.max_connections:
             raise web.HTTPServiceUnavailable(text="too many connections")
-        ws = web.WebSocketResponse(heartbeat=20, max_msg_size=64 * 1024)  # drawings
+        ws = web.WebSocketResponse(heartbeat=20, max_msg_size=256 * 1024)  # drawings, and Drama Club's background pictures
         await ws.prepare(request)
         self.sockets.add(ws)
         seat: Seat | None = None
