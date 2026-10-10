@@ -523,6 +523,11 @@
       total = null;
     }
     cue(scene, r, v);
+    // The story playing (and the credits rolling) runs on its own timers: redrawing it for an
+    // unrelated room change, like someone reconnecting, would bring back the title card and wipe
+    // the cast. Only a new chapter redraws it.
+    const playing = v && v.game === 'drama' && (v.phase === 'show' || v.phase === 'credits');
+    if (playing && scene === lastScene) lastContent = content;
     if (content !== lastContent || scene !== lastScene) {
       const entering = scene !== lastScene;
       $('tvc').innerHTML = html;
