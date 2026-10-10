@@ -658,3 +658,32 @@ def test_how_to_play_card_before_a_new_game():
         r2.add_bot()
     r2.start("quip")
     assert r2.game is not None
+
+
+def test_players_pick_a_profile_picture():
+    r, _ = room()
+    a = connect(r, "Ann")
+    assert r.room_view()["players"][0]["pfp"] == ""
+    assert ["konata", "Konata"] in r.room_view()["pfps"]
+    r.handle(a.pid, {"type": "pfp", "pfp": "konata"})
+    assert r.room_view()["players"][0]["pfp"] == "konata"
+    with pytest.raises(Invalid, match="one of the pictures"):
+        r.handle(a.pid, {"type": "pfp", "pfp": "../play.js"})
+    r.handle(a.pid, {"type": "pfp", "pfp": ""})  # back to the letter
+    assert r.seats[a.pid].pfp == ""
+
+
+async def test_profile_pictures_are_served_by_name_only():
+    from partyroom import PFPS
+
+    r, _ = room()
+    server, client = await client_for(r)
+    try:
+        for key in PFPS:
+            resp = await client.get(f"/pfp/{key}.webp")
+            assert resp.status == 200 and resp.headers["Content-Type"] == "image/webp"
+            assert (await resp.read())[8:12] == b"WEBP"
+        for bad in ("nope.webp", "konata.png", "konata", "..%2Fplay.js"):
+            assert (await client.get(f"/pfp/{bad}")).status == 404
+    finally:
+        await client.close()

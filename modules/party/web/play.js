@@ -77,7 +77,9 @@
     (st && st.room.players.find((p) => p.pid === id)) || { name: '?', color: 0 };
   const av = (id, size = 'sm') => {
     const p = player(id);
-    return `<span class="av ${size} c${p.color}" aria-hidden="true">${esc((p.name || '?')[0].toUpperCase())}</span>`;
+    return p.pfp
+      ? `<span class="av ${size} c${p.color} pic" aria-hidden="true"><img src="/pfp/${esc(p.pfp)}.webp" alt=""></span>`
+      : `<span class="av ${size} c${p.color}" aria-hidden="true">${esc((p.name || '?')[0].toUpperCase())}</span>`;
   };
   const wait = (title, note) =>
     `<div class="wait"><div class="face" aria-hidden="true"><svg viewBox="0 0 70 40"><ellipse cx="18" cy="20" rx="14" ry="17" fill="var(--bg)"/><ellipse cx="52" cy="20" rx="14" ry="17" fill="var(--bg)"/><circle cx="22" cy="12" r="6" fill="var(--fg)"/><circle cx="56" cy="12" r="6" fill="var(--fg)"/></svg></div><h2 class="ptitle">${title}</h2><p class="pnote">${note}</p></div>`;
@@ -169,6 +171,17 @@
           `<button type="button" aria-pressed="${st.room.timer === k}" data-send='{"type":"timer","timer":"${k}"}'>${label}</button>`,
       )
       .join('')}</div>`;
+  /** The profile picture picker: the letter, or one of the bundled pictures. */
+  function pfpRow() {
+    const mine = player(pid).pfp || '';
+    const opt = (key, label, inner) =>
+      `<button type="button" data-pfp="${esc(key)}" aria-pressed="${mine === key}" aria-label="${esc(label)}">${inner}</button>`;
+    return `<h3 class="dhead">Your picture</h3><div class="pfps" role="group" aria-label="Profile picture">${opt('', 'Your letter', `<span class="av c${player(pid).color}">${esc((player(pid).name || '?')[0].toUpperCase())}</span>`)}${(
+      st.room.pfps || []
+    )
+      .map(([k, label]) => opt(k, label, `<img src="/pfp/${esc(k)}.webp" alt="">`))
+      .join('')}</div>`;
+  }
   function lobbyScreen() {
     const r = st.room;
     const chips = r.players
@@ -182,7 +195,7 @@
         key: 'lobby:' + JSON.stringify([r.players, st.profile]) + r.vip + r.choice + r.timer,
         main:
           wait("You're in!", `${esc(player(r.vip).name)} picks the game. Look at the big screen.`) +
-          `<p class="pnote">Timers: <b>${TIMERS[r.timer] || 'Normal'}</b></p><div class="plist">${chips}</div>${profileCard()}`,
+          `<p class="pnote">Timers: <b>${TIMERS[r.timer] || 'Normal'}</b></p><div class="plist">${chips}</div>${pfpRow()}${profileCard()}`,
         keep: true,
       };
     }
@@ -200,7 +213,7 @@
       main: `<span class="kicker">You're the VIP</span><h2 class="ptitle">Pick a game, then start when everybody's in.</h2>
         <div class="gpick">${r.games.map((g) => `<button type="button" data-game="${esc(g.key)}" data-choose="${esc(g.key)}" aria-pressed="${g.key === r.choice}"><b>${esc(g.title)}</b><span>${esc(blurb[g.key] || '')} · ${g.min}–${g.max} players</span></button>`).join('')}</div>
         ${timerRow()}
-        <p class="pnote">${here} of ${r.max_players} players are in.</p><div class="plist">${chips}</div>${profileCard()}`,
+        <p class="pnote">${here} of ${r.max_players} players are in.</p><div class="plist">${chips}</div>${pfpRow()}${profileCard()}`,
       foot: `<button class="big-btn" type="button" data-act="start" ${short ? 'disabled' : ''}>${short ? `Need ${game.min} players` : "Everybody's in"}</button>`,
       game: r.choice,
       keep: true,
@@ -1147,7 +1160,12 @@
       sel.color = Number(b.dataset.color);
       preview();
     } else if (b.dataset.choose) send({ type: 'choose', game: b.dataset.choose });
-    else if (b.dataset.dtab) {
+    else if (b.dataset.pfp !== undefined) {
+      buzz();
+      me = { ...me, pfp: b.dataset.pfp };
+      store.set(me);
+      send({ type: 'pfp', pfp: b.dataset.pfp });
+    } else if (b.dataset.dtab) {
       dEmo = b.dataset.dtab;
       lastKey = '';
       render();
@@ -1311,6 +1329,8 @@
             device: msg.device || me.device,
           };
           store.set(me);
+          // the picture this phone picked last time comes along to the new room
+          if (me.pfp && !player(pid).pfp) send({ type: 'pfp', pfp: me.pfp });
           joinErr = '';
           pinFor = null;
           pinDigits = '';
