@@ -2895,3 +2895,220 @@ body.play {
 .dline .x {
   min-height: 48px;
 }
+
+/* ---------------- visual refresh: textured backdrops and sticker cards ----------------
+   Backgrounds get a soft spotlight in the game's color, a faint dot grid and (on the big
+   screen) the game's letter as a huge watermark. Cards, answers and choices get a lighter top,
+   an edge tinted with the game's color and a chunky drop shadow, like the room-code tiles. */
+:root {
+  --edge: color-mix(in srgb, var(--acc) 38%, var(--line));
+  --card: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface-2) 80%, var(--surface)) 0%,
+    var(--surface) 70%
+  );
+  --drop: 0 6px 0 color-mix(in srgb, var(--bg) 55%, #000);
+  --dots: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--fg) 7%, transparent) 1.4px,
+    transparent 1.6px
+  );
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --drop: 0 6px 0 color-mix(in srgb, var(--line) 75%, #6a5a90);
+    --card: linear-gradient(180deg, #fff 0%, color-mix(in srgb, var(--surface-2) 35%, #fff) 100%);
+  }
+}
+
+/* backdrops */
+.tvc {
+  background:
+    radial-gradient(
+      760px 460px at 88% -8%,
+      color-mix(in srgb, var(--acc) 30%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      620px 420px at -6% 108%,
+      color-mix(in srgb, var(--acc) 16%, transparent),
+      transparent 72%
+    ),
+    var(--dots) 0 0 / 30px 30px,
+    linear-gradient(160deg, color-mix(in srgb, var(--surface) 55%, var(--bg)) 0%, var(--bg) 60%);
+}
+.scene:not(.vn)::before {
+  position: absolute;
+  right: -40px;
+  bottom: -150px;
+  z-index: -1;
+  font-family: var(--display);
+  font-size: 620px;
+  line-height: 1;
+  color: var(--acc);
+  opacity: 0.06;
+  transform: rotate(-8deg);
+  pointer-events: none;
+}
+.scene[data-game="quip"]::before {
+  content: "Q";
+}
+.scene[data-game="bluff"]::before {
+  content: "B";
+}
+.scene[data-game="shirt"]::before {
+  content: "T";
+}
+.scene[data-game="drama"]:not(.vn)::before {
+  content: "D";
+}
+.scene[data-game="none"]::before {
+  content: "★";
+  font-size: 520px;
+  bottom: -90px;
+}
+body.play {
+  background:
+    radial-gradient(
+      120% 340px at 50% -60px,
+      color-mix(in srgb, var(--acc) 22%, transparent),
+      transparent 75%
+    ),
+    var(--dots) 0 0 / 22px 22px,
+    var(--bg);
+  background-attachment: fixed;
+}
+.phtop {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom-color: var(--edge);
+}
+
+/* sticker cards (big screen) */
+.ans,
+.opt,
+.slot,
+.doutline li,
+.dthemes .opt {
+  background: var(--card);
+  border-color: var(--edge);
+  box-shadow:
+    var(--drop),
+    inset 0 2px 0 color-mix(in srgb, #fff 6%, transparent);
+}
+.slot.empty {
+  background: transparent;
+  box-shadow: none;
+}
+.ans.win,
+.opt.truth {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--acc) 30%, var(--surface)) 0%,
+    color-mix(in srgb, var(--acc) 12%, var(--surface)) 100%
+  );
+  border-color: var(--acc);
+  box-shadow:
+    0 8px 0 color-mix(in srgb, var(--acc) 50%, #000),
+    0 0 0 6px color-mix(in srgb, var(--acc) 18%, transparent);
+}
+.ans .letter {
+  transform: rotate(-4deg);
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--acc) 50%, #000);
+}
+.bubble {
+  box-shadow: 0 10px 0 var(--acc);
+}
+.bubble::after {
+  filter: drop-shadow(0 6px 0 var(--acc));
+}
+.doutline li.next {
+  box-shadow: none;
+}
+
+/* sticker cards (phones) */
+.card,
+.choice,
+.dcastpick button,
+.dline {
+  background: var(--card);
+  border-color: var(--edge);
+  box-shadow:
+    0 4px 0 color-mix(in srgb, var(--bg) 55%, #000),
+    inset 0 2px 0 color-mix(in srgb, #fff 6%, transparent);
+}
+.card.hot {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--acc) 22%, var(--surface)) 0%,
+    var(--surface) 100%
+  );
+  border-color: var(--acc);
+  box-shadow: 0 5px 0 color-mix(in srgb, var(--acc) 50%, #000);
+}
+.choice .l {
+  background: var(--acc);
+  color: var(--ink);
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--acc) 50%, #000);
+}
+.choice[aria-pressed="true"],
+.dcastpick button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--acc) 22%, var(--surface));
+  border-color: var(--acc);
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--acc) 50%, #000);
+}
+.choice:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--bg) 55%, #000);
+}
+.kicker {
+  display: inline-block;
+}
+.ptitle {
+  text-wrap: balance;
+}
+@media (prefers-color-scheme: light) {
+  .card,
+  .choice,
+  .dcastpick button,
+  .dline {
+    box-shadow:
+      0 4px 0 color-mix(in srgb, var(--line) 75%, #6a5a90),
+      inset 0 2px 0 #fff;
+  }
+}
+
+/* text boxes: sunk into the page, lit in the game's color when typing */
+.field input,
+.field textarea,
+.dline input {
+  background: color-mix(in srgb, var(--bg) 70%, var(--surface));
+  border-color: var(--edge);
+  box-shadow: inset 0 3px 0 color-mix(in srgb, #000 22%, transparent);
+}
+.field input:focus,
+.field textarea:focus,
+.dline input:focus {
+  border-color: var(--acc);
+  box-shadow:
+    inset 0 3px 0 color-mix(in srgb, #000 22%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--acc) 22%, transparent);
+}
+@media (prefers-color-scheme: light) {
+  .field input,
+  .field textarea,
+  .dline input {
+    background: #fff;
+    box-shadow: inset 0 3px 0 color-mix(in srgb, var(--line) 60%, transparent);
+  }
+}
+.scene:not(.vn)::before {
+  opacity: 0.08;
+}
+:root {
+  --dots: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--fg) 9%, transparent) 1.5px,
+    transparent 1.7px
+  );
+}
