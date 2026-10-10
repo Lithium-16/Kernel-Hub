@@ -637,3 +637,44 @@ def test_a_custom_background_isnt_kept_in_the_greatest_hits():
         g.handle(p, {"type": "vote", "chapter": g._chapter_choices(p)[0]}, 1.0)
     g.tick(g.deadline + 1)
     assert g.hits and all(h["scene"]["bg"] in BACKGROUNDS for h in g.hits)
+
+
+# -- taking uploads out, and the credits' moods -----------------------------------------------
+
+
+def test_uploads_can_be_removed_by_their_owner_and_chapters_fall_back():
+    pids, g = drama(4)
+    play_to(g, "write")
+    upload(g, "p0", JPEG)
+    bg = "u:" + next(iter(g.uploads))
+    g.handle("p1", chapter([pids[0]], bg=bg), 1.0)  # someone already picked it
+    with pytest.raises(Invalid, match="your own"):
+        g.handle("p2", {"type": "remove_bg", "id": bg}, 1.0)
+    for bad in (None, 5, ["x"], "u:nothere"):
+        with pytest.raises(Invalid, match="already gone"):
+            g.handle("p0", {"type": "remove_bg", "id": bad}, 1.0)
+    g.handle("p0", {"type": "remove_bg", "id": bg}, 1.0)
+    assert not g.uploads and g.player_view("p0", 1.0)["uploads_left"] == 2
+    assert g.chapters[g.chapter_of("p1")].bg == ""
+    with pytest.raises(Invalid, match="background"):
+        g.handle("p3", chapter([pids[0]], bg=bg), 1.0)
+    g.tick(g.deadline + 1)  # time's up: the chapter that lost its picture gets a preset
+    assert g.phase == "show" and all(ch.bg in BACKGROUNDS for ch in g.chapters)
+
+
+def test_the_credits_have_every_mood_of_every_character():
+    pids, g = to_draw(4)
+    for p in pids:
+        draw_all(g, p)
+    g.handle(g.characters["p0"].artist, {"type": "face", "emotion": "smug", "strokes": LINE}, 1.0)
+    for p in pids:
+        g.handle(p, {"type": "ready"}, 1.0)
+    play_to(g, "show")
+    while g.phase == "show":
+        g.skip(1.0)
+    assert g.phase == "credits"
+    chars = {c["name"]: c for c in g.host_view(1.0)["credits"]["characters"]}
+    names = [[m["name"] for m in c["moods"]] for c in chars.values()]
+    assert sorted(map(len, names)) == [4, 4, 4, 5]
+    assert [m for m in names if len(m) == 5] == [[*EMOTIONS, "smug"]]
+    assert all(m["face"] for c in chars.values() for m in c["moods"])

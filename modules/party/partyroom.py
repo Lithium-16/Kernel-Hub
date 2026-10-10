@@ -307,6 +307,13 @@ class Room:
             if self.game.done:
                 self._finish()
 
+    def remove_background(self, key: Any) -> None:
+        """Drama Club: the VIP or the host takes a player's uploaded background out of the game."""
+        remove = getattr(self.game, "remove_upload", None)
+        if remove is None:
+            raise Invalid("There's no background to remove.")
+        remove(key)
+
     def set_timer(self, key: Any) -> None:
         """Changes the timer speed. A game already on uses it from its next step."""
         if key not in TIMERS:
@@ -495,6 +502,8 @@ class Room:
             self.set_timer(msg.get("timer"))
         elif kind == "next" and is_vip:
             self.next_line()
+        elif kind == "remove_bg" and is_vip:
+            self.remove_background(msg.get("id"))
         elif kind in ("choose", "start", "skip", "lobby", "timer", "next"):
             raise Invalid("Only the VIP can do that.")
         elif self.intro is not None:
@@ -526,6 +535,8 @@ class Room:
             self.set_timer(msg.get("timer"))
         elif kind == "next":
             self.next_line()
+        elif kind == "remove_bg":
+            self.remove_background(msg.get("id"))
         elif kind == "add_bot":
             self.add_bot()
         elif kind == "remove_bots":
