@@ -132,6 +132,7 @@ class Room:
         self.night_games: list[str] = []
         self.banned: set[str] = set()  # tokens of kicked players
         self.bot_due: dict[str, float] = {}  # when each bot makes its next move
+        self.show_due: float | None = None  # a room of only bots clicks through the show by itself
         self.content = Content.load(*self.content_dirs)
 
     @property
@@ -259,6 +260,17 @@ class Room:
                         moved = True
                     except Invalid:
                         pass
+        # Drama Club's show waits for a click; a room with only bots in it clicks through by itself
+        humans = any(s.connected and not s.bot for s in self.seats.values())
+        if getattr(g, "phase", "") == "show" and hasattr(g, "next_line") and not humans:
+            if self.show_due is None:
+                self.show_due = now + 3
+            elif now >= self.show_due:
+                self.show_due = None
+                g.next_line(now)
+                moved = True
+        else:
+            self.show_due = None
         return moved
 
     def connections_changed(self) -> None:
@@ -285,6 +297,14 @@ class Room:
             self.choice, self.state, self.results = key, "playing", None
             return
         self._begin(key)
+
+    def next_line(self) -> None:
+        """Drama Club's show moves on only when the host (or the VIP) says so."""
+        step = getattr(self.game, "next_line", None)
+        if step is not None:
+            step(self.clock())
+            if self.game.done:
+                self._finish()
 
     def set_timer(self, key: Any) -> None:
         """Changes the timer speed. A game already on uses it from its next step."""
@@ -470,7 +490,9 @@ class Room:
             self.to_lobby()
         elif kind == "timer" and is_vip:
             self.set_timer(msg.get("timer"))
-        elif kind in ("choose", "start", "skip", "lobby", "timer"):
+        elif kind == "next" and is_vip:
+            self.next_line()
+        elif kind in ("choose", "start", "skip", "lobby", "timer", "next"):
             raise Invalid("Only the VIP can do that.")
         elif self.intro is not None:
             raise Invalid("Hang on: the game starts right after the how-to-play card.")
@@ -499,6 +521,8 @@ class Room:
             self.end_game()
         elif kind == "timer":
             self.set_timer(msg.get("timer"))
+        elif kind == "next":
+            self.next_line()
         elif kind == "add_bot":
             self.add_bot()
         elif kind == "remove_bots":
