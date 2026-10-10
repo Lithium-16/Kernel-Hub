@@ -1646,6 +1646,19 @@ class DramaClub(Game):
         label = clean(name, MAX_BG_NAME) if isinstance(name, str) else ""
         self.uploads[secrets.token_hex(6)] = Upload(pid, label or "Custom", mime, raw)
 
+    def remove_upload(self, key: Any, by: str | None = None) -> None:
+        """Takes a custom background out (the VIP or host can remove any; a player only their own)."""
+        key = key[2:] if isinstance(key, str) and key.startswith("u:") else key
+        up = self.uploads.get(key) if isinstance(key, str) else None
+        if up is None:
+            raise Invalid("That background is already gone.")
+        if by is not None and up.by != by:
+            raise Invalid("You can only remove your own backgrounds.")
+        del self.uploads[key]
+        for ch in self.chapters:  # a chapter that picked it gets another one when the show starts
+            if ch.bg == f"u:{key}":
+                ch.bg = ""
+
     def _fx(self, raw: Any) -> list[str]:
         if raw is None:
             return []
@@ -1737,6 +1750,8 @@ class DramaClub(Game):
             ch.bg, ch.cast = bg, list(cast)
         elif ph == "write" and kind == "upload_bg":
             self._add_upload(pid, msg)
+        elif ph == "write" and kind == "remove_bg":
+            self.remove_upload(msg.get("id"), by=pid)
         elif kind == "draft":
             # unsent work, saved as it's typed; it only counts if time runs out first (and one
             # that lands just after the step changed is simply dropped)
@@ -1874,11 +1889,15 @@ class DramaClub(Game):
                           "writer": self.chapters[self.relay].headliner}
         elif ph == "write":
             v["cast"] = [c.card() for c in self.characters.values()]  # names only: still no art
+            v["uploads"] = [{"id": f"u:{i}", "name": u.name, "by": u.by} for i, u in self.uploads.items()]
         elif ph == "show":
             v["chapter"] = self._chapter_full(self.showing)
         elif ph == "credits":
             v["credits"] = {"characters": [{"name": c.name, "creator": c.creator, "artist": c.artist,
-                                            "face": c.faces.get("neutral", [])} for c in self.characters.values()],
+                                            "face": c.faces.get("neutral", []),
+                                            "moods": [{"name": k, "face": c.faces[k]}  # the credits cycle through these
+                                                      for k in (*EMOTIONS, *c.moods()) if k in c.faces]}
+                                           for c in self.characters.values()],
                             "writers": [ch.writer for ch in self.chapters]}
         elif ph == "vote":
             v["gallery"] = [{"pid": p, "name": c.name, "artist": c.artist, "face": c.faces.get("flustered", [])}

@@ -48,7 +48,9 @@
   const bar = (title, glyph) =>
     `<div class="tvbar"><div class="logo"><i>${glyph}</i>${esc(title)}</div><div class="code">Room <b>${esc(st.room.code)}</b></div></div>`;
   const ring = () =>
-    `<div class="timer"><svg viewBox="0 0 100 100"><circle class="bgc" cx="50" cy="50" r="44"/><circle class="fgc" id="ring" cx="50" cy="50" r="44" stroke-dasharray="276.5" stroke-dashoffset="0"/></svg><span id="left"></span></div>`;
+    st.view && st.view.ends_in === null && st.view.phase === 'draw'
+      ? '<div class="untimed" role="status">Take your time ✎<small>No time limit</small></div>'
+      : `<div class="timer"><svg viewBox="0 0 100 100"><circle class="bgc" cx="50" cy="50" r="44"/><circle class="fgc" id="ring" cx="50" cy="50" r="44" stroke-dasharray="276.5" stroke-dashoffset="0"/></svg><span id="left"></span></div>`;
   const doneRow = (waiting) => {
     const w = new Set(waiting || []);
     const players = st.room.players.filter((p) => p.playing);
@@ -282,7 +284,7 @@
       return `<div class="scene vn" data-game="drama"><div class="vncredroll"><div class="roll">
         <span class="tag">The end</span><h2 class="big">${esc(v.theme)}</h2>
         <h3>Starring</h3>
-        <div class="dcastwall">${cr.characters.map((c) => `<div>${D.artCanvas(c.face, '')}<b>${esc(c.name)}</b><small>invented by ${esc(nameOf(c.creator))}<br>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>
+        <div class="dcastwall">${cr.characters.map((c, i) => `<div><canvas class="art" width="400" height="400" data-cycle="${i}"></canvas><span class="moodtag" data-moodtag="${i}"></span><b>${esc(c.name)}</b><small>invented by ${esc(nameOf(c.creator))}<br>drawn by ${esc(nameOf(c.artist))}</small></div>`).join('')}</div>
         <h3>Written by</h3>
         <p class="sub">${cr.writers.map((w, i) => `Chapter ${i + 1}: <b>${esc(nameOf(w))}</b>`).join(' · ')}</p>
       </div></div></div>`;
@@ -334,6 +336,36 @@
       html += sg.act ? `<em class="act">${esc(t)}</em>` : esc(t);
     }
     return html;
+  }
+  // The credits: each character cycles through every mood the artist drew, like a little gif.
+  let creditsTimer = null;
+  function stopCredits() {
+    clearInterval(creditsTimer);
+    creditsTimer = null;
+  }
+  function playCredits(cr) {
+    stopCredits();
+    const D = window.PartyDraw;
+    const tiles = cr.characters.map((c, i) => ({
+      canvas: document.querySelector(`canvas[data-cycle="${i}"]`),
+      tag: document.querySelector(`[data-moodtag="${i}"]`),
+      moods: c.moods && c.moods.length ? c.moods : [{ name: 'neutral', face: c.face }],
+      at: i, // start on different moods, so they don't all change at once
+    }));
+    const show = (t) => {
+      const m = t.moods[t.at % t.moods.length];
+      if (t.canvas) D.render(t.canvas, m.face);
+      if (t.tag) t.tag.textContent = t.moods.length > 1 ? m.name : '';
+    };
+    tiles.forEach(show);
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    creditsTimer = setInterval(() => {
+      if (!document.querySelector('canvas[data-cycle]')) return stopCredits();
+      for (const t of tiles) {
+        t.at++;
+        show(t);
+      }
+    }, 900);
   }
   // A line's effects (screen shake, flashes…) are classes on the stage, any number at once. They
   // are set when the line appears and stay until the next one, so Flashback lasts as long as the line.
@@ -608,8 +640,12 @@
       $('tvc').dataset.game = sc.dataset.game || 'none';
       if (entering) sc.classList.add('enter');
       if (entering && scene === 'results') confetti();
-      if (entering) stopVN();
+      if (entering) {
+        stopVN();
+        stopCredits();
+      }
       if (entering && v && v.game === 'drama' && v.phase === 'show') playVN(v.chapter);
+      if (entering && v && v.game === 'drama' && v.phase === 'credits') playCredits(v.credits);
       lastContent = content;
       lastScene = scene;
     }
@@ -769,6 +805,13 @@
         .map(([k, label]) => btn(label + (r.timer === k ? ' ✓' : ''), { type: 'timer', timer: k }))
         .join('')}`,
     );
+    const ups = (r.state === 'playing' && st.view && st.view.phase === 'write' && st.view.uploads) || [];
+    if (ups.length)
+      rows.push(
+        ups
+          .map((u) => btn(`Remove background “${u.name}” (${nameOf(u.by)})`, { type: 'remove_bg', id: u.id }, 'kick'))
+          .join(''),
+      );
     if (r.guest) rows.push(btn('Close this room', { type: 'close' }, 'kick'));
     const P = S().prefs || {};
     rows.push(

@@ -727,3 +727,25 @@ async def test_uploaded_backgrounds_are_served_from_the_game_only():
             assert (await client.get(f"/ubg/{bad}")).status == 404
     finally:
         await client.close()
+
+
+def test_the_vip_and_the_host_can_remove_any_uploaded_background():
+    import base64
+
+    r, _ = room()
+    a, b, c = connect(r, "Ann"), connect(r, "Bo"), connect(r, "Cy")
+    with pytest.raises(Invalid, match="no background"):
+        r.handle(a.pid, {"type": "remove_bg", "id": "u:x"})
+    r.handle(a.pid, {"type": "start", "game": "drama"})
+    g = r.game
+    g.phase = "write"
+    jpeg = base64.b64encode(b"\xff\xd8\xff\xe0" + b"1" * 50).decode()
+    for s in (b, c):
+        r.handle(s.pid, {"type": "upload_bg", "name": "x", "data": jpeg})
+    k1, k2 = list(g.uploads)
+    with pytest.raises(Invalid, match="your own"):
+        r.handle(c.pid, {"type": "remove_bg", "id": k1})  # a player: own only
+    r.handle(a.pid, {"type": "remove_bg", "id": f"u:{k1}"})  # the VIP: anyone's
+    r.host_command({"type": "remove_bg", "id": k2})  # the host screen too
+    assert not g.uploads
+    assert [u["id"] for u in g.host_view(1.0)["uploads"]] == []

@@ -431,14 +431,14 @@
       .trim();
   /** Effects a line can set off on the big screen (stackable). */
   const FX = {
-    shake: 'Screen shake',
-    flash_red: 'Red flash',
-    flash_white: 'White flash',
-    blackout: 'Blackout',
-    zoom: 'Zoom punch',
-    blur: 'Dizzy blur',
-    sepia: 'Flashback',
-    hop: 'Jump',
+    shake: ['💥', 'Shake', 'Screen shake'],
+    flash_red: ['🔴', 'Red', 'Red flash'],
+    flash_white: ['⚪', 'White', 'White flash'],
+    blackout: ['⚫', 'Black', 'Blackout'],
+    zoom: ['🔍', 'Zoom', 'Zoom punch'],
+    blur: ['🌫️', 'Blur', 'Dizzy blur'],
+    sepia: ['🎞️', 'Old', 'Flashback'],
+    hop: ['⬆️', 'Jump', 'Jump'],
   };
   const NAME_IDEAS = ['Vlad', 'Mimi', 'Captain Pickles', 'Dr. Moon', 'Sir Toast', 'Aiko', 'Big Gary', 'Luna'];
   const PART = {
@@ -491,11 +491,11 @@
                   )
                   .join('')}</div>`
           }
-          <details class="dfx"${ln.fxOpen || ln.fx.length ? ' open' : ''}><summary>Effects${ln.fx.length ? ` · ${ln.fx.length}` : ''}</summary><div class="moods">${Object.entries(FX)
+          <details class="dfx"${ln.fxOpen ? ' open' : ''}><summary>Effects${ln.fx.length ? `<span class="fxon" aria-label="${ln.fx.map((k) => FX[k][2]).join(', ')}">${ln.fx.map((k) => FX[k][0]).join(' ')}</span>` : ''}</summary><div class="fxrow">${Object.entries(FX)
             .filter(([k]) => dJob.effects.includes(k))
             .map(
-              ([k, label]) =>
-                `<button type="button" data-lfx="${i}:${k}" aria-pressed="${ln.fx.includes(k)}">${label}</button>`,
+              ([k, [icon, short, label]]) =>
+                `<button type="button" data-lfx="${i}:${k}" aria-pressed="${ln.fx.includes(k)}" aria-label="${label}" title="${label}"><span aria-hidden="true">${icon}</span>${short}</button>`,
             )
             .join('')}</div></details>
           <div class="row"><textarea data-ltext="${i}" maxlength="400" rows="1" autocomplete="off" aria-label="Line ${i + 1}" placeholder="${ln.who === 'n' ? 'What happens…' : 'What they say…'}">${esc(ln.text)}</textarea>${dLines.length > 1 ? `<button type="button" class="x" data-ldel="${i}" aria-label="Remove line ${i + 1}">×</button>` : ''}</div>
@@ -517,9 +517,10 @@
       (b) =>
         `<button type="button" data-bg="${b}" aria-pressed="${b === dBg}" aria-label="${esc(S.LABELS[b])}">${S.svg(b, '', true)}<span>${esc(S.LABELS[b])}</span></button>`,
     );
+    // an uploaded background: its owner (and the VIP) can take it back out
     const mine = dJob.uploads.map(
       (u) =>
-        `<button type="button" data-bg="${esc(u.id)}" aria-pressed="${u.id === dBg}" aria-label="${esc(u.name)}">${S.svg(u.id, '', true)}<span>${esc(u.name)}<small>by ${esc(player(u.by).name)}</small></span></button>`,
+        `<div class="bgtile"><button type="button" data-bg="${esc(u.id)}" aria-pressed="${u.id === dBg}" aria-label="${esc(u.name)}">${S.svg(u.id, '', true)}<span>${esc(u.name)}<small>by ${esc(player(u.by).name)}</small></span></button>${u.by === pid || isVip() ? `<button type="button" class="bgx" data-rmbg="${esc(u.id)}" aria-label="Remove ${esc(u.name)}">×</button>` : ''}</div>`,
     );
     return [...mine, ...presets].join('');
   }
@@ -666,7 +667,7 @@
       const neutral = c.faces.neutral;
       return {
         key: `${base}:${dEmo}:${sent.join(',')}:${c.moods.join(',')}`,
-        main: `${top}<span class="kicker">Your job: draw ${esc(c.name)} · ${esc(dEmo)}</span>
+        main: `${top}<span class="kicker">Your job: draw ${esc(c.name)} · ${esc(dEmo)}${v.ends_in === null ? ' · no time limit' : ''}</span>
           ${charCard(c)}${tabs}${extra}
           <p class="pnote">${dEmo === 'neutral' ? 'Full character, standing. No background: the scene goes behind them.' : 'Tap Start from neutral, then change the face.'}${have ? " The four main moods are in: add extra moods if you like (writers can pick them for this character's lines), then tap I'm done." : ''}</p>
           ${c.moods.includes(dEmo) ? '<button class="ghost" type="button" data-act="dropmood">Remove this mood</button>' : ''}
@@ -1356,6 +1357,8 @@
       dEmo = b.dataset.dtab;
       lastKey = '';
       render();
+    } else if (b.dataset.rmbg) {
+      send({ type: 'remove_bg', id: b.dataset.rmbg });
     } else if (b.dataset.bg) {
       dBg = b.dataset.bg;
       for (const x of document.querySelectorAll('[data-bg]'))

@@ -3385,3 +3385,111 @@ body.play {
     display: none;
   }
 }
+
+/* Drama Club polish: the untimed ring, cycling credits, compact effects, removable backgrounds */
+.untimed {
+  position: absolute;
+  right: 40px;
+  bottom: 36px;
+  display: grid;
+  justify-items: end;
+  font-weight: 900;
+  font-size: 30px;
+  color: var(--acc);
+}
+.untimed small {
+  font-size: 15px;
+  font-weight: 800;
+  opacity: 0.7;
+}
+.dcastwall .moodtag {
+  min-height: 18px;
+  font-size: 13px;
+  font-weight: 900;
+  text-transform: capitalize;
+  color: var(--acc, #7a45d1);
+}
+.dfx summary {
+  gap: 8px;
+}
+.dfx .fxon {
+  font-size: 15px;
+  letter-spacing: 2px;
+}
+.fxrow {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scroll-snap-type: x proximity;
+}
+.fxrow button {
+  flex: none;
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  font-weight: 800;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  scroll-snap-align: start;
+}
+.fxrow button[aria-pressed="true"] {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 22%, var(--surface));
+}
+.bgpick.row .bgtile {
+  position: relative;
+  flex: 0 0 34%;
+  display: flex;
+  scroll-snap-align: start;
+}
+.bgpick.row .bgtile > button:first-child {
+  flex: 1 1 auto;
+  width: 100%;
+}
+.bgpick.row .bgtile .bgx {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(20, 12, 36, 0.75);
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+}
+
+/* a scrolling row inside a line card must scroll, not stretch the card past the screen */
+#dlines {
+  grid-template-columns: minmax(0, 1fr);
+}
+.dline {
+  grid-template-columns: minmax(0, 1fr);
+}
+.dline > *,
+.dfx {
+  min-width: 0;
+}
+
+/* a scrolling row inside a line card must scroll, not stretch the card past the screen */
+#dlines {
+  grid-template-columns: minmax(0, 1fr);
+}
+.dline {
+  grid-template-columns: minmax(0, 1fr);
+}
+.dline > *,
+.dfx {
+  min-width: 0;
+}
