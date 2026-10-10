@@ -3817,14 +3817,6 @@ body:has(.scene.vn[data-game="drama"]) {
   background: #07060d;
 }
 /* the show: a letterboxed film frame */
-.vnstage::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  pointer-events: none;
-  background: radial-gradient(ellipse 88% 78% at 50% 54%, transparent 50%, rgba(0, 0, 0, 0.66) 100%);
-}
 .vnbar {
   position: absolute;
   left: 0;
@@ -3873,9 +3865,7 @@ body:has(.scene.vn[data-game="drama"]) {
   background: #0f0b1a;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-left: 4px solid hsl(var(--hue, 262) 80% 65%);
-  box-shadow:
-    0 24px 70px rgba(0, 0, 0, 0.55),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.55);
   z-index: 6;
 }
 .vnbox .plate {
@@ -3885,7 +3875,7 @@ body:has(.scene.vn[data-game="drama"]) {
   letter-spacing: 0.05em;
   background: hsl(var(--hue, 262) 75% 68%);
   color: #10091f;
-  box-shadow: 0 8px 26px hsl(var(--hue, 262) 80% 50% / 0.5);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.5);
 }
 .vnbox::after {
   content: "▼";
@@ -3923,9 +3913,7 @@ body:has(.scene.vn[data-game="drama"]) {
 .vncard {
   z-index: 6;
   gap: 14px;
-  background:
-    radial-gradient(900px 500px at 50% 46%, rgba(246, 184, 93, 0.12), transparent 70%),
-    rgba(5, 4, 10, 0.93);
+  background: #08060e;
 }
 .vncard::before {
   content: "";
@@ -3955,10 +3943,7 @@ body:has(.scene.vn[data-game="drama"]) {
   font-size: 92px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  background: linear-gradient(180deg, #fff 25%, #bfaeff);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: #fff;
 }
 .vncard .dchap {
   letter-spacing: 0.34em;
@@ -3971,27 +3956,14 @@ body:has(.scene.vn[data-game="drama"]) {
   margin-inline: auto;
   color: #d9d0ee;
 }
-/* credits: a spotlight sweep, polaroid tiles */
-.vncredroll::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: radial-gradient(520px 760px at 20% 0%, rgba(246, 184, 93, 0.2), transparent 70%) no-repeat;
-  background-size: 200% 100%;
-  animation: sweep 10s ease-in-out infinite alternate;
-}
-@keyframes sweep {
-  from { background-position: 0% 0; }
-  to { background-position: 100% 0; }
-}
+/* credits: polaroid tiles */
 .vncredroll .tag,
 .vncredroll h3 {
   letter-spacing: 0.4em;
   text-transform: uppercase;
 }
 .dcastwall > div {
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.45);
 }
 .dcastwall > div:nth-child(odd) {
   rotate: -2.2deg;
@@ -4096,7 +4068,6 @@ body:has(.scene.vn[data-game="drama"]) {
   bottom: -50px;
   font-size: var(--s);
   color: #ff6fa8;
-  text-shadow: 0 0 14px rgba(255, 111, 168, 0.7);
   animation-name: fxrise;
 }
 @keyframes fxrise {
@@ -4138,7 +4109,6 @@ body:has(.scene.vn[data-game="drama"]) {
   top: var(--y);
   font-size: var(--s);
   color: #ffe9a8;
-  text-shadow: 0 0 12px #ffd36b;
   animation-name: fxtwinkle;
 }
 @keyframes fxtwinkle {
@@ -4149,9 +4119,6 @@ body:has(.scene.vn[data-game="drama"]) {
   .vnbg,
   .sprite.in,
   .vnbox::after,
-  .vncredroll::before {
-    animation: none;
-  }
   .wipe {
     display: none;
   }
@@ -4194,7 +4161,6 @@ body:has(.scene.vn[data-game="drama"]) {
   position: relative;
 }
 /* drifting confetti behind everything */
-#ph[data-game="drama"]::before,
 .scene[data-game="drama"]:not(.vn) .confetti {
   content: "";
   position: fixed;
@@ -4216,9 +4182,6 @@ body:has(.scene.vn[data-game="drama"]) {
 #ph[data-game="drama"] .phtop {
   background: var(--surface);
   border-bottom: 3px solid color-mix(in srgb, var(--fg) 20%, transparent);
-}
-#ph[data-game="drama"] .ptitle {
-  text-shadow: 3px 3px 0 var(--pk);
 }
 #ph[data-game="drama"] .kicker {
   display: inline-block;
@@ -4253,11 +4216,6 @@ body:has(.scene.vn[data-game="drama"]) {
   height: auto;
   min-height: 26px;
   font-weight: 900;
-  animation: nowpulse 2.2s ease-in-out infinite;
-}
-@keyframes nowpulse {
-  0%, 100% { scale: 1; }
-  50% { scale: 1.04; }
 }
 /* sticker cards: thick outline, hard shadow */
 #ph[data-game="drama"] .card,
@@ -4271,9 +4229,7 @@ body:has(.scene.vn[data-game="drama"]) {
 }
 #ph[data-game="drama"] .wstep.open {
   border-color: var(--yl);
-  box-shadow:
-    4px 5px 0 rgba(0, 0, 0, 0.3),
-    0 0 0 3px color-mix(in srgb, var(--yl) 35%, transparent);
+  box-shadow: 4px 5px 0 rgba(0, 0, 0, 0.3);
 }
 #ph[data-game="drama"] .wstep .wnum {
   border: 2px solid var(--ol);
@@ -4331,7 +4287,6 @@ body:has(.scene.vn[data-game="drama"]) {
   border: 3px solid var(--ol);
   border-radius: 18px;
   box-shadow: 0 6px 0 var(--ol);
-  animation: cta 2.6s ease-in-out infinite;
 }
 #ph[data-game="drama"] .big-btn:active:not(:disabled) {
   translate: 0 4px;
@@ -4346,15 +4301,11 @@ body:has(.scene.vn[data-game="drama"]) {
   box-shadow: none;
   animation: none;
 }
-@keyframes cta {
-  0%, 100% { scale: 1; rotate: 0deg; }
-  50% { scale: 1.03; rotate: -0.6deg; }
-}
 #ph[data-game="drama"] .field input:focus,
 #ph[data-game="drama"] .field textarea:focus,
 #ph[data-game="drama"] .newmood input:focus {
   border-color: var(--pk);
-  box-shadow: 0 0 0 4px rgba(255, 95, 162, 0.3);
+  box-shadow: 0 0 0 4px var(--pk);
 }
 /* screens bounce in one piece at a time */
 #ph[data-game="drama"] .phmain.enter > * {
@@ -4428,14 +4379,7 @@ body:has(.scene.vn[data-game="drama"]) {
   rotate: -2deg;
 }
 .scene[data-game="drama"]:not(.vn) .big {
-  text-shadow:
-    4px 4px 0 var(--pk),
-    8px 8px 0 rgba(0, 0, 0, 0.22);
-  animation: wobble 5s ease-in-out infinite;
-}
-@keyframes wobble {
-  0%, 100% { rotate: -0.7deg; }
-  50% { rotate: 0.7deg; }
+  text-shadow: 4px 4px 0 var(--pk);
 }
 .scene[data-game="drama"]:not(.vn) .dtheme {
   display: inline-block;
@@ -4513,14 +4457,10 @@ body:has(.scene.vn[data-game="drama"]) {
   color: var(--tl);
 }
 @media (prefers-reduced-motion: reduce) {
-  #ph[data-game="drama"]::before,
   .scene[data-game="drama"]:not(.vn) .confetti,
-  .scene[data-game="drama"]:not(.vn) .big,
   .scene[data-game="drama"]:not(.vn) .opt,
-  #ph[data-game="drama"] .big-btn,
   #ph[data-game="drama"] .phmain.enter > *,
   #ph[data-game="drama"] button[aria-pressed="true"],
-  #ph[data-game="drama"] .dsteps span.now,
   #ph[data-game="drama"] .wait .face,
   #ph[data-game="drama"] .wait h2.ptitle::after,
   #ph[data-game="drama"] .wstep.open .wbody {
@@ -4538,15 +4478,9 @@ body:has(.scene.vn[data-game="drama"]) {
 .scene[data-game="drama"]:not(.vn) .confetti {
   opacity: 0.26;
 }
-#ph[data-game="drama"]::before {
-  opacity: 0.2;
-}
 .scene[data-game="drama"]:not(.vn) .opt small {
   opacity: 1;
   color: rgba(26, 18, 48, 0.85);
-}
-#ph[data-game="drama"] .ptitle {
-  text-shadow: 2px 2px 0 rgba(255, 95, 162, 0.85);
 }
 /* votes on the phone: bright cards like the big screen's */
 #ph[data-game="drama"] .choice {
@@ -4580,4 +4514,29 @@ body:has(.scene.vn[data-game="drama"]) {
 .dprog .pips i.on {
   border-color: var(--ol);
   background: var(--tl);
+}
+
+/* Drama Club has no blur and no glow: solid, flat surfaces, hard shadows, easy to read */
+#ph[data-game="drama"] .phtop {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--surface);
+}
+#ph[data-game="drama"] .phfoot {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--bg);
+}
+body.play:has(#ph[data-game="drama"]) {
+  background: var(--dots) 0 0 / 22px 22px, var(--bg);
+  background-attachment: fixed;
+}
+.tvc[data-game="drama"] {
+  background: var(--dots) 0 0 / 30px 30px, var(--bg);
+}
+/* easy to hit with a thumb */
+#ph[data-game="drama"] .fxrow button,
+#ph[data-game="drama"] .dfx .prevbtn {
+  min-height: 44px;
+  font-size: 14px;
 }
