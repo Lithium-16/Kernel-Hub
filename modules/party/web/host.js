@@ -283,7 +283,8 @@
           : `<span class="tag">${esc(v.theme)}</span><h2 class="big">Chapter ${ch.index + 1}</h2>${PART[ch.part] ? `<p class="sub dchap">${PART[ch.part]}</p>` : ''}${hl}`;
       return `<div class="scene vn" data-game="drama"><div class="vnstage">${S.svg(ch.bg, 'vnbg')}
         ${ch.cast.map((_, k) => `<canvas class="sprite ${spot(k, ch.cast.length)}" width="400" height="400" id="sp${k}"${crowd(k, ch.cast.length)}></canvas>`).join('')}
-        <div class="vnfx fxr" aria-hidden="true"></div><div class="vnfx fxw" aria-hidden="true"></div><div class="vnfx fxk" aria-hidden="true"></div><div class="vnfx fxs" aria-hidden="true"></div>
+        ${S.fxLayers}
+        <div class="vnbar t" aria-hidden="true"></div><div class="vnbar b" aria-hidden="true"></div>
         <div class="vnbox" id="vnbox" hidden><div class="plate" id="vnplate"></div><p id="vntext"></p></div>
         <div class="vnchap" aria-hidden="true">Ch. ${ch.index + 1} of ${ch.of}</div>
         <div class="vnnext" aria-hidden="true">Click or press Space ▸</div>
@@ -387,17 +388,12 @@
       }
     }, 1100);
   }
-  // A line's effects (screen shake, flashes…) are classes on the stage, any number at once. They
-  // are set when the line appears and stay until the next one, so Flashback lasts as long as the line.
-  const FX = ['shake', 'flash_red', 'flash_white', 'blackout', 'zoom', 'blur', 'sepia', 'hop'];
+  // A line's effects (screen shake, flashes, hearts…) are set when the line appears and stay
+  // until the next one, so Flashback lasts as long as the line (the CSS is in party.css).
   function playFx(list) {
     const stage = document.querySelector('.vnstage');
     if (!stage) return;
-    stage.classList.remove(...FX.map((x) => `fx-${x}`));
-    const on = (list || []).filter((x) => FX.includes(x));
-    if (!on.length) return;
-    void stage.offsetWidth; // restart the animations
-    stage.classList.add(...on.map((x) => `fx-${x}`));
+    for (const k of window.PartyScenes.playFx(stage, list)) S().effect(k);
   }
   function playVN(ch) {
     vn = { ch, line: -2, cur: ch.cast.map(() => 'neutral') };
@@ -447,6 +443,7 @@
     box.classList.toggle('long', len > 120);
     box.classList.toggle('longer', len > 240);
     $('vnplate').textContent = narr ? '' : ch.cast[ln.who].name;
+    box.style.setProperty('--hue', String(narr ? 0 : (ln.who * 57 + 262) % 360));
     ch.cast.forEach((_, k) => {
       const c = $(`sp${k}`);
       if (!c) return;
@@ -659,6 +656,7 @@
       const sc = $('tvc').firstElementChild;
       $('tvc').dataset.game = sc.dataset.game || 'none';
       if (entering) sc.classList.add('enter');
+      if (entering && lastScene && v && v.game === 'drama' && v.phase !== 'show') wipe();
       if (entering && scene === 'results') confetti();
       if (entering) {
         stopVN();
@@ -676,10 +674,20 @@
   }
 
   let lastTick = null;
+  /** A light streak sweeps across between Drama Club's steps. */
+  function wipe() {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const w = document.createElement('div');
+    w.className = 'wipe';
+    w.setAttribute('aria-hidden', 'true');
+    w.addEventListener('animationend', () => w.remove());
+    $('tvc').append(w);
+  }
   function paintTimer() {
     const ring = $('ring');
     if (!ring || deadline === null) return;
     const left = Math.max(0, deadline - performance.now() / 1000);
+    ring.closest('.timer')?.classList.toggle('urgent', left > 0 && left <= 5 && total > 8);
     ring.style.strokeDashoffset = String(276.5 * (1 - left / total));
     const secs = Math.ceil(left);
     $('left').textContent = String(secs);

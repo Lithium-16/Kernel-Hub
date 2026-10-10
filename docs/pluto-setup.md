@@ -188,7 +188,9 @@ The games (3 to 8 players; Bluff Buffet works with 2):
   Players take turns writing a one-line headline per chapter, in order, each seeing the story
   so far; then everyone writes their chapter at once with the whole outline in view. Each line
   can set off stackable effects on the big screen (screen shake, red or white flash, blackout,
-  zoom, blur, flashback, jump), and chapters can use backgrounds players upload from their
+  zoom, blur, flashback, jump, speed lines, sparkles, hearts, petals, rain, glitch), each with
+  its own sound; the show is letterboxed with film grain, and Drama Club always uses its dark
+  theatre look, and chapters can use backgrounds players upload from their
   phones (JPEG, PNG or WebP, two each, kept only until the game ends). The big screen plays the
   chapters in order. Nobody sees the drawings until the show.
 
