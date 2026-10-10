@@ -3582,3 +3582,216 @@ body.play {
   border: 2px dashed var(--line);
   box-shadow: none;
 }
+
+/* Write step: three parts, one open at a time */
+.wstep {
+  display: grid;
+  gap: 10px;
+  border-radius: 18px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  padding: 4px 12px 4px;
+}
+.wstep.open {
+  border-color: var(--acc);
+  padding-bottom: 14px;
+}
+.wstep .whead {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  align-items: center;
+  text-align: left;
+  min-height: 56px;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+}
+.wstep .wnum {
+  grid-row: span 2;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-style: normal;
+  font-weight: 900;
+  background: var(--line);
+}
+.wstep.open .wnum {
+  background: var(--acc);
+  color: var(--ink);
+}
+.wstep.done:not(.open) .wnum {
+  background: var(--good, #2ec27e);
+  color: #fff;
+  font-size: 0;
+}
+.wstep.done:not(.open) .wnum::before {
+  content: "✓";
+  font-size: 16px;
+}
+.wstep .wtitle {
+  font-family: var(--display);
+  font-size: 19px;
+}
+.wstep .whead small {
+  grid-column: 2;
+  color: var(--muted);
+  font-weight: 700;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wstep .wbody {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.wstep .wbody[hidden] {
+  display: none;
+}
+details.dpart > summary {
+  cursor: pointer;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+}
+details.dpart > summary::-webkit-details-marker {
+  display: none;
+}
+details.dpart > summary::after {
+  content: "Tap to read the story so far ▾";
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--muted);
+}
+details.dpart[open] > summary::after {
+  content: "Tap to fold ▴";
+}
+details.dpart[open] > summary {
+  margin-bottom: 8px;
+}
+
+/* Lines: numbered, colour-coded by speaker, moods with faces */
+.dline {
+  border-left: 6px solid var(--muted);
+}
+.dline[style*="--hue"] {
+  border-left-color: hsl(var(--hue) 65% 55%);
+}
+.dline .lhead {
+  display: flex;
+}
+.dline .lnum {
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.dline .who .dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: hsl(var(--hue) 65% 55%);
+}
+.dline .who button.cast[aria-pressed="true"] {
+  border-color: hsl(var(--hue) 65% 55%);
+  background: color-mix(in srgb, hsl(var(--hue) 65% 55%) 22%, var(--surface));
+}
+.dline .moods.mood button {
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+}
+.dline[style*="--hue"] .moods.mood button[aria-pressed="true"] {
+  border-color: hsl(var(--hue) 65% 55%);
+  background: color-mix(in srgb, hsl(var(--hue) 65% 55%) 22%, var(--surface));
+}
+.dfx .prevbtn {
+  margin-top: 8px;
+  min-height: 40px;
+  font-size: 14px;
+}
+
+/* The effects preview: the big screen's own stage (1280x720), scaled down to fit the phone */
+.fxprev {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  margin-top: 8px;
+  border-radius: 12px;
+  background: #000;
+}
+.fxprev .vnstage {
+  inset: auto;
+  left: 0;
+  top: 0;
+  width: 1280px;
+  height: 720px;
+  transform-origin: 0 0;
+  transform: scale(var(--k, 0.28));
+}
+.ghostsprite {
+  background:
+    radial-gradient(circle at 50% 22%, #ffd9b8 0 15%, transparent 15.5%),
+    linear-gradient(#7a5cff, #7a5cff) 50% 100% / 46% 58% no-repeat;
+  border-radius: 40% 40% 0 0;
+}
+
+/* The big screen while everyone draws: each artist's four mood pips */
+.dprog {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 18px;
+  margin-top: 8px;
+}
+.dprog .dp {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  min-width: 110px;
+}
+.dprog .pips {
+  display: flex;
+  gap: 5px;
+}
+.dprog .pips i {
+  width: 18px;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--acc, #7a45d1) 18%, transparent);
+}
+.dprog .pips i.on {
+  background: var(--acc, #7a45d1);
+}
+.dprog small {
+  font-size: 15px;
+  font-weight: 800;
+  opacity: 0.8;
+}
+.dprog .dp.ready small {
+  color: var(--good, #2ec27e);
+  opacity: 1;
+}
+
+/* inside a step's panel, wide rows must scroll within the panel, not widen it */
+.wstep,
+.wstep .wbody > *,
+.wstep .sfade {
+  min-width: 0;
+  max-width: 100%;
+}
+.wstep .wbody {
+  grid-template-columns: minmax(0, 1fr);
+}

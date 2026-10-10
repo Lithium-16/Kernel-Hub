@@ -227,8 +227,17 @@
     const theme = v.theme
       ? `<span class="dtheme">${esc(v.theme)}</span>${v.problem ? `<p class="dproblem">The problem: <b>${esc(v.problem)}</b></p>` : ''}`
       : '';
-    const work = (title, sub, extra = '') =>
-      `${head(step)}<h2 class="big" style="font-size:64px">${title}</h2>${theme}<p class="sub">${sub}</p>${extra}${doneRow(v.waiting)}${ring()}</div>`;
+    const work = (title, sub, extra = '', rows = doneRow(v.waiting)) =>
+      `${head(step)}<h2 class="big" style="font-size:64px">${title}</h2>${theme}<p class="sub">${sub}</p>${extra}${rows}${ring()}</div>`;
+    // Drawing: each artist's moods so far (four pips), their extra moods, and when they're done
+    const progressRow = () =>
+      `<div class="dprog">${st.room.players
+        .filter((p) => p.playing && v.progress && v.progress[p.pid])
+        .map((p) => {
+          const g = v.progress[p.pid];
+          return `<div class="dp ${g.ready ? 'ready' : ''}">${av(p.pid, '')}<span class="pips" role="img" aria-label="${g.moods} of 4 moods drawn">${[0, 1, 2, 3].map((k) => `<i class="${k < g.moods ? 'on' : ''}"></i>`).join('')}</span><small>${g.ready ? 'Ready ✓' : g.moods < 4 ? `${g.moods}/4 moods` : 'Extra moods?'}${g.extra ? ` · +${g.extra}` : ''}</small></div>`;
+        })
+        .join('')}</div>`;
     if (v.phase === 'pitch')
       return work(
         "What's tonight's story about?",
@@ -245,6 +254,8 @@
       return work(
         "Draw someone else's character",
         'Neutral, flustered, sad and angry, plus any extra moods you like. Nobody sees the drawings until the show!',
+        '',
+        progressRow(),
       );
     if (v.phase === 'headline') {
       const r = v.relay;
