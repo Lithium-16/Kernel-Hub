@@ -418,7 +418,7 @@
   }
   /** The outline: one headline per chapter, in order; `mine` (a chapter number) is highlighted. */
   function outlineList(items, mine) {
-    return `<ol class="dheads">${items.map((x) => `<li${x.number === mine ? ' class="me"' : ''}><small>Chapter ${x.number}${x.number === mine ? ' · yours' : ''}</small>${esc(x.headline)}</li>`).join('')}</ol>`;
+    return `<ol class="dheads">${items.map((x) => `<li${x.number === mine ? ' class="me"' : ''}><small>Chapter ${x.number}${x.number === mine ? ' · yours' : ''} · headline by ${esc(player(x.by).name)}</small>${esc(x.headline)}</li>`).join('')}</ol>`;
   }
   function charCard(c, extra = '') {
     return `<div class="card dchar"><b>${esc(c.name)}</b><span class="pnote">${esc(c.look || 'No description: surprise us!')}</span>${c.personality ? `<span class="pnote"><i>${esc(c.personality)}</i></span>` : ''}${extra}</div>`;
@@ -580,6 +580,7 @@
       return {
         key: `${base}:now`,
         main: `${top}<h2 class="ptitle">Your turn: what happens in chapter ${ch.number} of ${ch.of}?</h2>
+          <p class="pnote"><b>${esc(player(v.for).name)}</b> will write this chapter from your headline. You write a different one.</p>
           <div class="card dpart"><span class="kicker">${esc(label)}</span><span>${esc(hint)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b>. The problem: <b>${esc(v.problem)}</b></span></div>
           ${sofar || '<p class="pnote"><b>You start the story!</b></p>'}
           <p class="pnote">One sentence that carries on from the story so far. Starring ${v.cast.map((c) => `<b>${esc(c.name)}</b>`).join(', ')}.</p>

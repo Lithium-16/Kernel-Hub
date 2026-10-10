@@ -240,7 +240,7 @@
       const lines = v.outline
         .map(
           (x, i) =>
-            `<li class="${i === v.outline.length - 1 ? 'new' : ''}">${av(x.writer, 'sm')}<span><small>Chapter ${x.number}</small>${esc(x.headline)}</span></li>`,
+            `<li class="${i === v.outline.length - 1 ? 'new' : ''}">${av(x.by, 'sm')}<span><small>Chapter ${x.number}</small>${esc(x.headline)}</span></li>`,
         )
         .join('');
       return `${head(step)}<h2 class="big" style="font-size:52px">The story so far</h2>${theme}
