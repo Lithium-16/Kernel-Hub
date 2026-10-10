@@ -1318,6 +1318,11 @@ class DramaClub(Game):
         # player i draws the character player i+1 invents: nobody draws their own
         self.characters: dict[str, Character] = {
             p: Character(p, artist=self.order[(i - 1) % n]) for i, p in enumerate(self.order)}
+        # Every list of characters (cast cards, credits, the vote) uses its own random order, so
+        # it gives away neither who invented which character nor who drew it.
+        listed = list(self.characters)
+        rng.shuffle(listed)
+        self.characters = {p: self.characters[p] for p in listed}
         self.chapters = [Chapter(p) for p in self.order]
         for i, ch in enumerate(self.chapters):  # you write the headline of the next player's chapter
             ch.headliner = self.chapters[(i + 1) % n].writer

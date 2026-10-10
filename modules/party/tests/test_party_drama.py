@@ -251,3 +251,13 @@ def test_bots_play_a_whole_game(n):
     assert g.counts and g.hits
     g.skip(1.0)
     assert g.done
+
+
+def test_characters_are_listed_in_their_own_random_order():
+    same_as_seats = 0
+    for seed in range(12):
+        pids, g = drama(5, seed=seed)
+        listed = list(g.characters)
+        assert sorted(listed) == sorted(pids)
+        same_as_seats += listed == g.order or listed == pids
+    assert same_as_seats <= 2  # not the seating order, which would give away who drew whom
