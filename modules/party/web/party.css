@@ -3797,91 +3797,26 @@ details.dpart[open] > summary {
 }
 
 /* =====================================================================================
-   Drama Club, cinematic: a dark theatre palette with amber light and letterbox. The show itself is clean (no blur,
-   grain or glass); the layout and player interface get the richer effects (see the end).
-   Everything here is scoped to Drama Club's screens (data-game="drama"). It always uses the dark
-   look, whatever the device prefers: a film doesn't switch to light mode.
+   Drama Club: the show is cinematic (a dark theatre palette with amber light, letterbox,
+   a slow push-in); the layout and player interface are a party game (see the end).
    ===================================================================================== */
 :root {
   --cin-amber: #f6b85d;
   --cin-violet: #7b61ff;
-  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
-#ph[data-game="drama"],
-.scene[data-game="drama"] {
+.scene.vn[data-game="drama"] {
   --bg: #07060d;
   --surface: #110e1c;
-  --surface-2: #181428;
-  --card: #120f1e;
-  --edge: #332b4f;
-  --line: #2b2544;
   --fg: #f1ecf9;
   --muted: #a69fc0;
-  --ink: #1b1204;
   --acc: var(--cin-amber);
   color-scheme: dark;
   color: var(--fg);
 }
-body.play:has(#ph[data-game="drama"]) {
-  background:
-    radial-gradient(120% 360px at 50% -80px, rgba(246, 184, 93, 0.2), transparent 72%),
-    radial-gradient(90% 420px at 100% 100%, rgba(123, 97, 255, 0.16), transparent 70%),
-    #07060d;
-  background-attachment: fixed;
+body:has(.scene.vn[data-game="drama"]) {
+  background: #07060d;
 }
-/* the big screen between shows: a spotlit stage */
-.scene[data-game="drama"]:not(.vn) {
-  background:
-    radial-gradient(900px 520px at 10% -12%, rgba(246, 184, 93, 0.17), transparent 62%),
-    radial-gradient(1000px 620px at 100% 115%, rgba(123, 97, 255, 0.24), transparent 62%),
-    #07060d;
-}
-.scene[data-game="drama"]:not(.vn)::before {
-  color: rgba(246, 184, 93, 0.06);
-}
-.scene[data-game="drama"] .tvbar .logo {
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.scene[data-game="drama"] .tag {
-  letter-spacing: 0.4em;
-  text-transform: uppercase;
-  font-size: 18px;
-  color: var(--cin-amber);
-}
-.scene[data-game="drama"]:not(.vn) .big {
-  background: linear-gradient(180deg, #fff 30%, #c4b5ff);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-.scene[data-game="drama"] .dtheme {
-  background: rgba(246, 184, 93, 0.1);
-  border: 1px solid rgba(246, 184, 93, 0.4);
-  color: #ffe9c4;
-}
-.scene[data-game="drama"] .opt {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.025));
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: var(--fg);
-  -webkit-backdrop-filter: blur(10px) saturate(1.2);
-  backdrop-filter: blur(10px) saturate(1.2);
-  box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14);
-}
-.scene[data-game="drama"] .opt small {
-  color: var(--muted);
-}
-
 /* the show: a letterboxed film frame */
-@keyframes grain {
-  0% { translate: 0 0; }
-  20% { translate: -3% 2%; }
-  40% { translate: 2% -3%; }
-  60% { translate: -2% -1%; }
-  80% { translate: 3% 3%; }
-}
 .vnstage::after {
   content: "";
   position: absolute;
@@ -4064,7 +3999,7 @@ body.play:has(#ph[data-game="drama"]) {
 .dcastwall > div:nth-child(even) {
   rotate: 1.8deg;
 }
-/* a light streak sweeps across between steps */
+/* a stripe of colour sweeps across between steps */
 .wipe {
   position: absolute;
   inset: 0;
@@ -4072,14 +4007,15 @@ body.play:has(#ph[data-game="drama"]) {
   pointer-events: none;
   background: linear-gradient(
     100deg,
-    transparent 32%,
-    rgba(246, 184, 93, 0.1) 40%,
-    rgba(255, 238, 205, 0.6) 50%,
-    rgba(246, 184, 93, 0.1) 60%,
-    transparent 68%
+    transparent 18%,
+    #ff5fa2 18% 34%,
+    #ffd23f 34% 50%,
+    #2fd1b4 50% 66%,
+    #4d8dff 66% 82%,
+    transparent 82%
   );
   translate: -100% 0;
-  animation: wipe 0.8s cubic-bezier(0.5, 0, 0.2, 1) forwards;
+  animation: wipe 0.7s cubic-bezier(0.6, 0, 0.3, 1) forwards;
 }
 @keyframes wipe {
   to { translate: 100% 0; }
@@ -4221,39 +4157,9 @@ body.play:has(#ph[data-game="drama"]) {
   }
 }
 
-/* polish: no light edges behind the dark scenes, a centred title card, readable pitch cards */
-html:has(#ph[data-game="drama"]),
-html:has(.scene[data-game="drama"]),
-body:has(.scene[data-game="drama"]) {
-  background: #07060d;
-}
 .vncard > * {
   justify-self: center;
   text-align: center;
-}
-.scene[data-game="drama"] .opt small {
-  color: #cfc7e6;
-  font-family: var(--body);
-  font-weight: 700;
-  font-size: 20px;
-}
-.scene[data-game="drama"] .opt small.dnames {
-  color: var(--cin-amber);
-}
-
-/* the light-mode input styling must not leak into the dark theatre */
-#ph[data-game="drama"] .field input,
-#ph[data-game="drama"] .field textarea,
-#ph[data-game="drama"] .dline input,
-#ph[data-game="drama"] .dline textarea,
-#ph[data-game="drama"] .newmood input {
-  background: color-mix(in srgb, var(--bg) 70%, var(--surface));
-  color: var(--fg);
-  box-shadow: inset 0 3px 0 color-mix(in srgb, #000 35%, transparent);
-}
-#ph[data-game="drama"] input::placeholder,
-#ph[data-game="drama"] textarea::placeholder {
-  color: color-mix(in srgb, var(--muted) 70%, transparent);
 }
 .newmood .ghost {
   width: auto;
@@ -4266,176 +4172,193 @@ body:has(.scene[data-game="drama"]) {
 }
 
 /* =====================================================================================
-   Drama Club: visual effects for the layout and the player interface (phones, and the big
-   screen between shows). Frosted cards, a slow aurora, film grain, springy controls, a shine on
-   the main buttons, staggered entrances. The show itself stays clean.
+   Drama Club: a party-game layout for the phones and the big screen between shows, in the
+   spirit of Jackbox: bright stickers with thick outlines and hard shadows, bold colours, bouncy
+   springs, drifting confetti. (The show itself keeps its cinematic look.)
    ===================================================================================== */
-#ph[data-game="drama"] {
+:root {
+  --pk: #ff5fa2;
+  --yl: #ffd23f;
+  --tl: #2fd1b4;
+  --og: #ff8a3d;
+  --bl: #4d8dff;
+  --ol: #1a1230;
+  --confetti: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='360' height='360'%3E%3Ccircle cx='50' cy='60' r='14' fill='%23ff5fa2'/%3E%3Crect x='200' y='40' width='28' height='28' rx='7' fill='%23ffd23f' transform='rotate(20 214 54)'/%3E%3Cpath d='M300 90l17 30h-34z' fill='%232fd1b4'/%3E%3Cpath d='M50 205q16-28 32 0t32 0' stroke='%23ff8a3d' stroke-width='8' fill='none' stroke-linecap='round'/%3E%3Cpath d='M250 235h32M266 219v32' stroke='%234d8dff' stroke-width='8' stroke-linecap='round'/%3E%3Ccircle cx='160' cy='305' r='10' fill='%234d8dff'/%3E%3Ccircle cx='318' cy='322' r='13' fill='none' stroke='%23ffd23f' stroke-width='7'/%3E%3Cpath d='M130 130l8 16 18 3-13 12 3 18-16-9-16 9 3-18-13-12 18-3z' fill='%23ff5fa2'/%3E%3C/svg%3E");
+}
+#ph[data-game="drama"],
+.scene[data-game="drama"]:not(.vn) {
+  --acc: var(--pk);
   isolation: isolate;
+}
+#ph[data-game="drama"] {
   position: relative;
 }
-/* a slow aurora behind everything */
+/* drifting confetti behind everything */
 #ph[data-game="drama"]::before,
-.scene[data-game="drama"]:not(.vn) .aurora {
+.scene[data-game="drama"]:not(.vn) .confetti {
   content: "";
   position: fixed;
-  inset: -20%;
+  inset: -360px;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(40% 30% at 18% 12%, rgba(246, 184, 93, 0.24), transparent 70%),
-    radial-gradient(46% 36% at 86% 88%, rgba(123, 97, 255, 0.28), transparent 70%),
-    radial-gradient(30% 24% at 70% 20%, rgba(255, 105, 150, 0.1), transparent 70%);
-  animation: aurora 22s ease-in-out infinite alternate;
+  background: var(--confetti) 0 0 / 360px 360px;
+  opacity: 0.3;
+  animation: drift 50s linear infinite;
 }
-.scene[data-game="drama"]:not(.vn) {
-  isolation: isolate;
-}
-.scene[data-game="drama"]:not(.vn) .aurora {
+.scene[data-game="drama"]:not(.vn) .confetti {
   position: absolute;
+  opacity: 0.42;
 }
-@keyframes aurora {
-  from { transform: translate(-3%, -2%) scale(1); }
-  to { transform: translate(3%, 3%) scale(1.12); }
+@keyframes drift {
+  to { transform: translate(360px, 360px); }
 }
-/* film grain over the interface */
-#ph[data-game="drama"]::after {
-  content: "";
-  position: fixed;
-  inset: -50%;
-  z-index: 40;
-  pointer-events: none;
-  background: var(--grain);
-  opacity: 0.05;
-  mix-blend-mode: overlay;
-}
-.scene[data-game="drama"]:not(.vn)::after {
-  content: "";
-  position: absolute;
-  inset: -50%;
-  z-index: 50;
-  pointer-events: none;
-  background: var(--grain);
-  opacity: 0.08;
-  mix-blend-mode: overlay;
-  animation: grain 0.8s steps(6) infinite;
-}
-.scene[data-game="drama"]:not(.vn) .big {
-  background: linear-gradient(105deg, #fff 30%, #ffe7b8 44%, #c4b5ff 58%, #fff 72%);
-  background-size: 260% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  filter: drop-shadow(0 0 28px rgba(246, 184, 93, 0.25));
-  animation: shine 7s linear infinite;
-}
-@keyframes shine {
-  from { background-position: 100% 0; }
-  to { background-position: -60% 0; }
-}
-/* frosted glass: header, footer, cards */
-#ph[data-game="drama"] .phtop,
-#ph[data-game="drama"] .phfoot {
-  background: rgba(14, 11, 24, 0.72);
-  -webkit-backdrop-filter: blur(14px) saturate(1.3);
-  backdrop-filter: blur(14px) saturate(1.3);
-}
+/* ---- phones ---- */
 #ph[data-game="drama"] .phtop {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface);
+  border-bottom: 3px solid color-mix(in srgb, var(--fg) 20%, transparent);
 }
-#ph[data-game="drama"] .phfoot {
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+#ph[data-game="drama"] .ptitle {
+  text-shadow: 3px 3px 0 var(--pk);
 }
-#ph[data-game="drama"] .card,
-#ph[data-game="drama"] .dline,
-#ph[data-game="drama"] .wstep,
-#ph[data-game="drama"] .dcastpick button,
-#ph[data-game="drama"] .choice,
-#ph[data-game="drama"] .dthumb {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.02));
-  border-color: rgba(255, 255, 255, 0.13);
-  -webkit-backdrop-filter: blur(10px) saturate(1.2);
-  backdrop-filter: blur(10px) saturate(1.2);
-  box-shadow:
-    0 12px 32px rgba(0, 0, 0, 0.38),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+#ph[data-game="drama"] .kicker {
+  display: inline-block;
+  justify-self: start;
+  align-self: flex-start;
+  padding: 3px 12px;
+  border: 2px solid var(--ol);
+  border-radius: 999px;
+  background: var(--yl);
+  color: var(--ol);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  rotate: -2deg;
 }
-#ph[data-game="drama"] .wstep.open {
-  border-color: color-mix(in srgb, var(--acc) 70%, transparent);
-  box-shadow:
-    0 12px 32px rgba(0, 0, 0, 0.38),
-    0 0 26px rgba(246, 184, 93, 0.18),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+/* the step bar: one colour per step */
+#ph[data-game="drama"] .dsteps span {
+  height: 12px;
+  border: 2px solid color-mix(in srgb, var(--fg) 25%, transparent);
+  background: transparent;
 }
-/* controls spring when chosen, and glow */
-#ph[data-game="drama"] button[aria-pressed="true"] {
-  animation: popin 0.32s cubic-bezier(0.3, 1.7, 0.5, 1);
-  box-shadow: 0 0 18px color-mix(in srgb, var(--acc) 35%, transparent);
+#ph[data-game="drama"] .dsteps span:is(.done, .now) {
+  border-color: var(--ol);
+  color: var(--ol);
 }
-#ph[data-game="drama"] .dline .who button.cast[aria-pressed="true"],
-#ph[data-game="drama"] .dline .moods.mood button[aria-pressed="true"] {
-  box-shadow: 0 0 18px hsl(var(--hue, 262) 80% 55% / 0.4);
-}
-@keyframes popin {
-  0% { scale: 0.88; }
-  100% { scale: 1; }
-}
-#ph[data-game="drama"] button:active:not(:disabled) {
-  scale: 0.97;
-  transition: scale 0.08s;
-}
-/* the main buttons shine now and then */
-#ph[data-game="drama"] .big-btn {
-  position: relative;
-  overflow: hidden;
-  box-shadow:
-    0 6px 0 color-mix(in srgb, var(--acc) 55%, #000),
-    0 0 30px rgba(246, 184, 93, 0.3);
-}
-#ph[data-game="drama"] .big-btn::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(108deg, transparent 36%, rgba(255, 255, 255, 0.5) 50%, transparent 64%);
-  translate: -130% 0;
-  animation: sheen 4.2s ease-in-out infinite;
-}
-#ph[data-game="drama"] .big-btn.pending::after,
-#ph[data-game="drama"] .big-btn:disabled::after {
-  display: none;
-}
-#ph[data-game="drama"] .big-btn.pending {
-  box-shadow: none;
-}
-@keyframes sheen {
-  0%, 55% { translate: -130% 0; }
-  85%, 100% { translate: 130% 0; }
-}
-/* inputs glow when focused */
-#ph[data-game="drama"] .field input:focus,
-#ph[data-game="drama"] .field textarea:focus,
-#ph[data-game="drama"] .newmood input:focus {
-  border-color: var(--acc);
-  box-shadow:
-    0 0 0 4px rgba(246, 184, 93, 0.22),
-    0 0 26px rgba(246, 184, 93, 0.25);
-}
-/* the step bar: the finished steps glow, the current one pulses */
-#ph[data-game="drama"] .dsteps span.done {
-  background: linear-gradient(90deg, #f6b85d, #ffd89a);
-  box-shadow: 0 0 10px rgba(246, 184, 93, 0.5);
-}
+#ph[data-game="drama"] .dsteps span:nth-child(1):is(.done, .now) { background: var(--pk); }
+#ph[data-game="drama"] .dsteps span:nth-child(2):is(.done, .now) { background: var(--og); }
+#ph[data-game="drama"] .dsteps span:nth-child(3):is(.done, .now) { background: var(--yl); }
+#ph[data-game="drama"] .dsteps span:nth-child(4):is(.done, .now) { background: var(--tl); }
+#ph[data-game="drama"] .dsteps span:nth-child(5):is(.done, .now) { background: var(--bl); }
 #ph[data-game="drama"] .dsteps span.now {
+  height: auto;
+  min-height: 26px;
+  font-weight: 900;
   animation: nowpulse 2.2s ease-in-out infinite;
 }
 @keyframes nowpulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(246, 184, 93, 0.5); }
-  50% { box-shadow: 0 0 0 7px rgba(246, 184, 93, 0); }
+  0%, 100% { scale: 1; }
+  50% { scale: 1.04; }
 }
-/* screens arrive one piece at a time */
+/* sticker cards: thick outline, hard shadow */
+#ph[data-game="drama"] .card,
+#ph[data-game="drama"] .dline,
+#ph[data-game="drama"] .wstep,
+#ph[data-game="drama"] .choice,
+#ph[data-game="drama"] .dcastpick button {
+  border: 3px solid color-mix(in srgb, var(--fg) 24%, transparent);
+  border-radius: 20px;
+  box-shadow: 4px 5px 0 rgba(0, 0, 0, 0.3);
+}
+#ph[data-game="drama"] .wstep.open {
+  border-color: var(--yl);
+  box-shadow:
+    4px 5px 0 rgba(0, 0, 0, 0.3),
+    0 0 0 3px color-mix(in srgb, var(--yl) 35%, transparent);
+}
+#ph[data-game="drama"] .wstep .wnum {
+  border: 2px solid var(--ol);
+  color: var(--ol);
+  font-weight: 900;
+}
+#ph[data-game="drama"] [data-wstep="1"] .wnum { background: var(--pk); }
+#ph[data-game="drama"] [data-wstep="2"] .wnum { background: var(--og); }
+#ph[data-game="drama"] [data-wstep="3"] .wnum { background: var(--tl); }
+#ph[data-game="drama"] .wstep.done:not(.open) .wnum {
+  background: var(--tl);
+  color: var(--ol);
+}
+/* a chosen control fills with colour and hops */
+#ph[data-game="drama"] button[aria-pressed="true"] {
+  background: var(--yl);
+  color: var(--ol);
+  border-color: var(--ol);
+  box-shadow: 0 4px 0 var(--ol);
+  animation: popin 0.34s cubic-bezier(0.3, 1.8, 0.5, 1);
+}
+#ph[data-game="drama"] button[aria-pressed="true"] :is(span, i, b, small) {
+  color: inherit;
+}
+#ph[data-game="drama"] .dline .who button.cast[aria-pressed="true"] {
+  background: hsl(var(--hue, 330) 90% 68%);
+}
+#ph[data-game="drama"] .dline .who button.narr[aria-pressed="true"] {
+  background: #fff;
+}
+#ph[data-game="drama"] .fxrow button[aria-pressed="true"] {
+  background: var(--pk);
+}
+#ph[data-game="drama"] .dcastpick button[aria-pressed="true"] {
+  background: var(--tl);
+}
+#ph[data-game="drama"] .bgpick button[aria-pressed="true"] {
+  background: var(--yl);
+  box-shadow:
+    0 4px 0 var(--ol),
+    0 0 0 3px var(--pk);
+}
+@keyframes popin {
+  0% { scale: 0.86; }
+  100% { scale: 1; }
+}
+#ph[data-game="drama"] button:active:not(:disabled) {
+  scale: 0.96;
+  transition: scale 0.08s;
+}
+/* the main button: yellow, chunky, and a little eager */
+#ph[data-game="drama"] .big-btn {
+  background: var(--yl);
+  color: var(--ol);
+  border: 3px solid var(--ol);
+  border-radius: 18px;
+  box-shadow: 0 6px 0 var(--ol);
+  animation: cta 2.6s ease-in-out infinite;
+}
+#ph[data-game="drama"] .big-btn:active:not(:disabled) {
+  translate: 0 4px;
+  box-shadow: 0 2px 0 var(--ol);
+  animation: none;
+}
+#ph[data-game="drama"] .big-btn.pending,
+#ph[data-game="drama"] .big-btn:disabled {
+  background: var(--surface);
+  color: var(--muted);
+  border: 3px dashed color-mix(in srgb, var(--fg) 30%, transparent);
+  box-shadow: none;
+  animation: none;
+}
+@keyframes cta {
+  0%, 100% { scale: 1; rotate: 0deg; }
+  50% { scale: 1.03; rotate: -0.6deg; }
+}
+#ph[data-game="drama"] .field input:focus,
+#ph[data-game="drama"] .field textarea:focus,
+#ph[data-game="drama"] .newmood input:focus {
+  border-color: var(--pk);
+  box-shadow: 0 0 0 4px rgba(255, 95, 162, 0.3);
+}
+/* screens bounce in one piece at a time */
 #ph[data-game="drama"] .phmain.enter > * {
-  animation: rise 0.55s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+  animation: bouncein 0.6s cubic-bezier(0.3, 1.4, 0.5, 1) both;
 }
 #ph[data-game="drama"] .phmain.enter > :nth-child(2) { animation-delay: 0.05s; }
 #ph[data-game="drama"] .phmain.enter > :nth-child(3) { animation-delay: 0.1s; }
@@ -4443,19 +4366,22 @@ body:has(.scene[data-game="drama"]) {
 #ph[data-game="drama"] .phmain.enter > :nth-child(5) { animation-delay: 0.2s; }
 #ph[data-game="drama"] .phmain.enter > :nth-child(6) { animation-delay: 0.25s; }
 #ph[data-game="drama"] .phmain.enter > :nth-child(n + 7) { animation-delay: 0.3s; }
-/* a step opens with a little slide */
+@keyframes bouncein {
+  from { opacity: 0; translate: 0 40px; scale: 0.92; }
+  60% { translate: 0 -8px; scale: 1.02; }
+}
 #ph[data-game="drama"] .wstep.open .wbody {
-  animation: wexpand 0.38s cubic-bezier(0.2, 0.9, 0.3, 1);
+  animation: wexpand 0.38s cubic-bezier(0.3, 1.4, 0.5, 1);
 }
 @keyframes wexpand {
   from { opacity: 0; translate: 0 -10px; }
 }
-/* waiting screens breathe, and the dots count */
+/* waiting screens bob, and the dots count */
 #ph[data-game="drama"] .wait .face {
-  animation: breathe-face 3.2s ease-in-out infinite;
+  animation: bob 2.6s ease-in-out infinite;
 }
-@keyframes breathe-face {
-  50% { scale: 1.06; translate: 0 -4px; }
+@keyframes bob {
+  50% { scale: 1.06; translate: 0 -6px; rotate: 2deg; }
 }
 #ph[data-game="drama"] .wait h2.ptitle::after {
   content: "";
@@ -4470,16 +4396,104 @@ body:has(.scene[data-game="drama"]) {
   50% { content: ".."; }
   75% { content: "..."; }
 }
-/* the big screen between shows */
-.scene[data-game="drama"]:not(.vn) .opt {
-  animation: optin 0.7s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+/* a burst of confetti from a button you press */
+.cf {
+  position: fixed;
+  z-index: 60;
+  width: 10px;
+  height: 14px;
+  border-radius: 3px;
+  pointer-events: none;
+  animation: cfpop 0.9s cubic-bezier(0.2, 0.7, 0.4, 1) forwards;
 }
+@keyframes cfpop {
+  to {
+    translate: var(--dx) var(--dy);
+    rotate: var(--rot);
+    opacity: 0;
+  }
+}
+/* ---- the big screen between shows ---- */
+.scene[data-game="drama"]:not(.vn) .tag {
+  align-self: flex-start;
+  padding: 6px 18px;
+  border: 3px solid var(--ol);
+  border-radius: 999px;
+  background: var(--yl);
+  color: var(--ol);
+  font-size: 22px;
+  letter-spacing: 0.03em;
+  text-transform: none;
+  box-shadow: 0 4px 0 var(--ol);
+  rotate: -2deg;
+}
+.scene[data-game="drama"]:not(.vn) .big {
+  text-shadow:
+    4px 4px 0 var(--pk),
+    8px 8px 0 rgba(0, 0, 0, 0.22);
+  animation: wobble 5s ease-in-out infinite;
+}
+@keyframes wobble {
+  0%, 100% { rotate: -0.7deg; }
+  50% { rotate: 0.7deg; }
+}
+.scene[data-game="drama"]:not(.vn) .dtheme {
+  display: inline-block;
+  padding: 6px 20px;
+  border: 3px solid var(--ol);
+  border-radius: 16px;
+  background: var(--yl);
+  color: var(--ol);
+  box-shadow: 0 5px 0 var(--ol);
+  rotate: -1deg;
+}
+/* the pitches: bright cards that pop in with a tilt */
+.scene[data-game="drama"]:not(.vn) .opt {
+  border: 4px solid var(--ol);
+  border-radius: 26px;
+  color: var(--ol);
+  box-shadow: 0 8px 0 var(--ol);
+  animation: popcard 0.7s cubic-bezier(0.3, 1.5, 0.5, 1) both;
+}
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 1) { background: var(--pk); }
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 2) { background: var(--yl); }
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 3) { background: var(--tl); }
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(4n + 4) { background: var(--og); }
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(odd) { --tilt: -1.4deg; }
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(even) { --tilt: 1.2deg; }
 .scene[data-game="drama"]:not(.vn) .opt:nth-child(2) { animation-delay: 0.1s; }
 .scene[data-game="drama"]:not(.vn) .opt:nth-child(3) { animation-delay: 0.2s; }
 .scene[data-game="drama"]:not(.vn) .opt:nth-child(4) { animation-delay: 0.3s; }
 .scene[data-game="drama"]:not(.vn) .opt:nth-child(n + 5) { animation-delay: 0.4s; }
-@keyframes optin {
-  from { opacity: 0; translate: 0 34px; scale: 0.96; }
+@keyframes popcard {
+  from { opacity: 0; translate: 0 50px; scale: 0.8; rotate: 0deg; }
+  to { rotate: var(--tilt, 0deg); }
+}
+.scene[data-game="drama"]:not(.vn) .opt {
+  rotate: var(--tilt, 0deg);
+}
+.scene[data-game="drama"]:not(.vn) .opt small {
+  color: rgba(26, 18, 48, 0.78);
+  font-family: var(--body);
+  font-weight: 800;
+  font-size: 20px;
+}
+.scene[data-game="drama"]:not(.vn) .opt small.dnames {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--ol);
+}
+.scene[data-game="drama"]:not(.vn) .timer .fgc {
+  stroke: var(--yl);
+}
+.scene[data-game="drama"]:not(.vn) .timer.urgent .fgc {
+  stroke: var(--danger);
+}
+.scene[data-game="drama"]:not(.vn) .av {
+  border: 3px solid var(--ol);
 }
 .scene[data-game="drama"]:not(.vn) .av .tick {
   animation: tickpop 0.45s cubic-bezier(0.3, 1.8, 0.5, 1) both;
@@ -4487,35 +4501,23 @@ body:has(.scene[data-game="drama"]) {
 @keyframes tickpop {
   from { scale: 0; }
 }
-.scene[data-game="drama"]:not(.vn) .dtheme {
-  animation: themeglow 3.5s ease-in-out infinite alternate;
-}
-@keyframes themeglow {
-  from { box-shadow: 0 0 0 rgba(246, 184, 93, 0); }
-  to { box-shadow: 0 0 28px rgba(246, 184, 93, 0.28); }
-}
-.scene[data-game="drama"]:not(.vn) .timer .fgc {
-  filter: drop-shadow(0 0 8px rgba(246, 184, 93, 0.65));
-}
-.scene[data-game="drama"]:not(.vn) .timer.urgent .fgc {
-  filter: drop-shadow(0 0 10px rgba(255, 99, 120, 0.8));
-}
-.scene[data-game="drama"]:not(.vn) .tvbar .code b {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  box-shadow: 0 0 22px rgba(246, 184, 93, 0.18);
+.dprog .pips i {
+  height: 12px;
+  border: 2px solid var(--ol);
+  background: rgba(0, 0, 0, 0.14);
 }
 .dprog .pips i.on {
-  box-shadow: 0 0 10px var(--acc, #f6b85d);
+  background: var(--tl);
+}
+.dprog .dp.ready small {
+  color: var(--tl);
 }
 @media (prefers-reduced-motion: reduce) {
   #ph[data-game="drama"]::before,
-  .scene[data-game="drama"]:not(.vn) .aurora,
-  .scene[data-game="drama"]:not(.vn)::after,
+  .scene[data-game="drama"]:not(.vn) .confetti,
   .scene[data-game="drama"]:not(.vn) .big,
   .scene[data-game="drama"]:not(.vn) .opt,
-  .scene[data-game="drama"]:not(.vn) .dtheme,
-  #ph[data-game="drama"] .big-btn::after,
+  #ph[data-game="drama"] .big-btn,
   #ph[data-game="drama"] .phmain.enter > *,
   #ph[data-game="drama"] button[aria-pressed="true"],
   #ph[data-game="drama"] .dsteps span.now,
@@ -4524,4 +4526,58 @@ body:has(.scene[data-game="drama"]) {
   #ph[data-game="drama"] .wstep.open .wbody {
     animation: none;
   }
+}
+
+/* party polish */
+.scene[data-game="drama"]:not(.vn) .big {
+  text-shadow: 4px 4px 0 var(--pk);
+}
+.scene[data-game="drama"]:not(.vn) .dtheme {
+  align-self: flex-start;
+}
+.scene[data-game="drama"]:not(.vn) .confetti {
+  opacity: 0.26;
+}
+#ph[data-game="drama"]::before {
+  opacity: 0.2;
+}
+.scene[data-game="drama"]:not(.vn) .opt small {
+  opacity: 1;
+  color: rgba(26, 18, 48, 0.85);
+}
+#ph[data-game="drama"] .ptitle {
+  text-shadow: 2px 2px 0 rgba(255, 95, 162, 0.85);
+}
+/* votes on the phone: bright cards like the big screen's */
+#ph[data-game="drama"] .choice {
+  border: 3px solid var(--ol);
+  color: var(--ol);
+  box-shadow: 0 6px 0 var(--ol);
+}
+#ph[data-game="drama"] .choice:nth-of-type(4n + 1) { background: var(--pk); }
+#ph[data-game="drama"] .choice:nth-of-type(4n + 2) { background: var(--yl); }
+#ph[data-game="drama"] .choice:nth-of-type(4n + 3) { background: var(--tl); }
+#ph[data-game="drama"] .choice:nth-of-type(4n + 4) { background: var(--og); }
+#ph[data-game="drama"] .choice small {
+  color: rgba(26, 18, 48, 0.82);
+  opacity: 1;
+}
+#ph[data-game="drama"] .choice[aria-pressed="true"] {
+  background: #fff;
+  box-shadow:
+    0 6px 0 var(--ol),
+    0 0 0 4px var(--pk);
+}
+#ph[data-game="drama"] .choice:active {
+  translate: 0 4px;
+  box-shadow: 0 2px 0 var(--ol);
+}
+.dprog .pips i {
+  height: 14px;
+  border-color: color-mix(in srgb, var(--fg) 45%, transparent);
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+}
+.dprog .pips i.on {
+  border-color: var(--ol);
+  background: var(--tl);
 }

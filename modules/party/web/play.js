@@ -1456,9 +1456,25 @@
       e.target.value = '';
     }
   });
+  /** Drama Club: a little burst of confetti from a main button you press. */
+  function burst(el) {
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const r = el.getBoundingClientRect();
+    const colors = ['#ff5fa2', '#ffd23f', '#2fd1b4', '#ff8a3d', '#4d8dff'];
+    for (let i = 0; i < 16; i++) {
+      const c = document.createElement('i');
+      const ang = Math.random() * Math.PI * 2;
+      const d = 60 + Math.random() * 90;
+      c.className = 'cf';
+      c.style.cssText = `left:${r.left + r.width / 2}px;top:${r.top + r.height / 2}px;background:${colors[i % colors.length]};--dx:${Math.cos(ang) * d}px;--dy:${Math.sin(ang) * d - 40}px;--rot:${Math.round(Math.random() * 720 - 360)}deg`;
+      c.addEventListener('animationend', () => c.remove());
+      document.body.append(c);
+    }
+  }
   document.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b || b.disabled || b.closest('.studio')) return;
+    if (b.classList.contains('big-btn') && $('ph').dataset.game === 'drama') burst(b);
     if (b.dataset.act) act(b.dataset.act);
     else if (b.dataset.pickd && sel) {
       sel.drawing = Number(b.dataset.pickd);
