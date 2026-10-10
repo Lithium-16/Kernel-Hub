@@ -305,12 +305,26 @@ class QuipClash(Game):
         n = len(order)
         prompts = deal(self.content.quips, n, self.rng, self.used)
         pairs = [(order[i], order[(i + 1) % n]) for i in range(n)]
+        pairs = [p if self.rng.random() < 0.5 else (p[1], p[0]) for p in pairs]  # who's on the left: random
+        pairs = self._play_order(pairs)
         self.matchups = [Matchup(self.fill(prompts[i], pairs[i]), pairs[i]) for i in range(n)]
         self.current = 0
         self._go("write", now, self.WRITE_S)
 
+    def _play_order(self, pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+        """The matchups in a random order, with nobody in two in a row when that's possible (with
+        3 players every matchup shares someone), so the order gives nothing away."""
+        best = pairs[:]
+        for _ in range(60):
+            self.rng.shuffle(best)
+            if all(not set(a) & set(b) for a, b in zip(best, best[1:])):
+                break
+        return best
+
     def _start_final(self, now: float) -> None:
         self.round = 3
+        self.final_order = self.pids[:]  # the answers are listed in a random order, the same on every screen
+        self.rng.shuffle(self.final_order)
         self.gained = {}
         self.final = Matchup(self.fill(deal(self.content.quips, 1, self.rng, self.used)[0]), ("", ""))
         self._go("final_write", now, self.FINAL_WRITE_S)
@@ -387,7 +401,7 @@ class QuipClash(Game):
         return None
 
     def _final_choices(self, pid: str) -> list[str]:
-        return [p for p in self.pids if p in self.final_answers and p != pid]
+        return [p for p in self.final_order if p in self.final_answers and p != pid]
 
     # -- scoring --------------------------------------------------------------------------
 
@@ -509,7 +523,7 @@ class QuipClash(Game):
         return view
 
     def _final_view(self, reveal: bool) -> dict[str, Any]:
-        order = [p for p in self.pids if p in self.final_answers]
+        order = [p for p in self.final_order if p in self.final_answers]
         view: dict[str, Any] = {
             "prompt": self.final.prompt if self.final else "",
             "answers": [{"id": p, "text": self.final_answers[p]} for p in order],

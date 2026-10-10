@@ -56,6 +56,34 @@ def test_quip_pairs_every_player_twice_with_different_partners():
     assert len({m.prompt for m in g.matchups}) == len(P5)
 
 
+def test_quip_order_and_sides_are_random_and_nobody_plays_twice_in_a_row():
+    lefts, firsts = set(), set()
+    for seed in range(20):
+        g = QuipClash(P5, content(), random.Random(seed), 0.0)
+        ms = g.matchups
+        for a, b in zip(ms, ms[1:]):
+            assert not set(a.authors) & set(b.authors)  # back to back matchups share nobody
+        lefts.add(ms[0].authors[0])
+        firsts.add(frozenset(ms[0].authors))
+    assert len(lefts) > 2 and len(firsts) > 2  # who opens, and on which side, changes from game to game
+
+
+def test_quip_final_answers_are_shuffled_the_same_for_everyone():
+    orders = set()
+    for seed in range(10):
+        g = QuipClash(P5, content(), random.Random(seed), 0.0)
+        g._start_final(1.0)
+        for p in P5:
+            g.handle(p, {"type": "answer", "text": f"answer {p}"}, 1.0)
+        g.tick(1.0)
+        host = [a["id"] for a in g.host_view(1.0)["final"]["answers"]]
+        assert sorted(host) == sorted(P5)
+        for p in P5:  # each phone sees the same order, minus its own answer
+            assert [c["id"] for c in g.player_view(p, 1.0)["choices"]] == [x for x in host if x != p]
+        orders.add(tuple(host))
+    assert len(orders) > 3
+
+
 def test_quip_needs_enough_players():
     with pytest.raises(Invalid, match="3 to 8"):
         quip(["a", "b"])
