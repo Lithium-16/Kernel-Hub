@@ -3797,7 +3797,8 @@ details.dpart[open] > summary {
 }
 
 /* =====================================================================================
-   Drama Club, cinematic: a dark theatre palette with amber light, letterbox and (in the show only) film grain.
+   Drama Club, cinematic: a dark theatre palette with amber light and letterbox. The show itself is clean (no blur,
+   grain or glass); the layout and player interface get the richer effects (see the end).
    Everything here is scoped to Drama Club's screens (data-game="drama"). It always uses the dark
    look, whatever the device prefers: a film doesn't switch to light mode.
    ===================================================================================== */
@@ -3860,33 +3861,26 @@ body.play:has(#ph[data-game="drama"]) {
   color: #ffe9c4;
 }
 .scene[data-game="drama"] .opt {
-  background: #15111f;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.025));
+  border: 1px solid rgba(255, 255, 255, 0.18);
   color: var(--fg);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  backdrop-filter: blur(10px) saturate(1.2);
+  box-shadow:
+    0 18px 50px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 .scene[data-game="drama"] .opt small {
   color: var(--muted);
 }
 
-/* the show: a letterboxed film frame, with a slow film grain */
+/* the show: a letterboxed film frame */
 @keyframes grain {
   0% { translate: 0 0; }
   20% { translate: -3% 2%; }
   40% { translate: 2% -3%; }
   60% { translate: -2% -1%; }
   80% { translate: 3% 3%; }
-}
-.vnstage::before {
-  content: "";
-  position: absolute;
-  inset: -50%;
-  z-index: 4;
-  pointer-events: none;
-  background: var(--grain);
-  opacity: 0.1;
-  mix-blend-mode: overlay;
-  animation: grain 0.8s steps(6) infinite;
 }
 .vnstage::after {
   content: "";
@@ -3941,9 +3935,7 @@ body.play:has(#ph[data-game="drama"]) {
   bottom: 88px;
   padding: 36px 44px 26px;
   border-radius: 20px;
-  background: linear-gradient(180deg, rgba(22, 16, 38, 0.6), rgba(8, 6, 15, 0.84));
-  -webkit-backdrop-filter: blur(16px) saturate(1.3);
-  backdrop-filter: blur(16px) saturate(1.3);
+  background: #0f0b1a;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-left: 4px solid hsl(var(--hue, 262) 80% 65%);
   box-shadow:
@@ -4022,7 +4014,7 @@ body.play:has(#ph[data-game="drama"]) {
 .vncard > :nth-child(3) { animation-delay: 0.28s; }
 .vncard > :nth-child(4) { animation-delay: 0.42s; }
 @keyframes cardrise {
-  from { opacity: 0; translate: 0 26px; filter: blur(8px); }
+  from { opacity: 0; translate: 0 26px; }
 }
 .vncard .big {
   font-size: 92px;
@@ -4032,7 +4024,6 @@ body.play:has(#ph[data-game="drama"]) {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 0 30px rgba(246, 184, 93, 0.28));
 }
 .vncard .dchap {
   letter-spacing: 0.34em;
@@ -4219,7 +4210,6 @@ body.play:has(#ph[data-game="drama"]) {
   50% { scale: 1.1; opacity: 1; rotate: 90deg; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .vnstage::before,
   .vnbg,
   .sprite.in,
   .vnbox::after,
@@ -4275,14 +4265,263 @@ body:has(.scene[data-game="drama"]) {
   height: 70px;
 }
 
-/* Drama Club's phone header is solid, not frosted */
+/* =====================================================================================
+   Drama Club: visual effects for the layout and the player interface (phones, and the big
+   screen between shows). Frosted cards, a slow aurora, film grain, springy controls, a shine on
+   the main buttons, staggered entrances. The show itself stays clean.
+   ===================================================================================== */
+#ph[data-game="drama"] {
+  isolation: isolate;
+  position: relative;
+}
+/* a slow aurora behind everything */
+#ph[data-game="drama"]::before,
+.scene[data-game="drama"]:not(.vn) .aurora {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 30% at 18% 12%, rgba(246, 184, 93, 0.24), transparent 70%),
+    radial-gradient(46% 36% at 86% 88%, rgba(123, 97, 255, 0.28), transparent 70%),
+    radial-gradient(30% 24% at 70% 20%, rgba(255, 105, 150, 0.1), transparent 70%);
+  animation: aurora 22s ease-in-out infinite alternate;
+}
+.scene[data-game="drama"]:not(.vn) {
+  isolation: isolate;
+}
+.scene[data-game="drama"]:not(.vn) .aurora {
+  position: absolute;
+}
+@keyframes aurora {
+  from { transform: translate(-3%, -2%) scale(1); }
+  to { transform: translate(3%, 3%) scale(1.12); }
+}
+/* film grain over the interface */
+#ph[data-game="drama"]::after {
+  content: "";
+  position: fixed;
+  inset: -50%;
+  z-index: 40;
+  pointer-events: none;
+  background: var(--grain);
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+}
+.scene[data-game="drama"]:not(.vn)::after {
+  content: "";
+  position: absolute;
+  inset: -50%;
+  z-index: 50;
+  pointer-events: none;
+  background: var(--grain);
+  opacity: 0.08;
+  mix-blend-mode: overlay;
+  animation: grain 0.8s steps(6) infinite;
+}
+.scene[data-game="drama"]:not(.vn) .big {
+  background: linear-gradient(105deg, #fff 30%, #ffe7b8 44%, #c4b5ff 58%, #fff 72%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 28px rgba(246, 184, 93, 0.25));
+  animation: shine 7s linear infinite;
+}
+@keyframes shine {
+  from { background-position: 100% 0; }
+  to { background-position: -60% 0; }
+}
+/* frosted glass: header, footer, cards */
+#ph[data-game="drama"] .phtop,
+#ph[data-game="drama"] .phfoot {
+  background: rgba(14, 11, 24, 0.72);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  backdrop-filter: blur(14px) saturate(1.3);
+}
 #ph[data-game="drama"] .phtop {
-  background: var(--surface);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
 }
 #ph[data-game="drama"] .phfoot {
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-  background: var(--bg);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+#ph[data-game="drama"] .card,
+#ph[data-game="drama"] .dline,
+#ph[data-game="drama"] .wstep,
+#ph[data-game="drama"] .dcastpick button,
+#ph[data-game="drama"] .choice,
+#ph[data-game="drama"] .dthumb {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.02));
+  border-color: rgba(255, 255, 255, 0.13);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  backdrop-filter: blur(10px) saturate(1.2);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+#ph[data-game="drama"] .wstep.open {
+  border-color: color-mix(in srgb, var(--acc) 70%, transparent);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.38),
+    0 0 26px rgba(246, 184, 93, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+/* controls spring when chosen, and glow */
+#ph[data-game="drama"] button[aria-pressed="true"] {
+  animation: popin 0.32s cubic-bezier(0.3, 1.7, 0.5, 1);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--acc) 35%, transparent);
+}
+#ph[data-game="drama"] .dline .who button.cast[aria-pressed="true"],
+#ph[data-game="drama"] .dline .moods.mood button[aria-pressed="true"] {
+  box-shadow: 0 0 18px hsl(var(--hue, 262) 80% 55% / 0.4);
+}
+@keyframes popin {
+  0% { scale: 0.88; }
+  100% { scale: 1; }
+}
+#ph[data-game="drama"] button:active:not(:disabled) {
+  scale: 0.97;
+  transition: scale 0.08s;
+}
+/* the main buttons shine now and then */
+#ph[data-game="drama"] .big-btn {
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    0 6px 0 color-mix(in srgb, var(--acc) 55%, #000),
+    0 0 30px rgba(246, 184, 93, 0.3);
+}
+#ph[data-game="drama"] .big-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(108deg, transparent 36%, rgba(255, 255, 255, 0.5) 50%, transparent 64%);
+  translate: -130% 0;
+  animation: sheen 4.2s ease-in-out infinite;
+}
+#ph[data-game="drama"] .big-btn.pending::after,
+#ph[data-game="drama"] .big-btn:disabled::after {
+  display: none;
+}
+#ph[data-game="drama"] .big-btn.pending {
+  box-shadow: none;
+}
+@keyframes sheen {
+  0%, 55% { translate: -130% 0; }
+  85%, 100% { translate: 130% 0; }
+}
+/* inputs glow when focused */
+#ph[data-game="drama"] .field input:focus,
+#ph[data-game="drama"] .field textarea:focus,
+#ph[data-game="drama"] .newmood input:focus {
+  border-color: var(--acc);
+  box-shadow:
+    0 0 0 4px rgba(246, 184, 93, 0.22),
+    0 0 26px rgba(246, 184, 93, 0.25);
+}
+/* the step bar: the finished steps glow, the current one pulses */
+#ph[data-game="drama"] .dsteps span.done {
+  background: linear-gradient(90deg, #f6b85d, #ffd89a);
+  box-shadow: 0 0 10px rgba(246, 184, 93, 0.5);
+}
+#ph[data-game="drama"] .dsteps span.now {
+  animation: nowpulse 2.2s ease-in-out infinite;
+}
+@keyframes nowpulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(246, 184, 93, 0.5); }
+  50% { box-shadow: 0 0 0 7px rgba(246, 184, 93, 0); }
+}
+/* screens arrive one piece at a time */
+#ph[data-game="drama"] .phmain.enter > * {
+  animation: rise 0.55s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+#ph[data-game="drama"] .phmain.enter > :nth-child(2) { animation-delay: 0.05s; }
+#ph[data-game="drama"] .phmain.enter > :nth-child(3) { animation-delay: 0.1s; }
+#ph[data-game="drama"] .phmain.enter > :nth-child(4) { animation-delay: 0.15s; }
+#ph[data-game="drama"] .phmain.enter > :nth-child(5) { animation-delay: 0.2s; }
+#ph[data-game="drama"] .phmain.enter > :nth-child(6) { animation-delay: 0.25s; }
+#ph[data-game="drama"] .phmain.enter > :nth-child(n + 7) { animation-delay: 0.3s; }
+/* a step opens with a little slide */
+#ph[data-game="drama"] .wstep.open .wbody {
+  animation: wexpand 0.38s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes wexpand {
+  from { opacity: 0; translate: 0 -10px; }
+}
+/* waiting screens breathe, and the dots count */
+#ph[data-game="drama"] .wait .face {
+  animation: breathe-face 3.2s ease-in-out infinite;
+}
+@keyframes breathe-face {
+  50% { scale: 1.06; translate: 0 -4px; }
+}
+#ph[data-game="drama"] .wait h2.ptitle::after {
+  content: "";
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation: dots 1.6s steps(1) infinite;
+}
+@keyframes dots {
+  0% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "..."; }
+}
+/* the big screen between shows */
+.scene[data-game="drama"]:not(.vn) .opt {
+  animation: optin 0.7s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(2) { animation-delay: 0.1s; }
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(3) { animation-delay: 0.2s; }
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(4) { animation-delay: 0.3s; }
+.scene[data-game="drama"]:not(.vn) .opt:nth-child(n + 5) { animation-delay: 0.4s; }
+@keyframes optin {
+  from { opacity: 0; translate: 0 34px; scale: 0.96; }
+}
+.scene[data-game="drama"]:not(.vn) .av .tick {
+  animation: tickpop 0.45s cubic-bezier(0.3, 1.8, 0.5, 1) both;
+}
+@keyframes tickpop {
+  from { scale: 0; }
+}
+.scene[data-game="drama"]:not(.vn) .dtheme {
+  animation: themeglow 3.5s ease-in-out infinite alternate;
+}
+@keyframes themeglow {
+  from { box-shadow: 0 0 0 rgba(246, 184, 93, 0); }
+  to { box-shadow: 0 0 28px rgba(246, 184, 93, 0.28); }
+}
+.scene[data-game="drama"]:not(.vn) .timer .fgc {
+  filter: drop-shadow(0 0 8px rgba(246, 184, 93, 0.65));
+}
+.scene[data-game="drama"]:not(.vn) .timer.urgent .fgc {
+  filter: drop-shadow(0 0 10px rgba(255, 99, 120, 0.8));
+}
+.scene[data-game="drama"]:not(.vn) .tvbar .code b {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04));
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  box-shadow: 0 0 22px rgba(246, 184, 93, 0.18);
+}
+.dprog .pips i.on {
+  box-shadow: 0 0 10px var(--acc, #f6b85d);
+}
+@media (prefers-reduced-motion: reduce) {
+  #ph[data-game="drama"]::before,
+  .scene[data-game="drama"]:not(.vn) .aurora,
+  .scene[data-game="drama"]:not(.vn)::after,
+  .scene[data-game="drama"]:not(.vn) .big,
+  .scene[data-game="drama"]:not(.vn) .opt,
+  .scene[data-game="drama"]:not(.vn) .dtheme,
+  #ph[data-game="drama"] .big-btn::after,
+  #ph[data-game="drama"] .phmain.enter > *,
+  #ph[data-game="drama"] button[aria-pressed="true"],
+  #ph[data-game="drama"] .dsteps span.now,
+  #ph[data-game="drama"] .wait .face,
+  #ph[data-game="drama"] .wait h2.ptitle::after,
+  #ph[data-game="drama"] .wstep.open .wbody {
+    animation: none;
+  }
 }
