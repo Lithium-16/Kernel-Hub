@@ -32,9 +32,9 @@
     },
     drama: {
       steps: [
-        'Pitch a theme and the problem, and vote. The whole room tells one story about it.',
-        "Invent a character in words. Then draw someone else's character in four moods.",
-        'Take turns writing one-line headlines, in order, to outline the story. Then everyone writes their chapter at once, and the big screen plays it all!',
+        'Pitch a theme, the problem and a name for every character, then vote. The whole room tells one story about it.',
+        "Build a character on the name you're dealt. Then draw someone else's character in four moods, plus any extra moods you like.",
+        'Take turns writing one-line headlines to outline the story. Then everyone writes their chapter at once: pick the cast, a background (or upload your own) and add effects. The big screen plays it all!',
       ],
       score:
         "Votes for best chapter pay its writer. Votes for best drawing pay the artist and the character's inventor.",
