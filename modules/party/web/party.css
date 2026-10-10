@@ -861,6 +861,32 @@ b.bot {
 .slot small b.bot {
   margin: 0 4px 0 0;
 }
+.hostctl .lbl {
+  align-self: center;
+  font-weight: 800;
+  opacity: 0.8;
+}
+.timers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.timers button {
+  flex: 1 1 auto;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 800;
+  font-size: 14px;
+}
+.timers button[aria-pressed="true"] {
+  border-color: var(--acc);
+  background: color-mix(in srgb, var(--acc) 22%, var(--surface));
+}
 .hostctl .msg {
   background: var(--surface);
   padding: 6px 10px;

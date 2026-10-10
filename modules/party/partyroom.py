@@ -78,6 +78,10 @@ class Seat:
         return self.bot or bool(self.sockets)
 
 
+# Timer speeds the host can pick per room: every timed step of every game is multiplied by it.
+TIMERS = {"fast": 0.75, "normal": 1.0, "relaxed": 1.5, "extra": 2.0}
+
+
 class Room:
     """Who's here, what's being played, and what every screen should show. No networking."""
 
@@ -113,6 +117,8 @@ class Room:
         self.game: Game | None = None
         self.state = "lobby"  # lobby, playing or results
         self.choice = "quip"
+        scale = float(self.settings.get("timer_scale", 1.0))  # the owner's default, to the nearest preset
+        self.timer = min(TIMERS, key=lambda k: abs(TIMERS[k] - scale))
         self.results: dict[str, Any] | None = None
         self.intro: dict[str, Any] | None = None  # {"game", "until"}: the how-to-play card before a game
         self.night: dict[str, int] = {}  # points tonight, across games
@@ -269,11 +275,19 @@ class Room:
         if here < cls.min_players:
             raise Invalid(f"{cls.title} needs at least {cls.min_players} players.")
         if self.settings.get("how_to_play", False) and cls.title not in self.night_games:
-            scale = float(self.settings.get("timer_scale", 1.0))
+            scale = TIMERS[self.timer]
             self.intro = {"game": key, "until": self.clock() + self.INTRO_S * max(1.0, scale)}
             self.choice, self.state, self.results = key, "playing", None
             return
         self._begin(key)
+
+    def set_timer(self, key: Any) -> None:
+        """Changes the timer speed. A game already on uses it from its next step."""
+        if key not in TIMERS:
+            raise Invalid("Pick a timer speed.")
+        self.timer = key
+        if self.game is not None:
+            self.game.scale = TIMERS[key]
 
     def _end_intro(self) -> None:
         intro, self.intro = self.intro, None
@@ -290,7 +304,7 @@ class Room:
         if len(pids) < cls.min_players:
             raise Invalid(f"{cls.title} needs at least {cls.min_players} players.")
         names = {p: s.name for p, s in self.seats.items()}
-        scale = float(self.settings.get("timer_scale", 1.0))
+        scale = TIMERS[self.timer]
         used = self.used.setdefault(key, set())
         now = self.clock()
         options: dict[str, Any] = {"used": used}
@@ -441,7 +455,9 @@ class Room:
             self.skip()
         elif kind == "lobby" and is_vip:
             self.to_lobby()
-        elif kind in ("choose", "start", "skip", "lobby"):
+        elif kind == "timer" and is_vip:
+            self.set_timer(msg.get("timer"))
+        elif kind in ("choose", "start", "skip", "lobby", "timer"):
             raise Invalid("Only the VIP can do that.")
         elif self.intro is not None:
             raise Invalid("Hang on: the game starts right after the how-to-play card.")
@@ -468,6 +484,8 @@ class Room:
             self.kick(self.seats[msg["pid"]].name)
         elif kind == "end":
             self.end_game()
+        elif kind == "timer":
+            self.set_timer(msg.get("timer"))
         elif kind == "add_bot":
             self.add_bot()
         elif kind == "remove_bots":
@@ -484,6 +502,7 @@ class Room:
             "code": self.code,
             "state": self.state,
             "choice": self.choice,
+            "timer": self.timer,
             "vip": self.vip,
             "guest": self.guest,
             "intro": {"game": self.intro["game"], "ends_in": max(0.0, round(self.intro["until"] - self.clock(), 1))}

@@ -187,6 +187,11 @@ The games (3 to 8 players; Bluff Buffet works with 2):
   so far; then everyone writes their chapter at once with the whole outline in view. The big screen plays the
   chapters in order. Nobody sees the drawings until the show.
 
+Need more (or less) time? The VIP picks **Timers** on their phone (Fast, Normal, Relaxed or
+Extra time), and the host controls on the big screen have the same choice. It applies to every
+game in that room; changed mid-game, it takes effect from the next step. `timer_scale` sets
+where new rooms start.
+
 To try a game alone, move the mouse on the host screen and press **Add bot** (or ask the
 assistant to add bots). Bots answer, lie, draw and vote by themselves; with three bots the host
 screen's **Start** plays a whole game on its own. They stay out of the hall of fame, and

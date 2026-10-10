@@ -3,6 +3,8 @@
   'use strict';
   const KEY = new URLSearchParams(location.search).get('key') || '';
   const GLYPH = { quip: 'Q', bluff: 'B', shirt: 'T', drama: 'D' };
+  // Timer speeds the host can pick (the server's TIMERS).
+  const TIMERS = { fast: 'Fast', normal: 'Normal', relaxed: 'Relaxed', extra: 'Extra time' };
   const $ = (id) => document.getElementById(id);
   const esc = (s) =>
     String(s ?? '').replace(
@@ -68,7 +70,7 @@
           <h2 class="big" style="font-size:76px">Grab your phone and join!</h2>
           ${link() ? `<div class="url">${esc(shortLink())}</div>` : `<div class="url none">Press Share in Kernel to get a link for your friends.</div>`}
           <div class="tiles">${[...r.code].map((c) => `<span>${esc(c)}</span>`).join('')}</div>
-          ${game ? `<div class="picking"><span class="sub">${vip ? `${esc(vip)} picks` : 'Up next · move the mouse for host controls'}</span><span class="gname" data-game="${esc(game.key)}">${esc(game.title)}</span></div><p class="sub" style="font-size:18px">${game.min}–${game.max} players${esc(need)}</p>` : ''}
+          ${game ? `<div class="picking"><span class="sub">${vip ? `${esc(vip)} picks` : 'Up next · move the mouse for host controls'}</span><span class="gname" data-game="${esc(game.key)}">${esc(game.title)}</span></div><p class="sub" style="font-size:18px">${game.min}–${game.max} players${esc(need)} · timers: ${esc(TIMERS[r.timer] || 'Normal')}</p>` : ''}
         </div>
         <div class="slots">${slots.join('')}</div>
       </div>
@@ -668,6 +670,11 @@
       );
       if (r.state === 'results') rows.push(btn('Back to lobby', { type: 'lobby' }));
     }
+    rows.push(
+      `<span class="lbl">Timers</span>${Object.entries(TIMERS)
+        .map(([k, label]) => btn(label + (r.timer === k ? ' ✓' : ''), { type: 'timer', timer: k }))
+        .join('')}`,
+    );
     if (r.guest) rows.push(btn('Close this room', { type: 'close' }, 'kick'));
     const P = S().prefs || {};
     rows.push(

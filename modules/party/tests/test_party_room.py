@@ -101,6 +101,27 @@ def test_vip_picks_and_starts_and_results_add_up():
     assert snap["online"] == 3 and snap["games_played"] == 1 and snap["room"] == "lobby"
 
 
+def test_the_host_picks_the_timer_speed():
+    r, _ = room(timer_scale=2.0)
+    assert r.room_view()["timer"] == "extra"  # the owner's default, to the nearest preset
+    a, b, c = connect(r, "Ann"), connect(r, "Bo"), connect(r, "Cy")
+    with pytest.raises(Invalid, match="Only the VIP"):
+        r.handle(b.pid, {"type": "timer", "timer": "fast"})
+    with pytest.raises(Invalid, match="timer speed"):
+        r.handle(a.pid, {"type": "timer", "timer": "ludicrous"})
+    r.handle(a.pid, {"type": "timer", "timer": "relaxed"})
+    assert r.room_view()["timer"] == "relaxed"
+    r.handle(a.pid, {"type": "start", "game": "drama"})
+    g = r.game
+    assert g.phase == "pitch" and g.deadline == pytest.approx(r.clock() + g.PITCH_S * 1.5)
+    before = g.deadline
+    r.host_command({"type": "timer", "timer": "fast"})  # mid-game: from the next step on
+    assert g.deadline == before and g.scale == 0.75
+    for s in (a, b, c):
+        r.handle(s.pid, {"type": "theme", "text": f"theme {s.name}"})
+    assert g.phase == "pitch_vote" and g.deadline == pytest.approx(r.clock() + g.PITCH_VOTE_S * 0.75)
+
+
 def test_vip_passes_on_when_they_disconnect():
     r, _ = room()
     a, b = connect(r, "Ann"), connect(r, "Bo")
