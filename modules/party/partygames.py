@@ -1235,109 +1235,98 @@ class ShirtShowdown(Game):
 # -- Drama Club ----------------------------------------------------------------------------
 
 EMOTIONS = ("neutral", "flustered", "sad", "angry")
-# The preset visual-novel backgrounds (web/bg pictures and web/scenes.js drawings); the scene writer picks one.
+# The preset visual-novel backgrounds (web/bg pictures and web/scenes.js drawings); each chapter's writer picks one.
 PHOTO_BACKGROUNDS = ("classroom_day", "school_hallway", "bedroom_day", "livingroom_night", "kitchen_day",
                      "restaurant", "city_afternoon", "spring_street", "train_beach", "onsen")  # web/bg/*.webp
 BACKGROUNDS = PHOTO_BACKGROUNDS + ("classroom", "rooftop", "cafe", "bedroom", "park", "beach", "street", "train",
                                    "festival", "castle", "spaceship", "haunted")
-NARRATOR = 2  # a script line's speaker: 0 and 1 are the scene's two characters
-MAX_LINE, MAX_NAME_C, MAX_BIO, MAX_THEME, MAX_PREMISE = 80, 18, 50, 50, 70
+NARRATOR = 2  # a line's speaker: 0 and 1 are the chapter's characters, 2 the narrator
+MAX_LINE, MAX_NAME_C, MAX_LOOK, MAX_PERSONALITY, MAX_THEME, MAX_PROBLEM, MAX_HEADLINE = 80, 18, 60, 50, 50, 70, 80
 FALLBACK_NAMES = ["Mystery Guest", "The New Kid", "Someone Shady", "A Stranger", "The Understudy",
                   "Background Extra", "Plot Device", "Extra #4"]  # each fits MAX_NAME_C
+LOST_CHAPTER = ["This chapter was lost in a tragic coffee accident.", "Nothing happened. For hours.",
+                "Meanwhile, somewhere else, something very important happened offscreen."]
+LOST_HEADLINE = ["Something happens. Nobody is sure what.", "Everyone has a snack and things calm down.",
+                 "Things get weird."]
+STEPS = {"pitch": 1, "pitch_vote": 1, "create": 2, "draw": 3, "headline": 4, "write": 4, "show": 5, "credits": 5,
+         "vote": 5, "scores": 5, "over": 5}
+STEP_NAMES = ["Pitch", "Create", "Draw", "Write", "Show"]
 
 
 @dataclass
 class Character:
-    by: str
+    creator: str
+    artist: str = ""
     name: str = ""
-    bio: str = ""
+    look: str = ""
+    personality: str = ""
     faces: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def card(self) -> dict[str, Any]:
-        """What other players may see before the show: no art."""
-        return {"name": self.name, "bio": self.bio}
+        """What players may see before the show: the description, never the art."""
+        return {"pid": self.creator, "name": self.name, "look": self.look, "personality": self.personality}
 
     def full(self) -> dict[str, Any]:
-        return self.card() | {"by": self.by, "faces": self.faces}
+        return self.card() | {"artist": self.artist, "faces": self.faces}
 
 
 @dataclass
-class Story:
-    cast: tuple[str, str]  # whose characters (= their artists)
-    script_by: str
-    twist_by: str | None
+class Chapter:
+    writer: str
+    headline: str = ""  # one sentence: what happens in it, written before the chapter itself
     bg: str = ""
-    premise: str = ""
+    cast: list[str] = field(default_factory=list)  # the characters in it (by creator), 1 or 2
     lines: list[dict[str, Any]] = field(default_factory=list)
-    twist: list[dict[str, Any]] = field(default_factory=list)
-
-    def writers(self) -> set[str]:
-        return {self.script_by} | ({self.twist_by} if self.twist_by else set())
 
 
 class DramaClub(Game):
-    """A visual novel made Gartic style. Everyone pitches a theme and the room picks one; everyone
-    draws a character in four moods; then each scene passes along: one player gets two characters
-    they've only read about, picks the background, names the situation and writes the scene;
-    another writes the twist ending. Nobody sees the characters until the big screen plays every scene. Then
-    everyone votes for the best scene and the best character."""
+    """One visual novel, written by the whole room. Everyone pitches a theme and the story's
+    problem, and the room picks one. Everyone invents a character in words, then draws someone
+    else's character in four moods. Everyone writes a one-sentence headline for their chapter,
+    then the chapter itself, all at the same time: each writer sees the headlines just before
+    and after theirs, so the chapters hand off to each other. The big screen plays the chapters
+    in order as one story, and only then does anyone see the drawings. Everyone votes for the
+    best chapter and the best drawing."""
 
     key = "drama"
     title = "Drama Club"
-    PITCH_S, PITCH_VOTE_S, CAST_S, SCRIPT_S, TWIST_S, VOTE_S, SCORES_S = 40, 20, 240, 210, 75, 30, 8
-    MAX_LINES, MAX_TWIST = 8, 3
-    SCENE_PTS = {"script": 550, "twist": 300, "art": 75}  # per scene vote (1000)
-    CHARACTER_PTS, THEME_PTS = 500, 250
+    PITCH_S, PITCH_VOTE_S, CREATE_S, DRAW_S, HEADLINE_S, WRITE_S, VOTE_S, SCORES_S, CREDITS_S = 50, 20, 60, 240, 45, 210, 30, 8, 10
+    MAX_LINES = 6
+    CHAPTER_PTS, ARTIST_PTS, CREATOR_PTS, THEME_PTS = 600, 400, 200, 250
 
-    def __init__(self, pids, content, rng, now, timer_scale=1.0, names=None, rounds: int = 1, used=None):
+    def __init__(self, pids, content, rng, now, timer_scale=1.0, names=None, used=None):
         super().__init__(pids, content, rng, now, timer_scale, names)
-        self.rounds = max(1, min(int(rounds), 2))
-        self.round = 0
         self.order = self.pids[:]
         rng.shuffle(self.order)
-        self.characters: dict[str, Character] = {p: Character(p) for p in self.pids}
+        n = len(self.order)
+        # player i draws the character player i+1 invents: nobody draws their own
+        self.characters: dict[str, Character] = {
+            p: Character(p, artist=self.order[(i - 1) % n]) for i, p in enumerate(self.order)}
+        self.chapters = [Chapter(p) for p in self.order]
         self.used = used if used is not None else set()
-        self._start_round(now)
-
-    # -- rounds -----------------------------------------------------------------------------
-
-    def _start_round(self, now: float) -> None:
-        self.round += 1
         self.themes: dict[str, str] = {}
+        self.problems: dict[str, str] = {}  # each pitch's problem: what the story is about solving
         self.theme_votes: dict[str, str] = {}
         self.theme = ""
         self.theme_by: str | None = None
-        self.stories: list[Story] = []
+        self.problem = ""
         self.showing = 0
-        self.scene_votes: dict[str, int] = {}
-        self.char_votes: dict[str, str] = {}
-        self._twisted: set[str] = set()  # twist writers who are done (a twist can be 1 or 2 lines)
+        self.chapter_votes: dict[str, int] = {}
+        self.drawing_votes: dict[str, str] = {}
         self._go("pitch", now, self.PITCH_S)
 
-    def _deal_stories(self) -> None:
-        """Story s stars the characters of order[s] and order[s+1+k] (k = round - 1, so round 2
-        pairs differently). The writer and the twist writer sit at fixed offsets along the order
-        that aren't the cast's, so in every step each player has exactly one job and never works
-        on their own character. With 3 players there is no twist."""
-        o, n, k = self.order, len(self.order), self.round - 1
-        free = [d for d in range(1, n) if d != 1 + k]
-        script_d = free[0]
-        twist_d = free[1] if len(free) > 1 and self.has_twist() else None
-        self.stories = [
-            Story((o[s], o[(s + 1 + k) % n]), o[(s + script_d) % n],
-                  o[(s + twist_d) % n] if twist_d is not None else None)
-            for s in range(n)
-        ]
+    # -- who does what -------------------------------------------------------------------------
 
-    def has_twist(self) -> bool:
-        return len(self.pids) >= 4
+    def drawing_for(self, pid: str) -> Character:
+        """The character this player draws."""
+        return next(c for c in self.characters.values() if c.artist == pid)
 
-    def job(self, pid: str) -> Story | None:
-        """The story this player works on in the current step."""
-        role = {"script": "script_by", "twist": "twist_by"}.get(self.phase)
-        if role is None:
-            return None
-        return next((st for st in self.stories if getattr(st, role) == pid), None)
+    def chapter_of(self, pid: str) -> int:
+        return next(i for i, ch in enumerate(self.chapters) if ch.writer == pid)
+
+    def part(self, i: int) -> str:
+        """Where a chapter falls: only so the writer knows whether to start, continue or finish."""
+        return "beginning" if i == 0 else "ending" if i == len(self.chapters) - 1 else "middle"
 
     # -- phases ----------------------------------------------------------------------------
 
@@ -1347,14 +1336,17 @@ class DramaClub(Game):
             return {p for p in self.pids if p not in self.themes}
         if ph == "pitch_vote":
             return {p for p in self.pids if p not in self.theme_votes and self._theme_choices(p)}
-        if ph == "cast":
-            return {p for p, c in self.characters.items() if not c.name or set(EMOTIONS) - set(c.faces)}
-        if ph == "script":
-            return {st.script_by for st in self.stories if not st.lines}
-        if ph == "twist":
-            return {st.twist_by for st in self.stories if st.twist_by and not st.twist and st.twist_by not in self._twisted}
+        if ph == "create":
+            return {p for p, c in self.characters.items() if not c.name}
+        if ph == "draw":
+            return {c.artist for c in self.characters.values() if set(EMOTIONS) - set(c.faces)}
+        if ph == "headline":
+            return {ch.writer for ch in self.chapters if not ch.headline}
+        if ph == "write":
+            return {ch.writer for ch in self.chapters if not ch.lines}
         if ph == "vote":
-            return {p for p in self.pids if p not in self.scene_votes or p not in self.char_votes}
+            return {p for p in self.pids if (p not in self.chapter_votes and self._chapter_choices(p))
+                    or (p not in self.drawing_votes and self._drawing_choices(p))}
         return None
 
     def _theme_choices(self, pid: str) -> list[str]:
@@ -1366,46 +1358,44 @@ class DramaClub(Game):
             for p in self.pids:  # a blank pitch gets an idea from the box
                 if p not in self.themes and self.content.drama_themes and self.rng.random() < 0.5:
                     self.themes[p] = self._idea(self.content.drama_themes)
+                    self.problems[p] = self._idea(self.content.drama_premises)[:MAX_PROBLEM]
             if len(self.themes) >= 2:
                 self._go("pitch_vote", now, self.PITCH_VOTE_S)
             else:
                 self._pick_theme()
-                self._after_theme(now)
+                self._go("create", now, self.CREATE_S)
         elif ph == "pitch_vote":
             self._pick_theme()
-            self._after_theme(now)
-        elif ph == "cast":
-            self._fill_cast()
-            self._deal_stories()
-            self._go("script", now, self.SCRIPT_S)
-        elif ph == "script":
-            for st in self.stories:
-                if not st.bg:
-                    st.bg = self.rng.choice(BACKGROUNDS)
-                if not st.premise:
-                    st.premise = self._idea(self.content.drama_premises) or "Two strangers, one awkward afternoon."
-                if not st.lines:
-                    st.lines = [self._bot_script_line(i % 2) for i in range(3)]
-            if self.has_twist():
-                self._go("twist", now, self.TWIST_S)
-            else:
-                self._start_show(now)
-        elif ph == "twist":
-            self._start_show(now)
+            self._go("create", now, self.CREATE_S)
+        elif ph == "create":
+            self._fill_names()
+            self._go("draw", now, self.DRAW_S)
+        elif ph == "draw":
+            self._fill_faces()
+            self._go("headline", now, self.HEADLINE_S)
+        elif ph == "headline":
+            for ch in self.chapters:
+                ch.headline = ch.headline or self.rng.choice(LOST_HEADLINE)
+            self._go("write", now, self.WRITE_S)
+        elif ph == "write":
+            for i, ch in enumerate(self.chapters):
+                if not ch.lines:
+                    self._fill_chapter(ch, i)
+            self.showing = 0
+            self._go("show", now, self._show_s(), scaled=False)
         elif ph == "show":
-            if self.showing + 1 < len(self.stories):
+            if self.showing + 1 < len(self.chapters):
                 self.showing += 1
                 self._go("show", now, self._show_s(), scaled=False)
             else:
-                self._go("vote", now, self.VOTE_S)
+                self._go("credits", now, self.CREDITS_S, scaled=False)
+        elif ph == "credits":
+            self._go("vote", now, self.VOTE_S)
         elif ph == "vote":
             self._score_votes()
             self._go("scores", now, self.SCORES_S, scaled=False)
         elif ph == "scores":
-            if self.round < self.rounds:
-                self._start_round(now)
-            else:
-                self.phase, self.deadline, self.done = "over", None, True
+            self.phase, self.deadline, self.done = "over", None, True
 
     def _idea(self, ideas: list[str]) -> str:
         return self.fill(self.rng.choice(ideas)) if ideas else ""
@@ -1419,31 +1409,35 @@ class DramaClub(Game):
             top = [p for p in self.themes if counts.get(p, 0) == best]
             self.theme_by = self.rng.choice(top)
             self.theme = self.themes[self.theme_by]
+            self.problem = self.problems.get(self.theme_by, "")
             if counts.get(self.theme_by):
                 self._award(self.theme_by, self.THEME_PTS)
         else:
             self.theme = self._idea(self.content.drama_themes) or "A very dramatic afternoon"
             self.theme_by = None
+        self.problem = self.problem or self._idea(self.content.drama_premises)[:MAX_PROBLEM] or "Nobody knows what's going on."
 
-    def _after_theme(self, now: float) -> None:
-        if self.round == 1:
-            self._go("cast", now, self.CAST_S)
-        else:  # round 2 keeps the cast
-            self._deal_stories()
-            self._go("script", now, self.SCRIPT_S)
-
-    def _fill_cast(self) -> None:
+    def _fill_names(self) -> None:
         names = [n for n in FALLBACK_NAMES if n not in {c.name for c in self.characters.values()}]
         for c in self.characters.values():
             if not c.name:
                 c.name = names.pop(0) if names else "Mystery Guest"
+
+    def _fill_faces(self) -> None:
+        for c in self.characters.values():
             base = c.faces.get("neutral") or next(iter(c.faces.values()), None) or doodle(self.rng, sprite=True)
             for e in EMOTIONS:
                 c.faces.setdefault(e, base)
 
+    def _fill_chapter(self, ch: Chapter, i: int) -> None:
+        ch.bg = ch.bg or self.rng.choice(BACKGROUNDS)
+        ch.cast = ch.cast or self.rng.sample(list(self.characters), min(2, len(self.characters)))
+        ch.lines = [{"who": NARRATOR, "emotion": "neutral", "text": self.rng.choice(LOST_CHAPTER)}]
+
     def _show_s(self) -> float:
-        st = self.stories[self.showing]
-        return 4.5 + sum(self.line_s(x["text"]) for x in st.lines + st.twist) + 5
+        ch = self.chapters[self.showing]
+        title = 6.5 if self.showing == 0 else 3.5  # the first chapter opens with the novel's title card
+        return title + 0.7 + sum(self.line_s(x["text"]) for x in ch.lines) + 1.5
 
     @staticmethod
     def line_s(text: str) -> float:
@@ -1451,26 +1445,19 @@ class DramaClub(Game):
         page uses the same formula)."""
         return 1.6 + 0.045 * len(text)
 
-    def _start_show(self, now: float) -> None:
-        self.showing = 0
-        self._go("show", now, self._show_s(), scaled=False)
-
-    def _bot_script_line(self, who: int) -> dict[str, Any]:
-        return {"who": who, "emotion": self.rng.choice(EMOTIONS), "text": self._bot_line()[:MAX_LINE]}
-
     # -- messages ----------------------------------------------------------------------------
 
-    def _lines(self, raw: Any, most: int) -> list[dict[str, Any]]:
+    def _lines(self, raw: Any, speakers: int) -> list[dict[str, Any]]:
         if not isinstance(raw, list) or not raw:
             raise Invalid("Write at least one line.")
-        if len(raw) > most:
-            raise Invalid(f"At most {most} lines.")
+        if len(raw) > self.MAX_LINES:
+            raise Invalid(f"At most {self.MAX_LINES} lines.")
         out = []
         for x in raw:
             if not isinstance(x, dict):
-                raise Invalid("That script didn't come through. Try again.")
+                raise Invalid("That chapter didn't come through. Try again.")
             who, emotion, text = x.get("who"), x.get("emotion"), clean(x.get("text"), MAX_LINE)
-            if who not in (0, 1, NARRATOR) or isinstance(who, bool) or emotion not in EMOTIONS:
+            if isinstance(who, bool) or who not in (*range(speakers), NARRATOR) or emotion not in EMOTIONS:
                 raise Invalid("Pick who says each line and how they feel.")
             if not text:
                 raise Invalid("A line is empty: write something or remove it.")
@@ -1483,170 +1470,169 @@ class DramaClub(Game):
             text = clean(msg.get("text"), MAX_THEME)
             if not text:
                 raise Invalid("Write a theme first.")
-            self.themes.setdefault(pid, text)
+            if pid not in self.themes:
+                self.themes[pid] = text
+                self.problems[pid] = clean(msg.get("problem") or "", MAX_PROBLEM)
         elif ph == "pitch_vote" and kind == "vote":
             if msg.get("choice") not in self._theme_choices(pid):
                 raise Invalid("Vote for someone else's theme.")
             self.theme_votes.setdefault(pid, msg["choice"])
-        elif ph == "cast" and kind == "character":
+        elif ph == "create" and kind == "character":
             c = self.characters[pid]
             name = clean(msg.get("name"), MAX_NAME_C)
             if not name:
                 raise Invalid("Give your character a name.")
-            c.name, c.bio = name, clean(msg.get("bio") or "", MAX_BIO)
-        elif ph == "cast" and kind == "face":
+            if any(o.name.lower() == name.lower() for o in self.characters.values() if o is not c):
+                raise Invalid("Someone already took that name. Pick another.")
+            c.name = name
+            c.look = clean(msg.get("look") or "", MAX_LOOK)
+            c.personality = clean(msg.get("personality") or "", MAX_PERSONALITY)
+        elif ph == "draw" and kind == "face":
             emotion = msg.get("emotion")
             if emotion not in EMOTIONS:
-                raise Invalid("Pick an emotion to draw.")
+                raise Invalid("Pick a mood to draw.")
             try:
-                self.characters[pid].faces[emotion] = check_drawing(msg.get("strokes"), sprite=True)
+                self.drawing_for(pid).faces[emotion] = check_drawing(msg.get("strokes"), sprite=True)
             except BadDrawing as e:
                 raise Invalid(str(e)) from None
-        elif ph == "script" and kind == "script":
-            st = self.job(pid)
-            if st is None:
-                raise Invalid("Not now: look at the big screen.")
-            bg, premise = msg.get("bg"), clean(msg.get("premise") or "", MAX_PREMISE)
+        elif ph == "headline" and kind == "headline":
+            text = clean(msg.get("text"), MAX_HEADLINE)
+            if not text:
+                raise Invalid("Write what happens in your chapter, in one sentence.")
+            self.chapters[self.chapter_of(pid)].headline = text
+        elif ph == "write" and kind == "chapter":
+            ch = self.chapters[self.chapter_of(pid)]
+            bg, cast = msg.get("bg"), msg.get("cast")
             if bg not in BACKGROUNDS:
                 raise Invalid("Pick a background.")
-            if not premise:
-                raise Invalid("Give the scene a title: what's happening, in one line.")
-            lines = self._lines(msg.get("lines"), self.MAX_LINES)
-            st.bg, st.premise, st.lines = bg, premise, lines
-        elif ph == "twist" and kind == "twist":
-            st = self.job(pid)
-            if st is None:
-                raise Invalid("Not now: look at the big screen.")
-            st.twist = self._lines(msg.get("lines"), self.MAX_TWIST)
-            self._twisted.add(pid)
+            if (not isinstance(cast, list) or not 1 <= len(cast) <= 2 or len(set(cast)) != len(cast)
+                    or any(c not in self.characters for c in cast)):
+                raise Invalid("Pick one or two characters for your chapter.")
+            ch.lines = self._lines(msg.get("lines"), len(cast))
+            ch.bg, ch.cast = bg, list(cast)
         elif ph == "vote" and kind == "vote":
-            scene, char = msg.get("scene"), msg.get("character")
-            if scene is not None:
-                if scene not in self._scene_choices(pid):
-                    raise Invalid("Vote for a scene you didn't write.")
-                self.scene_votes[pid] = scene
-            if char is not None:
-                if char not in self._char_choices(pid):
-                    raise Invalid("Vote for someone else's character.")
-                self.char_votes[pid] = char
+            chapter, drawing = msg.get("chapter"), msg.get("drawing")
+            if chapter is not None:
+                if chapter not in self._chapter_choices(pid):
+                    raise Invalid("Vote for a chapter you didn't write.")
+                self.chapter_votes[pid] = chapter
+            if drawing is not None:
+                if drawing not in self._drawing_choices(pid):
+                    raise Invalid("Vote for a drawing you didn't draw or invent.")
+                self.drawing_votes[pid] = drawing
         else:
             raise Invalid("Not now: look at the big screen.")
 
-    def _scene_choices(self, pid: str) -> list[int]:
-        return [i for i, st in enumerate(self.stories) if pid not in st.writers()]
+    def _chapter_choices(self, pid: str) -> list[int]:
+        return [i for i, ch in enumerate(self.chapters) if ch.writer != pid]
 
-    def _char_choices(self, pid: str) -> list[str]:
-        return [p for p in self.pids if p != pid]
+    def _drawing_choices(self, pid: str) -> list[str]:
+        return [p for p, c in self.characters.items() if pid not in (c.creator, c.artist)]
 
     def _score_votes(self) -> None:
         self.gained = {}
-        counts = [0] * len(self.stories)
-        for i in self.scene_votes.values():
+        counts = [0] * len(self.chapters)
+        for i in self.chapter_votes.values():
             counts[i] += 1
-        for st, n in zip(self.stories, counts):
-            if not n:
-                continue
-            twist_to = st.twist_by or st.script_by
-            self._award(st.script_by, self.SCENE_PTS["script"] * n)
-            self._award(twist_to, self.SCENE_PTS["twist"] * n)
-            for a in st.cast:
-                self._award(a, self.SCENE_PTS["art"] * n)
-        chars: dict[str, int] = {}
-        for p in self.char_votes.values():
-            chars[p] = chars.get(p, 0) + 1
-        for p, n in chars.items():
-            self._award(p, self.CHARACTER_PTS * n)
-        self.counts = {"scenes": counts, "characters": chars}
-        voters = len(self.scene_votes)
+        for ch, n in zip(self.chapters, counts):
+            self._award(ch.writer, self.CHAPTER_PTS * n)
+        drawings: dict[str, int] = {}
+        for p in self.drawing_votes.values():
+            drawings[p] = drawings.get(p, 0) + 1
+        for p, n in drawings.items():
+            c = self.characters[p]
+            self._award(c.artist, self.ARTIST_PTS * n)
+            self._award(c.creator, self.CREATOR_PTS * n)
+        self.counts = {"chapters": counts, "drawings": drawings}
+        voters = len(self.chapter_votes)
         if counts and max(counts) > 0:
             best = max(range(len(counts)), key=lambda i: counts[i])
-            st = self.stories[best]
-            if max(counts) >= 2 and st.twist_by and counts.count(max(counts)) == 1:
-                self.feats.append((st.twist_by, "plot_twist"))
-            first = (st.lines + st.twist)[0]["text"] if st.lines else st.premise
-            self.hits.append({"kind": "scene", "prompt": self.theme, "text": st.premise or first,
-                              "pid": st.script_by, "votes": counts[best], "of": voters,
-                              "scene": {"bg": st.bg, "names": [self.characters[a].name for a in st.cast],
-                                        "faces": [self.characters[a].faces.get("neutral", []) for a in st.cast],
+            ch = self.chapters[best]
+            if max(counts) >= 2 and counts.count(max(counts)) == 1:
+                self.feats.append((ch.writer, "plot_twist"))
+            first = next((x["text"] for x in ch.lines if x["who"] != NARRATOR), ch.lines[0]["text"])
+            self.hits.append({"kind": "scene", "prompt": self.theme, "text": first,
+                              "pid": ch.writer, "votes": counts[best], "of": voters,
+                              "scene": {"bg": ch.bg, "names": [self.characters[a].name for a in ch.cast],
+                                        "faces": [self.characters[a].faces.get("neutral", []) for a in ch.cast],
                                         "line": first}})
-        if chars and max(chars.values()) >= 2:
-            top = max(chars, key=lambda p: chars[p])
-            if list(chars.values()).count(chars[top]) == 1:
-                self.feats.append((top, "leading_role"))
+        if drawings and max(drawings.values()) >= 2:
+            top = max(drawings, key=lambda p: drawings[p])
+            if list(drawings.values()).count(drawings[top]) == 1:
+                self.feats.append((self.characters[top].artist, "leading_role"))
         ranked = sorted(range(len(counts)), key=lambda i: -counts[i])
         if len(ranked) >= 2 and counts[ranked[0]] > counts[ranked[1]]:
-            w, lo = self.stories[ranked[0]].script_by, self.stories[ranked[1]].script_by
-            if w != lo:
-                self.duels.append((w, lo, "drama"))
+            self.duels.append((self.chapters[ranked[0]].writer, self.chapters[ranked[1]].writer, "drama"))
 
     # -- bots --------------------------------------------------------------------------------
 
     def bot_move(self, pid: str) -> dict[str, Any] | None:
         ph = self.phase
         if ph == "pitch":
-            return {"type": "theme", "text": self._idea(self.content.drama_themes) or self._bot_line()}
+            return {"type": "theme", "text": self._idea(self.content.drama_themes) or self._bot_line(),
+                    "problem": self._idea(self.content.drama_premises)[:MAX_PROBLEM]}
         if ph == "pitch_vote" and (ch := self._theme_choices(pid)):
             return {"type": "vote", "choice": self.rng.choice(ch)}
-        if ph == "cast":
-            c = self.characters[pid]
-            if not c.name:
-                names = [n for n in FALLBACK_NAMES if n not in {x.name for x in self.characters.values()}]
-                return {"type": "character", "name": self.rng.choice(names or FALLBACK_NAMES), "bio": self._bot_line()[:MAX_BIO]}
-            missing = [e for e in EMOTIONS if e not in c.faces]
+        if ph == "create" and not self.characters[pid].name:
+            names = [n for n in FALLBACK_NAMES if n not in {x.name for x in self.characters.values()}]
+            return {"type": "character", "name": self.rng.choice(names or ["Extra " + pid[-2:]]),
+                    "look": self._bot_line()[:MAX_LOOK], "personality": self._bot_line()[:MAX_PERSONALITY]}
+        if ph == "draw":
+            missing = [e for e in EMOTIONS if e not in self.drawing_for(pid).faces]
             if missing:
                 return {"type": "face", "emotion": missing[0], "strokes": doodle(self.rng, sprite=True)}
             return None
-        if ph == "script" and (st := self.job(pid)) and not st.lines:
-            return {"type": "script", "bg": self.rng.choice(BACKGROUNDS),
-                    "premise": (self._idea(self.content.drama_premises) or self._bot_line())[:MAX_PREMISE],
-                    "lines": [self._bot_script_line(i % 2) for i in range(self.rng.randint(3, 6))]}
-        if ph == "twist" and (st := self.job(pid)) and not st.twist:
-            return {"type": "twist", "lines": [self._bot_script_line(NARRATOR if self.rng.random() < 0.3 else 0)]}
+        if ph == "headline" and not self.chapters[self.chapter_of(pid)].headline:
+            return {"type": "headline", "text": self._bot_line()[:MAX_HEADLINE]}
+        if ph == "write" and not self.chapters[self.chapter_of(pid)].lines:
+            cast = self.rng.sample(list(self.characters), min(2, len(self.characters)))
+            lines = [{"who": NARRATOR, "emotion": "neutral",
+                      "text": (self._idea(self.content.drama_premises) or self._bot_line())[:MAX_LINE]}]
+            lines += [{"who": i % len(cast), "emotion": self.rng.choice(EMOTIONS), "text": self._bot_line()[:MAX_LINE]}
+                      for i in range(self.rng.randint(2, 4))]
+            return {"type": "chapter", "bg": self.rng.choice(BACKGROUNDS), "cast": cast, "lines": lines}
         if ph == "vote":
             out: dict[str, Any] = {"type": "vote"}
-            if pid not in self.scene_votes and (sc := self._scene_choices(pid)):
-                out["scene"] = self.rng.choice(sc)
-            if pid not in self.char_votes and (cc := self._char_choices(pid)):
-                out["character"] = self.rng.choice(cc)
+            if pid not in self.chapter_votes and (cc := self._chapter_choices(pid)):
+                out["chapter"] = self.rng.choice(cc)
+            if pid not in self.drawing_votes and (dc := self._drawing_choices(pid)):
+                out["drawing"] = self.rng.choice(dc)
             return out if len(out) > 1 else None
         return None
 
     # -- views -------------------------------------------------------------------------------
 
-    def _story_cards(self, st: Story) -> dict[str, Any]:
-        """A story as the next writer sees it: names and bios, never the drawings."""
-        return {"cast": [self.characters[a].card() for a in st.cast], "bg": st.bg, "premise": st.premise,
-                "theme": self.theme}
-
-    def _story_full(self, i: int) -> dict[str, Any]:
-        st = self.stories[i]
-        return {"index": i, "cast": [self.characters[a].full() for a in st.cast], "bg": st.bg,
-                "premise": st.premise, "lines": st.lines, "twist": st.twist,
-                "credits": {"cast": list(st.cast), "script": st.script_by, "twist": st.twist_by}}
+    def _chapter_full(self, i: int) -> dict[str, Any]:
+        ch = self.chapters[i]
+        return {"index": i, "of": len(self.chapters), "part": self.part(i), "bg": ch.bg, "headline": ch.headline,
+                "cast": [self.characters[a].full() for a in ch.cast], "lines": ch.lines, "writer": ch.writer}
 
     def _common(self, now: float) -> dict[str, Any]:
-        return self.base_view(now) | {"round": self.round, "rounds": self.rounds, "theme": self.theme,
-                                      "emotions": list(EMOTIONS), "has_twist": self.has_twist()}
+        step = STEPS.get(self.phase, 1)
+        return self.base_view(now) | {"theme": self.theme, "problem": self.problem, "emotions": list(EMOTIONS),
+                                      "step": step, "steps": STEP_NAMES}
 
     def host_view(self, now: float) -> dict[str, Any]:
         v = self._common(now)
         ph = self.phase
-        if ph in ("pitch", "pitch_vote", "cast", "script", "twist", "vote"):
+        if ph in ("pitch", "pitch_vote", "create", "draw", "headline", "write", "vote"):
             v["waiting"] = sorted(self.waiting_on() or set())
         if ph == "pitch_vote":
-            v["themes"] = [{"pid": p, "text": t} for p, t in self.themes.items()]
-        if ph == "show":
-            v["story"] = self._story_full(self.showing)
-            v["of"] = len(self.stories)
+            v["themes"] = [{"pid": p, "text": t, "problem": self.problems.get(p, "")} for p, t in self.themes.items()]
+        elif ph in ("headline", "write"):
+            v["cast"] = [c.card() for c in self.characters.values()]  # names only: still no art
+        elif ph == "show":
+            v["chapter"] = self._chapter_full(self.showing)
+        elif ph == "credits":
+            v["credits"] = {"characters": [{"name": c.name, "creator": c.creator, "artist": c.artist,
+                                            "face": c.faces.get("neutral", [])} for c in self.characters.values()],
+                            "writers": [ch.writer for ch in self.chapters]}
         elif ph == "vote":
-            v["count"] = len(self.stories)
-            v["gallery"] = [{"pid": p, "name": c.name, "face": c.faces.get("flustered", [])}
+            v["gallery"] = [{"pid": p, "name": c.name, "artist": c.artist, "face": c.faces.get("flustered", [])}
                             for p, c in self.characters.items()]
         elif ph in ("scores", "over"):
             v["standings"] = self.standings()
             v["results"] = getattr(self, "counts", None)
-            v["stories"] = [{"premise": st.premise, "bg": st.bg} for st in self.stories]
-            v["characters"] = {p: c.full() for p, c in self.characters.items()}
         return v
 
     def player_view(self, pid: str, now: float) -> dict[str, Any]:
@@ -1654,36 +1640,44 @@ class DramaClub(Game):
         ph = self.phase
         if ph == "pitch":
             v["mine"] = self.themes.get(pid)
-            v["idea"] = self.content.drama_themes[(self.pids.index(pid) * 7 + self.round) % len(self.content.drama_themes)] if self.content.drama_themes else ""
+            ideas = self.content.drama_themes
+            v["idea"] = ideas[(self.pids.index(pid) * 7) % len(ideas)] if ideas else ""
         elif ph == "pitch_vote":
-            v["themes"] = [{"pid": p, "text": self.themes[p]} for p in self._theme_choices(pid)]
+            v["themes"] = [{"pid": p, "text": self.themes[p], "problem": self.problems.get(p, "")}
+                           for p in self._theme_choices(pid)]
             v["voted"] = self.theme_votes.get(pid)
-        elif ph == "cast":
-            c = self.characters[pid]
-            v["character"] = {"name": c.name, "bio": c.bio, "faces": c.faces}  # only your own art
-        elif ph in ("script", "twist"):
-            st = self.job(pid)
-            v["job"] = None
-            if st is not None:
-                job = self._story_cards(st)
-                done = bool(st.lines) if ph == "script" else pid in self._twisted
-                job["lines"] = st.lines if ph == "twist" else []
-                job["done"] = done
-                v["job"] = job
+        elif ph == "create":
+            v["character"] = self.characters[pid].card()
+        elif ph == "draw":
+            c = self.drawing_for(pid)
+            v["drawing"] = c.card() | {"faces": c.faces}  # only the art you're making
+        elif ph == "headline":
+            i = self.chapter_of(pid)
+            v["chapter"] = {"number": i + 1, "of": len(self.chapters), "part": self.part(i),
+                            "done": bool(self.chapters[i].headline)}
+            v["cast"] = [c.card() for c in self.characters.values()]
+        elif ph == "write":
+            i = self.chapter_of(pid)
+            chs = self.chapters
+            v["chapter"] = {"number": i + 1, "of": len(chs), "part": self.part(i), "done": bool(chs[i].lines),
+                            "headline": chs[i].headline,
+                            "before": chs[i - 1].headline if i > 0 else None,
+                            "after": chs[i + 1].headline if i + 1 < len(chs) else None}
+            v["cast"] = [c.card() for c in self.characters.values()]
             v["backgrounds"] = list(BACKGROUNDS)
-            v["max_lines"] = self.MAX_TWIST if ph == "twist" else self.MAX_LINES
+            v["max_lines"] = self.MAX_LINES
         elif ph == "show":
-            st = self.stories[self.showing]
-            v["number"], v["of"] = self.showing + 1, len(self.stories)
-            v["premise"] = st.premise
-            v["yours"] = pid in st.writers() or pid in st.cast
+            v["number"], v["of"] = self.showing + 1, len(self.chapters)
+            v["yours"] = self.chapters[self.showing].writer == pid
         elif ph == "vote":
-            v["scenes"] = [{"index": i, "premise": self.stories[i].premise, "bg": self.stories[i].bg,
-                            "cast": [self.characters[a].name for a in self.stories[i].cast]}
-                           for i in self._scene_choices(pid)]
-            v["characters"] = [{"pid": p, "name": self.characters[p].name, "face": self.characters[p].faces.get("flustered", [])}
-                               for p in self._char_choices(pid)]
-            v["voted"] = {"scene": self.scene_votes.get(pid), "character": self.char_votes.get(pid)}
+            v["chapters"] = [{"index": i, "number": i + 1, "bg": self.chapters[i].bg,
+                              "first": self.chapters[i].lines[0]["text"] if self.chapters[i].lines else "",
+                              "cast": [self.characters[a].name for a in self.chapters[i].cast]}
+                             for i in self._chapter_choices(pid)]
+            v["drawings"] = [{"pid": p, "name": self.characters[p].name,
+                              "face": self.characters[p].faces.get("flustered", [])}
+                             for p in self._drawing_choices(pid)]
+            v["voted"] = {"chapter": self.chapter_votes.get(pid), "drawing": self.drawing_votes.get(pid)}
         elif ph in ("scores", "over"):
             v["standings"] = self.standings()
         return v

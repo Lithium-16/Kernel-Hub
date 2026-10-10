@@ -32,12 +32,12 @@
     },
     drama: {
       steps: [
-        'Pitch a theme and vote. Then draw a character in four moods: neutral, flustered, sad, angry.',
-        'Write a scene for two characters you only know by name. Someone else writes the twist.',
-        'Nobody sees the characters until the big screen plays every scene!',
+        'Pitch a theme and the problem, and vote. The whole room tells one story about it.',
+        "Invent a character in words. Then draw someone else's character in four moods.",
+        'Write a one-line headline for your chapter, then the chapter, bridging the headlines next to yours. The big screen plays it all!',
       ],
       score:
-        'Votes for best scene pay its writers and artists. Votes for best character pay the artist.',
+        "Votes for best chapter pay its writer. Votes for best drawing pay the artist and the character's inventor.",
     },
   };
 })();

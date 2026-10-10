@@ -1,101 +1,181 @@
-# Quip Clash prompts, one per line. Lines starting with # are ignored.
+# Quip Clash prompts, one per line. Lines starting with # are ignored. {player} becomes a friend's name.
+# They read like ordinary prompts, but most leave room for a dark answer: that's where the laughs are.
 # Add your own in the module's data folder: content/quips.txt (same format).
-A terrible name for a Wi-Fi network at a haunted house
-The real reason the cat knocked it off the table
-The worst thing to find inside a fortune cookie
-A rejected flavor of energy drink
-What your houseplant would put on its LinkedIn
+
+# everyday life, gone wrong
 The least comforting thing a pilot can say over the intercom
-A new Olympic sport nobody asked for
-The worst possible name for a pet goldfish
-What the Roomba is secretly plotting
-A bad slogan for a dentist
 The worst thing to hear from the next toilet stall
-A rejected name for a superhero
-What aliens would review Earth as, in one sentence
-The first thing you'd do if you woke up as a dog
-A bad thing to write in a birthday card for your boss
-The most useless superpower
-Something you shouldn't microwave, but people do anyway
-The worst theme for a wedding
-What the fridge light does when the door is closed
-A rejected Pokémon type
-The worst possible thing to yell during a magic trick
-An honest name for a gym
-A terrible fortune for a fortune teller to give
-What's actually at the bottom of the ocean
-The worst ice cream topping
-Something you'd never want to hear from your barber
-A bad name for a retirement home
-The real reason dinosaurs went extinct
-A strange thing to bring to a job interview
-The most awkward thing to say on a first date
-What the "S" in "IoT" stands for
-A rejected Monopoly property
-The worst motivational poster
-What your phone's autocorrect thinks you meant to say
-A bad name for a pirate ship
-The last thing you want to see in your rearview mirror
-A terrible idea for a reality TV show
-Something you'd find in a wizard's junk drawer
-The worst thing to say right after "I do"
-A rejected emoji
-What a pigeon is thinking right now
-The worst mascot for a hospital
-A bad name for a hair salon
-Something you should never say to a cop
-The worst flavor of chewing gum
-A surprising thing to find in a library book
-What you'd name a band made of grandmas
-The most disappointing prize at the bottom of a cereal box
-A bad excuse for being late to your own wedding
-The worst job at the North Pole
-A rejected title for a Fast and Furious movie
-The worst thing to hear your surgeon hum
-What ghosts do for fun on weekdays
-A new law that would make the world slightly worse
-The worst text to get from your mom
-Something a squirrel would buy with money
-A terrible name for a mattress store
-The worst thing to accidentally reply-all to
-The most unhelpful thing a GPS could say
-A rejected crayon color
-What the Moon complains about
-The worst sound a car can make
-A strange thing for a dog to bring back
-What's really in the secret sauce
-A bad name for a theme park ride
-The worst thing to be famous for
-A rejected board game
-Something you shouldn't say during a eulogy
-The worst way to start a speech
-What the toaster dreams about
-A bad thing to name your Wi-Fi when your neighbors can see it
-The real reason the chicken crossed the road
-A terrible thing to put on a pizza
-The worst gift for a vampire
-A fun fact that's not fun at all
-What your cat does while you're at work
-A rejected Hogwarts house
+Something you never want to hear your surgeon say
 The worst thing to whisper to a stranger in an elevator
-A terrible tagline for a funeral home
-The least intimidating name for a gang
-Something you'd hear at a cooking class for robots
-The worst possible name for a cruise ship
-What your past self would say if they saw you now
+A bad thing to write in a birthday card for your boss
+The real reason the cat knocked it off the table
+Something you shouldn't microwave, but people do anyway
+The worst thing to find inside a fortune cookie
+The worst theme for a wedding
+The worst mascot for a hospital
+A strange thing to bring to a job interview
+The worst thing to say right after "I do"
+A terrible thing to hear from your dentist after the gas wears off
+What the babysitter will never tell the parents
+The worst thing to find in your grandma's basement
+The real reason the last tenant moved out so fast
+A bad thing to yell during a moment of silence
+The worst possible last words
+What the funeral director whispers when nobody's around
+A bad thing to say at a gender reveal party
+The worst thing to hear over a baby monitor
+Something you'd rather not find in the attic of your new house
+The worst thing to accidentally reply-all to the whole office
+The real reason grandpa doesn't come to Thanksgiving anymore
+What your neighbor is definitely burying in the backyard
+The worst thing to say to a cop who just pulled you over
+A bad time to start laughing uncontrollably
+The worst thing to hear your Uber driver mutter
+Something you don't want to see in the background of your vacation photos
+The worst thing to find written on the bathroom wall at a kids' birthday party
+What the flight attendant actually means by "we're experiencing some turbulence"
+The worst thing to overhear at your own surprise party
+A terrible thing to text your mom by accident
+What you really shouldn't Google at work
+The worst thing to hear from the guy sitting next to you on a 12-hour flight
+The worst thing to find out about your new roommate on day one
+The real reason the ice cream truck plays music
+A bad thing to say while holding a newborn
+The worst thing a GPS could tell you
+Something that should never be said at a hospital nursery
+The worst thing to leave in a rental car
+The real reason the school cancelled the field trip
+What really happened to the class hamster
+
+# job, school and money
+The worst thing to put on your resume under "special skills"
+A bad answer to "where do you see yourself in five years?"
+The real reason you got fired
+A bad name for a retirement home
+The worst motivational poster for an office
+A terrible slogan for a funeral home
+A bad name for a daycare
+The worst thing to bring to show-and-tell
+A bad excuse for missing your own wedding
+The worst job to get on "take your kid to work day"
+The worst possible employee of the month
+A terrible thing to say in a job interview for a babysitter
+The worst summer camp activity
+A terrible name for a life insurance company
+A bad thing to put in the company suggestion box
+The worst thing to say in a eulogy for your boss
+The worst field trip destination
+A bad slogan for a dentist
+A terrible fundraiser for an elementary school
+What the HR department actually does all day
+The worst thing to put in a time capsule
+A rejected lesson from driver's ed
+
+# love, family and friends
+The worst thing to say on a first date
+A red flag you'd spot on a dating profile right away
+The worst way to find out your partner is cheating
+A terrible thing to say during a breakup
+The worst thing to bring home to meet the parents
+A bad thing to name your firstborn
+The real reason your parents had a second kid
+What your parents talk about after you go to bed
+The worst thing to find in your partner's phone
+A terrible pet name for your significant other
+The worst wedding vow
+A bad gift for a one-year anniversary
+The worst thing to say when someone tells you they're pregnant
+A terrible way to propose
+What your family group chat would look like if it were honest
+The worst thing a kid can say to a teacher
+A bad lesson to teach a toddler
+The worst bedtime story
+A terrible thing to put in a child's lunchbox note
+What your dog does when you're at work
+The worst thing to inherit
+The real reason the family doesn't talk about Uncle Gary
+
+# things that shouldn't exist
+A rejected flavor of energy drink
 A rejected Girl Scout cookie
-The worst thing to find in a hotel room
-An inappropriate time to start a slow clap
-A useless app idea
-The most boring conspiracy theory
-What the bread is thinking in the toaster
-A bad name for a sports team from the moon
-Something you'd say to a genie to waste a wish
-The worst subject for a podcast
-A weird thing to collect
+A rejected emoji
+A rejected board game
+A rejected Monopoly property
+A rejected children's book
+A rejected Happy Meal toy
+A rejected flavor of baby food
+A terrible name for a mattress store
+A terrible name for a Wi-Fi network at a haunted house
+The worst possible name for a cruise ship
+A bad name for a hair salon
+The least intimidating name for a gang
+A new Olympic sport nobody asked for
+A rejected name for a superhero
+The most useless superpower
+A rejected Disney princess
+A rejected theme park ride
+A terrible name for a children's TV show
+The worst thing to sell at a bake sale
+A bad flavor for a birthday cake
+A rejected Hallmark card message
+A terrible scented candle
+A bad name for a bakery
+A rejected warning label
+The worst thing to get engraved on a watch
+A terrible sequel to a beloved kids' movie
+A rejected slogan for a gym
+A bad thing to name a boat
+The worst ringtone to have at a funeral
+A rejected tagline for a dating app
+A bad fortune for a fortune teller to give
+A terrible thing to call a retirement party
+A rejected Christmas carol
+
+# the big questions
+What really happens after you die
+What God would say if you met him tomorrow
+The worst thing to be reincarnated as
+What aliens would review Earth as, in one sentence
+The real reason the dinosaurs went extinct
+What's actually at the bottom of the ocean
+The real reason the Titanic sank
+What the Mona Lisa is smiling about
+What's actually in a hot dog
+The worst thing to be famous for
+What the Roomba is secretly plotting
+What the fridge light does when the door is closed
+The first thing you'd do if you woke up as a dog
+What your houseplant would put on its LinkedIn
+The worst thing to be immortal for
+What your browser history says about you
+The real reason we haven't found aliens yet
+What ghosts actually do all day
+The worst way to go viral
+What the Tooth Fairy does with all those teeth
+The real reason Santa only works one night a year
+What the Easter Bunny is running from
+
+# your friends ({player} becomes someone in the room)
 What {player} is secretly really good at
 The real reason {player} was late today
 What {player} would be famous for in 10 years
 {player}'s most likely search history entry
 What {player} would bring to a desert island
 The title of {player}'s autobiography
+What {player} is hiding in their freezer
+The real reason {player} isn't allowed back at Walmart
+What {player} would do with one week left to live
+{player}'s secret talent that should stay secret
+What {player} would be arrested for
+What {player}'s therapist writes in their notes
+What {player} will be remembered for at their funeral
+The worst thing {player} has done for money
+{player}'s villain origin story, in one sentence
+What {player} would name their cult
+What {player} would be the first to do in a zombie apocalypse
+What {player} says to their reflection every morning
+The real reason {player} got kicked out of the group chat
+How {player} would survive a horror movie
+The worst thing {player} could inherit from their parents
+What {player}'s dating profile says in the "about me" section
+{player}'s last words
