@@ -116,24 +116,52 @@ def test_no_peeking_before_the_show():
     assert g.host_view(1.0)["chapter"]["cast"][0]["faces"]
 
 
-def test_headlines_hand_off_between_chapters():
+@pytest.mark.parametrize("n", range(3, 9))
+def test_nobody_writes_the_headline_of_their_own_chapter(n):
+    pids, g = drama(n)
+    heads = [ch.headliner for ch in g.chapters]
+    assert sorted(heads) == sorted(pids)  # one headline each
+    assert all(ch.headliner != ch.writer for ch in g.chapters)
+
+
+def test_the_outline_is_a_relay_in_chapter_order():
     pids, g = drama(4)
     play_to(g, "headline")
-    v = g.player_view("p0", 1.0)
-    assert v["step"] == 4 and v["chapter"]["part"] == g.part(g.chapter_of("p0")) and not v["chapter"]["done"]
+    heads = [ch.headliner for ch in g.chapters]
+    v = g.player_view(heads[0], 1.0)
+    assert v["step"] == 4 and v["chapter"]["turn"] == "now" and v["outline"] == []
+    assert v["for"] == g.chapters[0].writer != heads[0]  # someone else writes the chapter
+    last = g.player_view(heads[3], 1.0)["chapter"]
+    assert last["turn"] == "waiting" and last["turns_left"] == 3
+    with pytest.raises(Invalid, match="Not your turn"):
+        g.handle(heads[1], {"type": "headline", "text": "too soon"}, 1.0)
     with pytest.raises(Invalid, match="one sentence"):
-        g.handle("p0", {"type": "headline", "text": " "}, 1.0)
-    for p in pids:
+        g.handle(heads[0], {"type": "headline", "text": " "}, 1.0)
+    for k, p in enumerate(heads):
+        assert g.phase == "headline" and g.host_view(1.0)["relay"]["writer"] == p
+        seen = g.player_view(p, 1.0)["outline"]
+        assert [x["headline"] for x in seen] == [f"{q} happens" for q in heads[:k]]  # the story so far
         g.handle(p, {"type": "headline", "text": f"{p} happens"}, 1.0)
-    g.tick(1.0)
+        with pytest.raises(Invalid, match="Not your turn"):
+            g.handle(p, {"type": "headline", "text": "again"}, 1.0)
+        g.tick(1.0)  # the writer is done: the next one is up straight away
     assert g.phase == "write"
-    order = [ch.writer for ch in g.chapters]
-    first, mid, last = (g.player_view(order[k], 1.0)["chapter"] for k in (0, 1, 3))
-    assert first["before"] is None and first["after"] == f"{order[1]} happens"
-    assert mid["before"] == f"{order[0]} happens" and mid["headline"] == f"{order[1]} happens"
-    assert last["after"] is None
+    for p in pids:
+        outline = g.player_view(p, 1.0)["chapter"]["outline"]
+        assert [(x["headline"], x["by"]) for x in outline] == [(f"{q} happens", q) for q in heads]
     play_to(g, "show")
-    assert g.host_view(1.0)["chapter"]["headline"] == f"{order[0]} happens"
+    assert g.host_view(1.0)["chapter"]["headline"] == f"{heads[0]} happens"
+
+
+def test_a_relay_turn_times_out_or_skips_someone_who_left():
+    pids, g = drama(4)
+    play_to(g, "headline")
+    heads = [ch.headliner for ch in g.chapters]
+    g.tick(1000.0)  # the first writer ran out of time: a stand-in, then the next writer's turn
+    assert g.phase == "headline" and g.relay == 1 and g.chapters[0].headline
+    g.set_active(set(pids) - {heads[1]})  # the second writer left: skipped at once
+    g.tick(1001.0)
+    assert g.relay == 2 and g.chapters[1].headline
 
 
 def test_writing_a_chapter():
@@ -223,3 +251,13 @@ def test_bots_play_a_whole_game(n):
     assert g.counts and g.hits
     g.skip(1.0)
     assert g.done
+
+
+def test_characters_are_listed_in_their_own_random_order():
+    same_as_seats = 0
+    for seed in range(12):
+        pids, g = drama(5, seed=seed)
+        listed = list(g.characters)
+        assert sorted(listed) == sorted(pids)
+        same_as_seats += listed == g.order or listed == pids
+    assert same_as_seats <= 2  # not the seating order, which would give away who drew whom

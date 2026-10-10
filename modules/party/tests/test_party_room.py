@@ -101,6 +101,27 @@ def test_vip_picks_and_starts_and_results_add_up():
     assert snap["online"] == 3 and snap["games_played"] == 1 and snap["room"] == "lobby"
 
 
+def test_the_host_picks_the_timer_speed():
+    r, _ = room(timer_scale=2.0)
+    assert r.room_view()["timer"] == "extra"  # the owner's default, to the nearest preset
+    a, b, c = connect(r, "Ann"), connect(r, "Bo"), connect(r, "Cy")
+    with pytest.raises(Invalid, match="Only the VIP"):
+        r.handle(b.pid, {"type": "timer", "timer": "fast"})
+    with pytest.raises(Invalid, match="timer speed"):
+        r.handle(a.pid, {"type": "timer", "timer": "ludicrous"})
+    r.handle(a.pid, {"type": "timer", "timer": "relaxed"})
+    assert r.room_view()["timer"] == "relaxed"
+    r.handle(a.pid, {"type": "start", "game": "drama"})
+    g = r.game
+    assert g.phase == "pitch" and g.deadline == pytest.approx(r.clock() + g.PITCH_S * 1.5)
+    before = g.deadline
+    r.host_command({"type": "timer", "timer": "fast"})  # mid-game: from the next step on
+    assert g.deadline == before and g.scale == 0.75
+    for s in (a, b, c):
+        r.handle(s.pid, {"type": "theme", "text": f"theme {s.name}"})
+    assert g.phase == "pitch_vote" and g.deadline == pytest.approx(r.clock() + g.PITCH_VOTE_S * 0.75)
+
+
 def test_vip_passes_on_when_they_disconnect():
     r, _ = room()
     a, b = connect(r, "Ann"), connect(r, "Bo")
@@ -637,3 +658,32 @@ def test_how_to_play_card_before_a_new_game():
         r2.add_bot()
     r2.start("quip")
     assert r2.game is not None
+
+
+def test_players_pick_a_profile_picture():
+    r, _ = room()
+    a = connect(r, "Ann")
+    assert r.room_view()["players"][0]["pfp"] == ""
+    assert ["konata", "Konata"] in r.room_view()["pfps"]
+    r.handle(a.pid, {"type": "pfp", "pfp": "konata"})
+    assert r.room_view()["players"][0]["pfp"] == "konata"
+    with pytest.raises(Invalid, match="one of the pictures"):
+        r.handle(a.pid, {"type": "pfp", "pfp": "../play.js"})
+    r.handle(a.pid, {"type": "pfp", "pfp": ""})  # back to the letter
+    assert r.seats[a.pid].pfp == ""
+
+
+async def test_profile_pictures_are_served_by_name_only():
+    from partyroom import PFPS
+
+    r, _ = room()
+    server, client = await client_for(r)
+    try:
+        for key in PFPS:
+            resp = await client.get(f"/pfp/{key}.webp")
+            assert resp.status == 200 and resp.headers["Content-Type"] == "image/webp"
+            assert (await resp.read())[8:12] == b"WEBP"
+        for bad in ("nope.webp", "konata.png", "konata", "..%2Fplay.js"):
+            assert (await client.get(f"/pfp/{bad}")).status == 404
+    finally:
+        await client.close()

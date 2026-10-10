@@ -72,10 +72,19 @@ class Seat:
     device: str = ""  # the phone's profile token, so it signs in by itself next time
     sockets: set[web.WebSocketResponse] = field(default_factory=set)
     bot: bool = False  # a test player the host added; plays by itself
+    pfp: str = ""  # a profile picture from PFPS, or "" for the letter
 
     @property
     def connected(self) -> bool:
         return self.bot or bool(self.sockets)
+
+
+# Profile pictures players can pick (web/pfp/<key>.webp), in the order the picker shows them.
+PFPS = {"kernel": "Kernel", "user": "User", "sunny": "Sunny", "bocchi": "Bocchi", "ryo": "Ryo", "kita": "Kita",
+        "konata": "Konata", "tsukasa": "Tsukasa", "miyuki": "Miyuki", "haruhi": "Haruhi", "lucoa": "Lucoa"}
+
+# Timer speeds the host can pick per room: every timed step of every game is multiplied by it.
+TIMERS = {"fast": 0.75, "normal": 1.0, "relaxed": 1.5, "extra": 2.0}
 
 
 class Room:
@@ -113,6 +122,8 @@ class Room:
         self.game: Game | None = None
         self.state = "lobby"  # lobby, playing or results
         self.choice = "quip"
+        scale = float(self.settings.get("timer_scale", 1.0))  # the owner's default, to the nearest preset
+        self.timer = min(TIMERS, key=lambda k: abs(TIMERS[k] - scale))
         self.results: dict[str, Any] | None = None
         self.intro: dict[str, Any] | None = None  # {"game", "until"}: the how-to-play card before a game
         self.night: dict[str, int] = {}  # points tonight, across games
@@ -269,11 +280,19 @@ class Room:
         if here < cls.min_players:
             raise Invalid(f"{cls.title} needs at least {cls.min_players} players.")
         if self.settings.get("how_to_play", False) and cls.title not in self.night_games:
-            scale = float(self.settings.get("timer_scale", 1.0))
+            scale = TIMERS[self.timer]
             self.intro = {"game": key, "until": self.clock() + self.INTRO_S * max(1.0, scale)}
             self.choice, self.state, self.results = key, "playing", None
             return
         self._begin(key)
+
+    def set_timer(self, key: Any) -> None:
+        """Changes the timer speed. A game already on uses it from its next step."""
+        if key not in TIMERS:
+            raise Invalid("Pick a timer speed.")
+        self.timer = key
+        if self.game is not None:
+            self.game.scale = TIMERS[key]
 
     def _end_intro(self) -> None:
         intro, self.intro = self.intro, None
@@ -290,7 +309,7 @@ class Room:
         if len(pids) < cls.min_players:
             raise Invalid(f"{cls.title} needs at least {cls.min_players} players.")
         names = {p: s.name for p, s in self.seats.items()}
-        scale = float(self.settings.get("timer_scale", 1.0))
+        scale = TIMERS[self.timer]
         used = self.used.setdefault(key, set())
         now = self.clock()
         options: dict[str, Any] = {"used": used}
@@ -390,6 +409,12 @@ class Room:
             self._cards[seat.profile] = self.store.profile(seat.profile)
         return self._cards[seat.profile]
 
+    def set_pfp(self, pid: str, key: Any) -> None:
+        """A player's profile picture: one of PFPS, or "" for the letter."""
+        if key != "" and key not in PFPS:
+            raise Invalid("Pick one of the pictures.")
+        self.seats[pid].pfp = key
+
     def set_pin(self, pid: str, pin: Any) -> None:
         seat = self.seats.get(pid)
         if self.store is None or seat is None or seat.profile is None:
@@ -431,6 +456,8 @@ class Room:
         is_vip = pid == self.vip
         if kind == "set_pin":
             self.set_pin(pid, msg.get("pin"))
+        elif kind == "pfp":
+            self.set_pfp(pid, msg.get("pfp"))
         elif kind == "choose" and is_vip:
             if msg.get("game") not in GAMES:
                 raise Invalid("Pick a game first.")
@@ -441,7 +468,9 @@ class Room:
             self.skip()
         elif kind == "lobby" and is_vip:
             self.to_lobby()
-        elif kind in ("choose", "start", "skip", "lobby"):
+        elif kind == "timer" and is_vip:
+            self.set_timer(msg.get("timer"))
+        elif kind in ("choose", "start", "skip", "lobby", "timer"):
             raise Invalid("Only the VIP can do that.")
         elif self.intro is not None:
             raise Invalid("Hang on: the game starts right after the how-to-play card.")
@@ -468,6 +497,8 @@ class Room:
             self.kick(self.seats[msg["pid"]].name)
         elif kind == "end":
             self.end_game()
+        elif kind == "timer":
+            self.set_timer(msg.get("timer"))
         elif kind == "add_bot":
             self.add_bot()
         elif kind == "remove_bots":
@@ -484,19 +515,21 @@ class Room:
             "code": self.code,
             "state": self.state,
             "choice": self.choice,
+            "timer": self.timer,
             "vip": self.vip,
             "guest": self.guest,
             "intro": {"game": self.intro["game"], "ends_in": max(0.0, round(self.intro["until"] - self.clock(), 1))}
             if self.intro else None,
             "max_players": self.max_players,
             "players": [
-                {"pid": p, "name": s.name, "color": s.color, "connected": s.connected, "bot": s.bot,
+                {"pid": p, "name": s.name, "color": s.color, "pfp": s.pfp, "connected": s.connected, "bot": s.bot,
                  "score": scores.get(p, 0), "night": self.night.get(p, 0),
                  "playing": self.game is None or p in self.game.pids,
                  "champ": champ is not None and s.profile == champ}
                 for p, s in self.seats.items()
             ],
             "games": [{"key": g.key, "title": g.title, "min": g.min_players, "max": g.max_players} for g in GAMES.values()],
+            "pfps": [[k, label] for k, label in PFPS.items()],
         }
 
     def host_state(self) -> dict[str, Any]:
@@ -587,6 +620,7 @@ class PartyServer:
         app.router.add_get("/health", self._health)
         app.router.add_get("/static/{name}", self._static)
         app.router.add_get("/bg/{name}", self._background)
+        app.router.add_get("/pfp/{name}", self._pfp)
         app.router.add_get("/ws", self._ws)
         app.on_startup.append(self._start_ticker)
         app.on_cleanup.append(self._stop_ticker)
@@ -698,6 +732,14 @@ class PartyServer:
             raise web.HTTPNotFound()
         return web.FileResponse(WEB / "bg" / name, headers={"Content-Type": "image/webp",
                                                              "Cache-Control": "max-age=86400"})
+
+    async def _pfp(self, request: web.Request) -> web.StreamResponse:
+        """The profile pictures, by name only."""
+        name = request.match_info["name"]
+        if name.removesuffix(".webp") not in PFPS or not name.endswith(".webp"):
+            raise web.HTTPNotFound()
+        return web.FileResponse(WEB / "pfp" / name, headers={"Content-Type": "image/webp",
+                                                              "Cache-Control": "max-age=86400"})
 
     # -- sockets --------------------------------------------------------------------------
 

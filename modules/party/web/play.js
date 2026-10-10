@@ -77,7 +77,9 @@
     (st && st.room.players.find((p) => p.pid === id)) || { name: '?', color: 0 };
   const av = (id, size = 'sm') => {
     const p = player(id);
-    return `<span class="av ${size} c${p.color}" aria-hidden="true">${esc((p.name || '?')[0].toUpperCase())}</span>`;
+    return p.pfp
+      ? `<span class="av ${size} c${p.color} pic" aria-hidden="true"><img src="/pfp/${esc(p.pfp)}.webp" alt=""></span>`
+      : `<span class="av ${size} c${p.color}" aria-hidden="true">${esc((p.name || '?')[0].toUpperCase())}</span>`;
   };
   const wait = (title, note) =>
     `<div class="wait"><div class="face" aria-hidden="true"><svg viewBox="0 0 70 40"><ellipse cx="18" cy="20" rx="14" ry="17" fill="var(--bg)"/><ellipse cx="52" cy="20" rx="14" ry="17" fill="var(--bg)"/><circle cx="22" cy="12" r="6" fill="var(--fg)"/><circle cx="56" cy="12" r="6" fill="var(--fg)"/></svg></div><h2 class="ptitle">${title}</h2><p class="pnote">${note}</p></div>`;
@@ -158,6 +160,28 @@
     };
   }
 
+  // Timer speeds the host can pick (the server's TIMERS): every timed step is multiplied.
+  const TIMERS = { fast: 'Fast', normal: 'Normal', relaxed: 'Relaxed', extra: 'Extra time' };
+  const timerRow = () =>
+    `<h3 class="dhead">Timers</h3><div class="timers" role="group" aria-label="Timer speed">${Object.entries(
+      TIMERS,
+    )
+      .map(
+        ([k, label]) =>
+          `<button type="button" aria-pressed="${st.room.timer === k}" data-send='{"type":"timer","timer":"${k}"}'>${label}</button>`,
+      )
+      .join('')}</div>`;
+  /** The profile picture picker: the letter, or one of the bundled pictures. */
+  function pfpRow() {
+    const mine = player(pid).pfp || '';
+    const opt = (key, label, inner) =>
+      `<button type="button" data-pfp="${esc(key)}" aria-pressed="${mine === key}" aria-label="${esc(label)}">${inner}</button>`;
+    return `<h3 class="dhead">Your picture</h3><div class="pfps" role="group" aria-label="Profile picture">${opt('', 'Your letter', `<span class="av c${player(pid).color}">${esc((player(pid).name || '?')[0].toUpperCase())}</span>`)}${(
+      st.room.pfps || []
+    )
+      .map(([k, label]) => opt(k, label, `<img src="/pfp/${esc(k)}.webp" alt="">`))
+      .join('')}</div>`;
+  }
   function lobbyScreen() {
     const r = st.room;
     const chips = r.players
@@ -168,10 +192,10 @@
       .join('');
     if (!isVip()) {
       return {
-        key: 'lobby:' + JSON.stringify([r.players, st.profile]) + r.vip + r.choice,
+        key: 'lobby:' + JSON.stringify([r.players, st.profile]) + r.vip + r.choice + r.timer,
         main:
           wait("You're in!", `${esc(player(r.vip).name)} picks the game. Look at the big screen.`) +
-          `<div class="plist">${chips}</div>${profileCard()}`,
+          `<p class="pnote">Timers: <b>${TIMERS[r.timer] || 'Normal'}</b></p><div class="plist">${chips}</div>${pfpRow()}${profileCard()}`,
         keep: true,
       };
     }
@@ -185,10 +209,11 @@
       drama: 'Invent characters, draw each other, write one story together',
     };
     return {
-      key: 'lobby-vip:' + JSON.stringify([r.players, st.profile]) + r.choice,
+      key: 'lobby-vip:' + JSON.stringify([r.players, st.profile]) + r.choice + r.timer,
       main: `<span class="kicker">You're the VIP</span><h2 class="ptitle">Pick a game, then start when everybody's in.</h2>
         <div class="gpick">${r.games.map((g) => `<button type="button" data-game="${esc(g.key)}" data-choose="${esc(g.key)}" aria-pressed="${g.key === r.choice}"><b>${esc(g.title)}</b><span>${esc(blurb[g.key] || '')} · ${g.min}–${g.max} players</span></button>`).join('')}</div>
-        <p class="pnote">${here} of ${r.max_players} players are in.</p><div class="plist">${chips}</div>${profileCard()}`,
+        ${timerRow()}
+        <p class="pnote">${here} of ${r.max_players} players are in.</p><div class="plist">${chips}</div>${pfpRow()}${profileCard()}`,
       foot: `<button class="big-btn" type="button" data-act="start" ${short ? 'disabled' : ''}>${short ? `Need ${game.min} players` : "Everybody's in"}</button>`,
       game: r.choice,
       keep: true,
@@ -200,13 +225,13 @@
     const myHit = (v.hits || []).find((h) => h.pid === pid);
     const myBadges = (v.badges || []).filter((b) => b.pid === pid);
     return {
-      key: 'results:' + v.title + JSON.stringify(v.standings) + isVip(),
+      key: 'results:' + v.title + JSON.stringify(v.standings) + isVip() + st.room.timer,
       main: `<span class="kicker">${esc(v.title)} · final results</span>
         <h2 class="ptitle">${k === 0 && mine && mine.score > 0 ? (tied.length ? 'You tied for the win!' : 'You won!') : k >= 0 ? `You finished ${ORD[k]}${tied.length ? ' (tied)' : ''}` : 'Game over'}</h2>
         ${mine ? `<div class="card hot"><span class="pnote">Your points</span><span class="gain">${fmt(mine.score)}</span></div>` : ''}
         ${myHit ? `<div class="card"><b>${myHit.kind === 'shirt' ? 'Your shirt won!' : myHit.kind === 'scene' ? 'Your chapter won!' : 'Best of the game'}</b><span class="pnote">“${esc(myHit.text)}”${myHit.kind === 'shirt' ? '' : ` (${myHit.votes} of ${myHit.of})`}</span></div>` : ''}
         ${myBadges.map((b) => `<div class="card hot"><div class="prow2"><span class="badge">★</span><div><b>New badge: ${esc(b.title)}</b><span class="pnote">${esc(b.about)}</span></div></div></div>`).join('')}
-        ${isVip() ? '' : `<p class="pnote">${esc(player(st.room.vip).name)} picks what's next.</p>`}`,
+        ${isVip() ? timerRow() : `<p class="pnote">${esc(player(st.room.vip).name)} picks what's next.</p>`}`,
       foot: isVip()
         ? `<button class="big-btn" type="button" data-act="again">Play ${esc(v.title)} again</button><button class="ghost" type="button" data-send='{"type":"lobby"}'>Back to lobby</button>`
         : '<button class="ghost" type="button" data-act="leave">Leave room</button>',
@@ -404,6 +429,10 @@
       )
       .join('')}</div>`;
   }
+  /** The outline: one headline per chapter, in order; `mine` (a chapter number) is highlighted. */
+  function outlineList(items, mine) {
+    return `<ol class="dheads">${items.map((x) => `<li${x.number === mine ? ' class="me"' : ''}><small>Chapter ${x.number}${x.number === mine ? ' · yours' : ''} · headline by ${esc(player(x.by).name)}</small>${esc(x.headline)}</li>`).join('')}</ol>`;
+  }
   function charCard(c, extra = '') {
     return `<div class="card dchar"><b>${esc(c.name)}</b><span class="pnote">${esc(c.look || 'No description: surprise us!')}</span>${c.personality ? `<span class="pnote"><i>${esc(c.personality)}</i></span>` : ''}${extra}</div>`;
   }
@@ -545,21 +574,30 @@
     }
     if (v.phase === 'headline') {
       const ch = v.chapter;
-      if (ch.done)
+      const sofar = v.outline.length
+        ? `<h3 class="dhead">The story so far</h3>${outlineList(v.outline, 0)}`
+        : '';
+      if (ch.turn !== 'now')
         return {
-          key: base + ':done',
+          key: `${base}:${ch.turn}:${v.outline.length}`,
           main:
             top +
-            wait('Headline in!', 'Next you write the chapter, with the headlines around yours.'),
+            wait(
+              ch.turn === 'done' ? 'Headline in!' : `You're up in ${ch.turns_left}`,
+              `${esc(player(v.writer).name)} is writing chapter ${v.outline.length + 1}'s headline. Watch the story grow!`,
+            ) +
+            sofar,
           foot: skipBtn(),
         };
       const [label, hint] = PART[ch.part];
       return {
-        key: base,
-        main: `${top}<h2 class="ptitle">What happens in chapter ${ch.number} of ${ch.of}?</h2>
+        key: `${base}:now`,
+        main: `${top}<h2 class="ptitle">Your turn: what happens in chapter ${ch.number} of ${ch.of}?</h2>
+          <p class="pnote"><b>${esc(player(v.for).name)}</b> will write this chapter from your headline. You write a different one.</p>
           <div class="card dpart"><span class="kicker">${esc(label)}</span><span>${esc(hint)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b>. The problem: <b>${esc(v.problem)}</b></span></div>
-          <p class="pnote">One sentence. The writers before and after you will see it, so the story connects. Starring ${v.cast.map((c) => `<b>${esc(c.name)}</b>`).join(', ')}.</p>
-          <div class="field"><label for="f-headline">Your chapter's headline</label><input id="f-headline" maxlength="80" enterkeyhint="send" autocomplete="off" placeholder="Vlad gets blamed for the missing croissants"></div>`,
+          ${sofar || '<p class="pnote"><b>You start the story!</b></p>'}
+          <p class="pnote">One sentence that carries on from the story so far. Starring ${v.cast.map((c) => `<b>${esc(c.name)}</b>`).join(', ')}.</p>
+          <div class="field"><label for="f-headline">Chapter ${ch.number}'s headline</label><input id="f-headline" maxlength="80" enterkeyhint="send" autocomplete="off" placeholder="Vlad gets blamed for the missing croissants"></div>`,
         foot: '<button class="big-btn" type="button" data-act="headline">Send headline</button>',
         input: true,
       };
@@ -582,7 +620,7 @@
         key: base,
         main: `${top}<h2 class="ptitle">Write chapter ${ch.number} of ${ch.of}</h2>
           <div class="card dpart"><span class="kicker">${esc(label)}</span><span class="pnote">The story: <b>${esc(v.theme)}</b>. The problem: <b>${esc(v.problem)}</b></span>
-            <ol class="dheads">${ch.before ? `<li><small>Before you</small>${esc(ch.before)}</li>` : '<li><small>Before you</small>The story starts with you!</li>'}<li class="me"><small>Your chapter</small>${esc(ch.headline)}</li>${ch.after ? `<li><small>After you</small>${esc(ch.after)}</li>` : '<li><small>After you</small>The end. Wrap it all up!</li>'}</ol>
+            ${outlineList(ch.outline, ch.number)}
             <span class="pnote">${esc(hint)} Get the story from the chapter before into the one after.</span></div>
           <h3 class="dhead">Who's in it? <small>(up to 2)</small></h3>
           <div class="dcastpick">${v.cast.map((c) => `<button type="button" data-dcast="${esc(c.pid)}" aria-pressed="${dCast.includes(c.pid)}"><b>${esc(c.name)}</b><span>${esc(c.look || '')}</span>${c.personality ? `<i>${esc(c.personality)}</i>` : ''}</button>`).join('')}</div>
@@ -1122,7 +1160,12 @@
       sel.color = Number(b.dataset.color);
       preview();
     } else if (b.dataset.choose) send({ type: 'choose', game: b.dataset.choose });
-    else if (b.dataset.dtab) {
+    else if (b.dataset.pfp !== undefined) {
+      buzz();
+      me = { ...me, pfp: b.dataset.pfp };
+      store.set(me);
+      send({ type: 'pfp', pfp: b.dataset.pfp });
+    } else if (b.dataset.dtab) {
       dEmo = b.dataset.dtab;
       lastKey = '';
       render();
@@ -1286,6 +1329,8 @@
             device: msg.device || me.device,
           };
           store.set(me);
+          // the picture this phone picked last time comes along to the new room
+          if (me.pfp && !player(pid).pfp) send({ type: 'pfp', pfp: me.pfp });
           joinErr = '';
           pinFor = null;
           pinDigits = '';

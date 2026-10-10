@@ -3,6 +3,8 @@
   'use strict';
   const KEY = new URLSearchParams(location.search).get('key') || '';
   const GLYPH = { quip: 'Q', bluff: 'B', shirt: 'T', drama: 'D' };
+  // Timer speeds the host can pick (the server's TIMERS).
+  const TIMERS = { fast: 'Fast', normal: 'Normal', relaxed: 'Relaxed', extra: 'Extra time' };
   const $ = (id) => document.getElementById(id);
   const esc = (s) =>
     String(s ?? '').replace(
@@ -32,7 +34,10 @@
   const nameOf = (pid) => player(pid).name;
   const av = (pid, size = '', extra = '', off = false) => {
     const p = player(pid);
-    return `<span class="av ${size} c${p.color}${off ? ' off' : ''}" aria-hidden="true">${esc((p.name || '?')[0].toUpperCase())}${extra}</span>`;
+    const face = p.pfp
+      ? `<img src="/pfp/${esc(p.pfp)}.webp" alt="">`
+      : esc((p.name || '?')[0].toUpperCase());
+    return `<span class="av ${size} c${p.color}${p.pfp ? ' pic' : ''}${off ? ' off' : ''}" aria-hidden="true">${face}${extra}</span>`;
   };
   const bar = (title, glyph) =>
     `<div class="tvbar"><div class="logo"><i>${glyph}</i>${esc(title)}</div><div class="code">Room <b>${esc(st.room.code)}</b></div></div>`;
@@ -68,7 +73,7 @@
           <h2 class="big" style="font-size:76px">Grab your phone and join!</h2>
           ${link() ? `<div class="url">${esc(shortLink())}</div>` : `<div class="url none">Press Share in Kernel to get a link for your friends.</div>`}
           <div class="tiles">${[...r.code].map((c) => `<span>${esc(c)}</span>`).join('')}</div>
-          ${game ? `<div class="picking"><span class="sub">${vip ? `${esc(vip)} picks` : 'Up next · move the mouse for host controls'}</span><span class="gname" data-game="${esc(game.key)}">${esc(game.title)}</span></div><p class="sub" style="font-size:18px">${game.min}–${game.max} players${esc(need)}</p>` : ''}
+          ${game ? `<div class="picking"><span class="sub">${vip ? `${esc(vip)} picks` : 'Up next · move the mouse for host controls'}</span><span class="gname" data-game="${esc(game.key)}">${esc(game.title)}</span></div><p class="sub" style="font-size:18px">${game.min}–${game.max} players${esc(need)} · timers: ${esc(TIMERS[r.timer] || 'Normal')}</p>` : ''}
         </div>
         <div class="slots">${slots.join('')}</div>
       </div>
@@ -233,15 +238,21 @@
         "Draw someone else's character",
         'Neutral, flustered, sad and angry. Nobody sees the drawings until the show!',
       );
-    if (v.phase === 'headline')
-      return work(
-        'One sentence per chapter',
-        "Everyone writes what happens in their chapter. Next, you'll see the headlines before and after yours.",
-      );
+    if (v.phase === 'headline') {
+      const r = v.relay;
+      const lines = v.outline
+        .map(
+          (x, i) =>
+            `<li class="${i === v.outline.length - 1 ? 'new' : ''}">${av(x.by, 'sm')}<span><small>Chapter ${x.number}</small>${esc(x.headline)}</span></li>`,
+        )
+        .join('');
+      return `${head(step)}<h2 class="big" style="font-size:52px">The story so far</h2>${theme}
+        <ol class="doutline">${lines}<li class="next">${av(r.writer, 'sm')}<span><small>Chapter ${r.number} of ${r.of}</small><b>${esc(nameOf(r.writer))}</b> is writing what happens next…</span></li></ol>${ring()}</div>`;
+    }
     if (v.phase === 'write')
       return work(
         'One story, one chapter each',
-        'Everyone writes their chapter at the same time, bridging the headlines before and after theirs.',
+        'Everyone writes their chapter at the same time, following the outline from start to end.',
         `<div class="dstarring">Starring ${(v.cast || []).map((c) => `<b>${esc(c.name)}</b>`).join(' · ')}</div>`,
       );
     if (v.phase === 'show') {
@@ -662,6 +673,11 @@
       );
       if (r.state === 'results') rows.push(btn('Back to lobby', { type: 'lobby' }));
     }
+    rows.push(
+      `<span class="lbl">Timers</span>${Object.entries(TIMERS)
+        .map(([k, label]) => btn(label + (r.timer === k ? ' ✓' : ''), { type: 'timer', timer: k }))
+        .join('')}`,
+    );
     if (r.guest) rows.push(btn('Close this room', { type: 'close' }, 'kick'));
     const P = S().prefs || {};
     rows.push(
