@@ -1386,9 +1386,9 @@ class DramaClub(Game):
         if ph == "pitch":
             for p in self.pids:  # an unsent pitch counts as sent
                 d = self._draft(p)
-                if p not in self.themes and (text := clean(d.get("text") or "", MAX_THEME)):
+                if p not in self.themes and (text := self._text(d, "text", MAX_THEME)):
                     self.themes[p] = text
-                    self.problems[p] = clean(d.get("problem") or "", MAX_PROBLEM)
+                    self.problems[p] = self._text(d, "problem", MAX_PROBLEM)
             for p in self.pids:  # a blank pitch gets an idea from the box
                 if p not in self.themes and self.content.drama_themes and self.rng.random() < 0.5:
                     self.themes[p] = self._idea(self.content.drama_themes)
@@ -1404,11 +1404,11 @@ class DramaClub(Game):
         elif ph == "create":
             for p, c in self.characters.items():  # a half-made character joins as it is
                 d = self._draft(p)
-                name = clean(d.get("name") or "", MAX_NAME_C)
+                name = self._text(d, "name", MAX_NAME_C)
                 if not c.name and name and all(o.name.lower() != name.lower() for o in self.characters.values()):
                     c.name = name
-                    c.look = clean(d.get("look") or "", MAX_LOOK)
-                    c.personality = clean(d.get("personality") or "", MAX_PERSONALITY)
+                    c.look = self._text(d, "look", MAX_LOOK)
+                    c.personality = self._text(d, "personality", MAX_PERSONALITY)
             self._fill_names()
             self._go("draw", now, self.DRAW_S)
         elif ph == "draw":
@@ -1424,7 +1424,7 @@ class DramaClub(Game):
             self._go("headline", now, self.RELAY_S)
         elif ph == "headline":  # the relay: one headline at a time, in chapter order
             ch = self.chapters[self.relay]
-            typed = clean(self._draft(ch.headliner).get("text") or "", MAX_HEADLINE)
+            typed = self._text(self._draft(ch.headliner), "text", MAX_HEADLINE)
             ch.headline = ch.headline or typed or self.rng.choice(LOST_HEADLINE)
             if self.relay + 1 < len(self.chapters):
                 self.relay += 1
@@ -1437,6 +1437,7 @@ class DramaClub(Game):
                     self._draft_chapter(ch)
                 if not ch.lines:
                     self._fill_chapter(ch, i)
+                ch.bg = ch.bg or self.rng.choice(BACKGROUNDS)  # lines without a picked background
             self.showing, self.line = 0, -1
             self._go("show", now, None)  # the host clicks through it
         elif ph == "show":
@@ -1477,6 +1478,11 @@ class DramaClub(Game):
         """This player's unsent work in the current step, or {}."""
         return self.drafts.get((self.phase, pid), {})
 
+    @staticmethod
+    def _text(d: dict[str, Any], key: str, limit: int) -> str:
+        """A draft's text field, cleaned; drafts aren't checked when sent, so a non-string counts as empty."""
+        return clean(d[key], limit) if isinstance(d.get(key), str) else ""
+
     def _draft_chapter(self, ch: Chapter) -> None:
         """A chapter whose writer ran out of time: whatever lines they'd written, made valid."""
         d = self._draft(ch.writer)
@@ -1484,7 +1490,7 @@ class DramaClub(Game):
         cast = list(dict.fromkeys(c for c in raw if isinstance(c, str) and c in self.characters))
         lines = []
         for x in d.get("lines") if isinstance(d.get("lines"), list) else []:
-            if not isinstance(x, dict) or not (text := clean(x.get("text") or "", MAX_LINE)):
+            if not isinstance(x, dict) or not (text := self._text(x, "text", MAX_LINE)):
                 continue
             who = x.get("who")
             who = who if isinstance(who, int) and not isinstance(who, bool) and 0 <= who < len(cast) else NARRATOR
@@ -1533,7 +1539,7 @@ class DramaClub(Game):
             if not isinstance(x, dict):
                 raise Invalid("That chapter didn't come through. Try again.")
             who, emotion, text = x.get("who"), x.get("emotion"), clean(x.get("text"), MAX_LINE)
-            if isinstance(who, bool) or who not in (*range(speakers), NARRATOR) or emotion not in EMOTIONS:
+            if type(who) is not int or who not in (*range(speakers), NARRATOR) or emotion not in EMOTIONS:
                 raise Invalid("Pick who says each line and how they feel.")
             if not text:
                 raise Invalid("A line is empty: write something or remove it.")
@@ -1550,7 +1556,7 @@ class DramaClub(Game):
                 self.themes[pid] = text
                 self.problems[pid] = clean(msg.get("problem") or "", MAX_PROBLEM)
         elif ph == "pitch_vote" and kind == "vote":
-            if msg.get("choice") not in self._theme_choices(pid):
+            if not isinstance(msg.get("choice"), str) or msg["choice"] not in self._theme_choices(pid):
                 raise Invalid("Vote for someone else's theme.")
             self.theme_votes.setdefault(pid, msg["choice"])
         elif ph == "create" and kind == "character":
@@ -1584,7 +1590,8 @@ class DramaClub(Game):
             bg, cast = msg.get("bg"), msg.get("cast")
             if bg not in BACKGROUNDS:
                 raise Invalid("Pick a background.")
-            if (not isinstance(cast, list) or not cast or len(set(cast)) != len(cast)
+            if (not isinstance(cast, list) or not cast or not all(isinstance(c, str) for c in cast)
+                    or len(set(cast)) != len(cast)
                     or any(c not in self.characters for c in cast)):
                 raise Invalid("Pick who's in your chapter.")
             ch.lines = self._lines(msg.get("lines"), len(cast))
@@ -1597,11 +1604,11 @@ class DramaClub(Game):
         elif ph == "vote" and kind == "vote":
             chapter, drawing = msg.get("chapter"), msg.get("drawing")
             if chapter is not None:
-                if chapter not in self._chapter_choices(pid):
+                if type(chapter) is not int or chapter not in self._chapter_choices(pid):
                     raise Invalid("Vote for a chapter you didn't write.")
                 self.chapter_votes[pid] = chapter
             if drawing is not None:
-                if drawing not in self._drawing_choices(pid):
+                if not isinstance(drawing, str) or drawing not in self._drawing_choices(pid):
                     raise Invalid("Vote for a drawing you didn't draw or invent.")
                 self.drawing_votes[pid] = drawing
         else:
@@ -1614,7 +1621,6 @@ class DramaClub(Game):
         return [p for p, c in self.characters.items() if pid not in (c.creator, c.artist)]
 
     def _score_votes(self) -> None:
-        self.gained = {}
         counts = [0] * len(self.chapters)
         for i in self.chapter_votes.values():
             counts[i] += 1

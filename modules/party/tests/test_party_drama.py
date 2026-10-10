@@ -334,3 +334,58 @@ def test_the_show_waits_for_the_host_line_by_line():
         assert g.host_view(1.0)["chapter"]["line"] == k
     g.next_line(1.0)  # past the last line: the next chapter, from its title card
     assert g.showing == 1 and g.line == -1
+
+
+def test_odd_drafts_dont_stall_the_game():
+    pids, g = drama(4)
+    g.handle("p0", {"type": "draft", "text": ["a"], "problem": 5}, 1.0)
+    g.handle("p1", {"type": "draft", "text": "ok", "problem": None}, 1.0)
+    g.tick(1e6)
+    assert g.phase != "pitch" and g.themes["p1"] == "ok" and not isinstance(g.themes.get("p0"), list)
+    play_to(g, "create")
+    g.handle("p0", {"type": "draft", "name": 7, "look": ["x"], "personality": {}}, 1.0)
+    g.tick(1e6)
+    assert g.phase == "draw" and all(c.name for c in g.characters.values())
+    play_to(g, "headline")
+    g.handle(g.chapters[0].headliner, {"type": "draft", "text": {"a": 1}}, 1.0)
+    g.tick(1e6)
+    assert g.chapters[0].headline
+    play_to(g, "write")
+    g.handle("p0", {"type": "draft", "cast": [pids[1]], "lines": [{"who": 0, "text": ["x"]},
+                                                                  {"who": 0, "emotion": "sad", "text": "hi"}]}, 1.0)
+    g.tick(1e6)
+    assert g.phase == "show"
+    ch = g.chapters[g.chapter_of("p0")]
+    assert [x["text"] for x in ch.lines] == ["hi"] and ch.bg in BACKGROUNDS  # no background picked: one is chosen
+
+
+def test_votes_must_be_whole_numbers_and_real_ids():
+    pids, g = drama(4)
+    play_to(g, "write")
+    for bad in ([["x"]], [1.5], [True], [None]):
+        with pytest.raises(Invalid):
+            g.handle("p0", chapter(bad), 1.0)
+    with pytest.raises(Invalid):
+        g.handle("p0", chapter([pids[0]], [{"who": 0.0, "emotion": "sad", "text": "hi"}]), 1.0)
+    play_to(g, "vote")
+    i = g._chapter_choices("p0")[0]
+    for bad in (float(i), True, "1", [i]):
+        with pytest.raises(Invalid):
+            g.handle("p0", {"type": "vote", "chapter": bad}, 1.0)
+    with pytest.raises(Invalid):
+        g.handle("p0", {"type": "vote", "drawing": ["p1"]}, 1.0)
+    g.handle("p0", {"type": "vote", "chapter": i}, 1.0)
+
+
+def test_the_themes_bonus_shows_in_the_final_gains():
+    pids, g = drama(4)
+    for p in pids:
+        g.handle(p, {"type": "theme", "text": f"theme {p}"}, 1.0)
+    g.tick(1.0)
+    for p in ("p0", "p2", "p3"):
+        g.handle(p, {"type": "vote", "choice": "p1"}, 1.0)
+    g.handle("p1", {"type": "vote", "choice": "p0"}, 1.0)
+    g.tick(1.0)
+    play_to(g, "scores")
+    assert g.gained["p1"] >= DramaClub.THEME_PTS
+    assert all(g.gained.get(p, 0) == g.scores[p] for p in pids)
