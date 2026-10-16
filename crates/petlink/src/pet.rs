@@ -393,6 +393,14 @@ impl Pet {
     pub fn release(&mut self) {
         self.set(State::Idle);
     }
+    /// Jumps from where she stands onto a floor at `ty`, landing at `land_x` (it may be a
+    /// little sideways).
+    pub fn jump_to(&mut self, ty: f32, land_x: f32) {
+        if self.free_to_chase() {
+            self.start_jump(ty, land_x);
+        }
+    }
+
     /// Walks under a window top and jumps onto it.
     pub fn go_jump(&mut self, ty: f32, land_x: f32) {
         if (land_x - self.x).abs() < 1.0 {

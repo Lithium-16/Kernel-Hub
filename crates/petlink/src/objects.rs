@@ -1,7 +1,7 @@
 //! Things on the desktop that pets can go after: a slice of cake you can drag and throw, and a
 //! room to add more kinds later. Pure logic (the drawing and the mouse live in `app.rs`).
 
-use crate::pet::{HALF_W, JUMP_MAX_UP, JUMP_MIN_UP, Pet, floor_span};
+use crate::pet::{HALF_W, JUMP_MAX_UP, JUMP_MIN_UP, JUMP_REACH_X, Pet, floor_span};
 use crate::world::{Rect, World};
 
 const GRAVITY: f32 = 1400.0;
@@ -151,8 +151,91 @@ pub enum Chase {
     Ate,
 }
 
-/// Sends one pet after one object: along her floor, up onto a window with a jump, down off an
-/// edge, or (when it is out of reach above her) hopping underneath it.
+/// One move over the floors: a jump up (possibly a little sideways) or a walk off an edge.
+#[derive(Clone, Copy, Debug)]
+enum Step {
+    Jump { take_off: f32, land_x: f32, y: f32 },
+    Walk { to_x: f32 },
+}
+
+/// The floor (an index into `world.floors`) standing at (x, y).
+fn floor_at(world: &World, x: f32, y: f32) -> Option<usize> {
+    world
+        .floors
+        .iter()
+        .position(|f| (f.y - y).abs() < 3.0 && x >= f.x0 - 1.0 && x < f.x1 + 1.0)
+}
+
+/// Where she can go from floor `a`: up onto a window she can jump to, or off an edge.
+fn moves(world: &World, a: usize, want_x: f32) -> Vec<(usize, Step)> {
+    let f = &world.floors[a];
+    let margin = HALF_W + 4.0;
+    let mut out = Vec::new();
+    for (b, g) in world.floors.iter().enumerate() {
+        let up = f.y - g.y;
+        if b == a || !(JUMP_MIN_UP..=JUMP_MAX_UP).contains(&up) {
+            continue;
+        }
+        let (a_lo, a_hi) = (f.x0 + HALF_W, f.x1 - HALF_W);
+        let (b_lo, b_hi) = (g.x0 + margin, g.x1 - margin);
+        if a_lo > a_hi || b_lo > b_hi {
+            continue;
+        }
+        let (lo, hi) = (a_lo.max(b_lo), a_hi.min(b_hi));
+        let (take_off, land_x) = if lo <= hi {
+            let x = want_x.clamp(lo, hi);
+            (x, x)
+        } else if b_lo > a_hi {
+            (a_hi, b_lo)
+        } else {
+            (a_lo, b_hi)
+        };
+        if (take_off - land_x).abs() <= JUMP_REACH_X {
+            out.push((
+                b,
+                Step::Jump {
+                    take_off,
+                    land_x,
+                    y: g.y,
+                },
+            ));
+        }
+    }
+    for x in [f.x0 - 24.0, f.x1 + 24.0] {
+        if let Some(y) = world.floor_below(x, f.y + 1.0)
+            && let Some(b) = floor_at(world, x, y)
+            && b != a
+        {
+            out.push((b, Step::Walk { to_x: x }));
+        }
+    }
+    out
+}
+
+/// The first move on the shortest way from floor `from` to floor `to`, if there is one.
+fn route(world: &World, from: usize, to: usize, want_x: f32) -> Option<Step> {
+    let mut first: Vec<Option<Step>> = vec![None; world.floors.len()];
+    let mut seen = vec![false; world.floors.len()];
+    seen[from] = true;
+    let mut queue = std::collections::VecDeque::from([from]);
+    while let Some(a) = queue.pop_front() {
+        for (b, step) in moves(world, a, want_x) {
+            if seen[b] {
+                continue;
+            }
+            seen[b] = true;
+            first[b] = if a == from { Some(step) } else { first[a] };
+            if b == to {
+                return first[b];
+            }
+            queue.push_back(b);
+        }
+    }
+    None
+}
+
+/// Sends one pet after one object: along her floor, then window to window (jumping up, or
+/// walking off edges to come down), and when there is no way she waits underneath, hopping.
 pub fn chase(pet: &mut Pet, o: &Object, world: &World) -> Chase {
     if !pet.free_to_chase() {
         return Chase::Going;
@@ -160,51 +243,49 @@ pub fn chase(pet: &mut Pet, o: &Object, world: &World) -> Chase {
     let span = floor_span(world, pet.x, pet.y);
     let near = |x: f32| x.clamp(span.0 + HALF_W, span.1 - HALF_W);
     let obj_floor = world.floor_below(o.x, o.y).unwrap_or(world.ground());
-    if (obj_floor - pet.y).abs() < 3.0 {
+    let (here, target) = (
+        floor_at(world, pet.x, pet.y),
+        floor_at(world, o.x, obj_floor),
+    );
+    if here.is_some() && here == target {
         // The same floor: run to it, then take it or hop for it.
-        let dx = o.x - pet.x;
-        if dx.abs() > EAT_REACH_X {
+        if (o.x - pet.x).abs() > EAT_REACH_X {
             pet.chase_to(near(o.x));
             return Chase::Going;
         }
-        let up = pet.y - o.y;
-        if o.motion != Motion::Held && up <= EAT_REACH_UP {
+        if o.motion != Motion::Held && pet.y - o.y <= EAT_REACH_UP {
             return Chase::Ate;
         }
         pet.face(o.x);
         pet.hop();
-    } else if obj_floor < pet.y - 3.0 {
-        // On a higher window: jump up if she can, otherwise wait underneath and hop.
-        let up = pet.y - obj_floor;
-        let Some(f) = world
-            .floors
-            .iter()
-            .find(|f| (f.y - obj_floor).abs() < 1.0 && o.x >= f.x0 && o.x < f.x1)
-        else {
-            pet.chase_to(near(o.x));
-            return Chase::Going;
-        };
-        let land_x = o.x.clamp(f.x0 + HALF_W + 4.0, f.x1 - HALF_W - 4.0);
-        let take_off = near(land_x);
-        if (JUMP_MIN_UP..=JUMP_MAX_UP).contains(&up) && (take_off - land_x).abs() < 1.0 {
-            pet.go_jump(obj_floor, land_x);
-        } else if (take_off - pet.x).abs() > EAT_REACH_X {
-            pet.chase_to(take_off);
-        } else {
-            pet.hop();
+        return Chase::Going;
+    }
+    let step = match (here, target) {
+        (Some(h), Some(t)) => route(world, h, t, o.x),
+        _ => None,
+    };
+    match step {
+        Some(Step::Jump {
+            take_off,
+            land_x,
+            y,
+        }) => {
+            if (pet.x - take_off).abs() > 6.0 {
+                pet.chase_to(take_off);
+            } else {
+                pet.jump_to(y, land_x);
+            }
         }
-    } else {
-        // On a lower floor: walk off the nearer edge and drop down to it.
-        let edge = if o.x <= span.0 {
-            span.0 - 24.0
-        } else if o.x >= span.1 {
-            span.1 + 24.0
-        } else if o.x - span.0 < span.1 - o.x {
-            span.0 - 24.0
-        } else {
-            span.1 + 24.0
-        };
-        pet.chase_to(edge);
+        Some(Step::Walk { to_x }) => pet.chase_to(to_x),
+        None => {
+            // No way up from here: wait underneath it and hop.
+            if (near(o.x) - pet.x).abs() > EAT_REACH_X {
+                pet.chase_to(near(o.x));
+            } else {
+                pet.face(o.x);
+                pet.hop();
+            }
+        }
     }
     Chase::Going
 }
@@ -372,6 +453,43 @@ mod tests {
         assert!(
             (pet.y - 800.0).abs() < 1.0,
             "she ate it from y {} ({t} s)",
+            pet.y
+        );
+    }
+
+    #[test]
+    fn she_climbs_from_window_to_window_when_one_jump_is_too_high() {
+        // the ground is 382 px below the upper window: too high for one jump, fine in two
+        let w = world(&[window(600.0, 650.0, 600.0), window(100.0, 900.0, 600.0)]);
+        let mut pet = Pet::new(300.0, 1032.0);
+        let mut cake = Object::new(Kind::Cake, 900.0, 650.0);
+        cake.motion = Motion::Resting;
+        let t = run_chase(&w, &mut pet, cake, 120.0).expect("never climbed up to it");
+        assert!(
+            (pet.y - 650.0).abs() < 1.0,
+            "ate it from y {} ({t} s)",
+            pet.y
+        );
+    }
+
+    #[test]
+    fn a_window_with_no_way_up_gets_a_hopping_pet_underneath() {
+        let w = world(&[window(500.0, 300.0, 600.0)]);
+        let mut pet = Pet::new(300.0, 1032.0);
+        let mut cake = Object::new(Kind::Cake, 800.0, 300.0);
+        cake.motion = Motion::Resting;
+        let mut objects = Objects { items: vec![cake] };
+        let mut rng = StdRng::seed_from_u64(3);
+        let mut hopped = false;
+        for _ in 0..(40.0 * 60.0) as usize {
+            pet.step(1.0 / 60.0, &w, &mut rng);
+            assert!(objects.chase(&mut [&mut pet], &w).is_none());
+            hopped |= pet.is_hopping();
+        }
+        assert!(hopped);
+        assert!(
+            pet.y > 1032.0 - 40.0,
+            "she never left the ground for good: {}",
             pet.y
         );
     }
