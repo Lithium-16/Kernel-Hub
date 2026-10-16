@@ -103,7 +103,11 @@ pub enum Msg {
         denied: bool,
     },
     #[serde(rename = "visit.start")]
-    VisitStart,
+    VisitStart {
+        /// My bow colour, which the relay doesn't know when I've picked one locally.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hue: Option<u16>,
+    },
     #[serde(rename = "visit.end")]
     VisitEnd,
     #[serde(rename = "touch")]

@@ -706,7 +706,11 @@ impl PetApp {
                     });
                 }
             }
-            Msg::VisitStart => {
+            Msg::VisitStart { hue } => {
+                if let Some(h) = hue.filter(|h| *h != self.friend_hue) {
+                    self.friend_hue = h;
+                    self.friend_tex = None;
+                }
                 // A visitor already on the way out doesn't count: a quick re-visit must queue behind it.
                 let has_visit = self
                     .visitor
@@ -993,7 +997,7 @@ impl PetApp {
         match std::mem::replace(&mut self.trip, Trip::None) {
             Trip::Visit => {
                 self.my_pet_away = true;
-                self.send_to_friend(Msg::VisitStart);
+                self.send_to_friend(Msg::VisitStart { hue: Some(self.my_hue) });
                 self.tray.set_visiting(true);
             }
             Trip::Peek => self.on_my_pet_at_door_for_peek(),
