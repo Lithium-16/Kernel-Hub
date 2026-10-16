@@ -17,6 +17,8 @@ pub enum TrayAction {
     TogglePeek,
     ToggleWander,
     ToggleSounds,
+    /// Loudness in percent.
+    Volume(u8),
     Visit,
     /// A hue; only changes how my own pet looks (friends see the hue the relay has).
     BowColour(u16),
@@ -72,6 +74,16 @@ impl Parts {
         for i in &bow_items {
             bows.append(i)?;
         }
+        let volumes = Submenu::new("Sound volume", true);
+        let mut volume_items = Vec::new();
+        for (name, pct) in [("Quiet", 15u8), ("Normal", 30), ("Loud", 60), ("Max", 100)] {
+            let item = MenuItem::new(name, true, None);
+            add(item.id(), TrayAction::Volume(pct));
+            volume_items.push(item);
+        }
+        for i in &volume_items {
+            volumes.append(i)?;
+        }
         let sizes = Submenu::new("Pet size", true);
         let mut size_items = Vec::new();
         for n in 1..=4u8 {
@@ -103,6 +115,7 @@ impl Parts {
             &visit,
             &wander,
             &sounds,
+            &volumes,
             &PredefinedMenuItem::separator(),
             &bows,
             &sizes,

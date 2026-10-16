@@ -81,47 +81,6 @@ fn purr(secs: f32) -> Vec<f32> {
         .collect()
 }
 
-/// A cat's voice: a buzzy source pushed through two moving vowel resonances (formants).
-/// `shape(s)` gives (pitch, first formant, second formant) in Hz for s from 0 to 1;
-/// `trill` is a pulse rate in Hz (0 for none).
-fn voice(secs: f32, trill: f32, shape: impl Fn(f32) -> (f32, f32, f32)) -> Vec<f32> {
-    let n = (secs * RATE as f32) as usize;
-    let mut phase = 0.0_f32;
-    let mut state = [[0.0_f32; 4]; 2]; // x1, x2, y1, y2 for each resonator
-    let mut out: Vec<f32> = (0..n)
-        .map(|i| {
-            let s = i as f32 / n as f32;
-            let t = i as f32 / RATE as f32;
-            let (mut f0, f1, f2) = shape(s);
-            f0 += 10.0 * (TAU * 5.5 * t).sin(); // a little shake in the pitch
-            phase = (phase + f0 / RATE as f32).fract();
-            let source = 2.0 * phase - 1.0 + 0.04 * ((i * 7919) % 101) as f32 / 101.0; // saw + breath
-            let mut sum = 0.0;
-            for (k, (f, gain)) in [(f1, 1.0), (f2, 0.6)].into_iter().enumerate() {
-                let w0 = TAU * f / RATE as f32;
-                let alpha = w0.sin() / (2.0 * 7.0);
-                let a0 = 1.0 + alpha;
-                let [x1, x2, y1, y2] = state[k];
-                let y =
-                    (alpha * source - alpha * x2 + 2.0 * w0.cos() * y1 - (1.0 - alpha) * y2) / a0;
-                state[k] = [source, x1, y, y1];
-                sum += gain * y;
-            }
-            let attack = (t / 0.015).min(1.0);
-            let release = (1.0 - s).powf(0.6);
-            let pulse = if trill > 0.0 {
-                0.55 + 0.45 * (TAU * trill * t).sin()
-            } else {
-                1.0
-            };
-            sum * attack * release * pulse
-        })
-        .collect();
-    let peak = out.iter().fold(0.0_f32, |m, v| m.max(v.abs())).max(1e-6);
-    out.iter_mut().for_each(|v| *v = *v / peak * 0.9);
-    out
-}
-
 /// An impact: a low body that drops in pitch and dies fast, with a short knock on top.
 fn thump() -> Vec<f32> {
     let n = (0.18 * RATE as f32) as usize;
@@ -141,20 +100,27 @@ fn thump() -> Vec<f32> {
         .collect()
 }
 
+/// A soft marimba-like pluck: a sine with a couple of quiet overtones and a quick fade.
+fn pluck(freq: f32, secs: f32) -> Vec<f32> {
+    let n = (secs * RATE as f32) as usize;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / RATE as f32;
+            let s = i as f32 / n as f32;
+            let tone = (TAU * freq * t).sin()
+                + 0.3 * (TAU * 2.0 * freq * t).sin()
+                + 0.08 * (TAU * 4.0 * freq * t).sin();
+            tone * (t / 0.003).min(1.0) * (-s * 5.0).exp() * 0.7
+        })
+        .collect()
+}
+
 fn samples(s: Sound) -> Vec<f32> {
     let cat = |parts: Vec<Vec<f32>>| parts.into_iter().flatten().collect::<Vec<f32>>();
     match s {
-        Sound::Chime => cat(vec![
-            glide(880.0, 880.0, 0.12, 0.0),
-            glide(1320.0, 1320.0, 0.25, 0.0),
-        ]),
+        Sound::Chime => cat(vec![pluck(880.0, 0.12), pluck(1319.0, 0.3)]),
         Sound::Door => glide(420.0, 760.0, 0.09, 0.0),
-        Sound::Mew => voice(0.32, 0.0, |s| {
-            // up then down, with the vowel moving from "e" to "ow"
-            let up = (s * 3.0).min(1.0);
-            let f0 = 560.0 + 340.0 * up - 280.0 * ((s - 0.33).max(0.0) / 0.67);
-            (f0, 350.0 + 350.0 * up, 2300.0 - 1200.0 * up)
-        }),
+        Sound::Mew => cat(vec![pluck(784.0, 0.08), pluck(1047.0, 0.22)]),
         Sound::Boing => glide(260.0, 520.0, 0.22, 25.0),
         Sound::Click => noise(0.04, false),
         Sound::TaDa => cat(vec![
@@ -164,16 +130,16 @@ fn samples(s: Sound) -> Vec<f32> {
         ]),
         Sound::Whoosh => noise(0.22, true),
         Sound::Bounce => thump(),
-        Sound::Meow => voice(0.62, 0.0, |s| {
-            let f0 = if s < 0.3 {
-                480.0 + 340.0 * (s / 0.3)
-            } else {
-                820.0 - 440.0 * ((s - 0.3) / 0.7)
-            };
-            let open = (s * 2.2).min(1.0);
-            (f0, 380.0 + 340.0 * open, 2200.0 - 1000.0 * open)
-        }),
-        Sound::Mrrp => voice(0.28, 28.0, |s| (380.0 + 150.0 * s, 520.0, 1500.0)),
+        Sound::Meow => cat(vec![
+            pluck(1047.0, 0.09),
+            pluck(784.0, 0.09),
+            pluck(587.0, 0.3),
+        ]),
+        Sound::Mrrp => cat(vec![
+            pluck(880.0, 0.05),
+            pluck(988.0, 0.05),
+            pluck(1175.0, 0.14),
+        ]),
         Sound::Purr => purr(0.9),
         Sound::Giggle => cat(vec![
             glide(900.0, 1100.0, 0.06, 0.0),
@@ -273,28 +239,6 @@ mod tests {
             "{} crossings/s",
             crossings as f32 / secs
         );
-    }
-
-    #[test]
-    fn cat_voices_have_overtones_not_a_pure_sine() {
-        for s in [Sound::Mew, Sound::Meow, Sound::Mrrp] {
-            let x = samples(s);
-            // a pure sine's second difference is proportional to the signal itself; a voice with
-            // formants is not, so the ratio varies a lot
-            let ratios: Vec<f32> = x
-                .windows(3)
-                .filter(|w| w[1].abs() > 0.2)
-                .map(|w| (w[0] - 2.0 * w[1] + w[2]) / w[1])
-                .collect();
-            let (lo, hi) = ratios
-                .iter()
-                .fold((f32::MAX, f32::MIN), |(l, h), r| (l.min(*r), h.max(*r)));
-            assert!(hi - lo > 0.5, "{s:?} is too pure ({lo}..{hi})");
-            assert!(
-                x.iter().all(|v| v.is_finite() && v.abs() <= 1.01),
-                "{s:?} blew up"
-            );
-        }
     }
 
     #[test]

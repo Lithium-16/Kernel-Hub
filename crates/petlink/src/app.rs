@@ -26,8 +26,6 @@ const IDLE_AWAY_SECS: u64 = 300;
 const DOOR_W: f32 = 32.0;
 const DOOR_H: f32 = 32.0;
 const BUBBLE_S: u64 = 4;
-/// Sounds are quiet on purpose: they play next to whatever the owner is doing.
-const SOUND_VOLUME: f32 = 0.3;
 /// A visiting pet on an errand (mail, peek) that hasn't finished by now is sent home.
 const ERRAND_MAX: Duration = Duration::from_secs(30);
 
@@ -556,10 +554,11 @@ impl PetApp {
         if !self.config.sounds || self.hidden || self.away {
             return;
         }
+        let volume = f32::from(self.config.volume) / 100.0;
         let wav = *self
             .sound_cache
             .entry(s)
-            .or_insert_with(|| Box::leak(sounds::wav(s, SOUND_VOLUME).into_boxed_slice()));
+            .or_insert_with(|| Box::leak(sounds::wav(s, volume).into_boxed_slice()));
         win::play_wav(wav);
     }
 
@@ -1238,6 +1237,12 @@ impl PetApp {
                 }
             }
             TrayAction::Visit => self.start_visit(),
+            TrayAction::Volume(pct) => {
+                self.config.volume = pct;
+                self.save_config();
+                self.sound_cache.clear();
+                self.play(Sound::Chime); // so the new level can be heard
+            }
             TrayAction::ToggleSounds => {
                 self.config.sounds = !self.config.sounds;
                 self.save_config();
