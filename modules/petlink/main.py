@@ -18,6 +18,11 @@ async def add_user(ctx: ActionContext, name: str, bow_hue: int = 0) -> dict:
     return await pets.add_user(name, bow_hue)
 
 
+@mod.action("user.relink")
+async def relink(ctx: ActionContext, name: str) -> dict:
+    return await pets.relink(name)
+
+
 @mod.action("user.remove")
 async def remove_user(ctx: ActionContext, name: str) -> dict:
     return await pets.remove_user(name)

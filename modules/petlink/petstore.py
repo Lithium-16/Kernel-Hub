@@ -11,6 +11,7 @@ from pathlib import Path
 
 FILE_TTL_S = 7 * 86400
 MAIL_TTL_S = 30 * 86400
+CODE_TTL_S = 7 * 86400
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -22,6 +23,8 @@ CREATE TABLE IF NOT EXISTS mail (
 CREATE TABLE IF NOT EXISTS files (
   id TEXT PRIMARY KEY, owner TEXT NOT NULL, recipient TEXT NOT NULL, name TEXT NOT NULL,
   size INTEGER NOT NULL, path TEXT NOT NULL, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS install_codes (
+  code_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, invite TEXT NOT NULL, expires REAL NOT NULL);
 """
 
 
@@ -71,6 +74,7 @@ class Store:
         return user, token
 
     def remove_user(self, user_id: str) -> bool:
+        self.db.execute("DELETE FROM install_codes WHERE user_id = ?", (user_id,))
         return self.db.execute("DELETE FROM users WHERE id = ?", (user_id,)).rowcount > 0
 
     def users(self) -> list[User]:
@@ -85,6 +89,40 @@ class Store:
             return None
         row = self.db.execute("SELECT id, name, bow_hue, peek FROM users WHERE token_hash = ?", (_hash(token),)).fetchone()
         return self._user(row)
+
+    def rotate_token(self, user_id: str) -> str:
+        """New token; the old one stops working and so do the user's unused install codes."""
+        token = secrets.token_urlsafe(32)
+        self.db.execute("UPDATE users SET token_hash = ? WHERE id = ?", (_hash(token), user_id))
+        self.db.execute("DELETE FROM install_codes WHERE user_id = ?", (user_id,))
+        return token
+
+    # -- install codes ---------------------------------------------------------------------
+
+    def add_install_code(self, user_id: str, invite: str) -> str:
+        # ponytail: the invite (holds the token) sits in the row until the code is used or expires,
+        # because the download needs it later and `users` keeps only the token's hash.
+        code = secrets.token_urlsafe(24)
+        self.db.execute(
+            "INSERT INTO install_codes VALUES (?, ?, ?, ?)", (_hash(code), user_id, invite, self.clock() + CODE_TTL_S)
+        )
+        return code
+
+    def take_install_code(self, code: str, consume: bool = True) -> tuple[str, str] | None:
+        """(user_id, invite) for a live code; `consume` makes it single-use."""
+        h = _hash(code)
+        row = self.db.execute("SELECT user_id, invite, expires FROM install_codes WHERE code_hash = ?", (h,)).fetchone()
+        if row is None or row[2] <= self.clock():
+            return None
+        if consume and self.db.execute("DELETE FROM install_codes WHERE code_hash = ?", (h,)).rowcount == 0:
+            return None
+        return row[0], row[1]
+
+    def pending_codes(self) -> dict[str, int]:
+        rows = self.db.execute(
+            "SELECT user_id, COUNT(*) FROM install_codes WHERE expires > ? GROUP BY user_id", (self.clock(),)
+        ).fetchall()
+        return dict(rows)
 
     def set_peek(self, user_id: str, on: bool) -> None:
         self.db.execute("UPDATE users SET peek = ? WHERE id = ?", (int(on), user_id))
@@ -137,4 +175,5 @@ class Store:
         old = self.db.execute("SELECT id, path FROM files WHERE created < ?", (now - FILE_TTL_S,)).fetchall()
         self.db.execute("DELETE FROM files WHERE created < ?", (now - FILE_TTL_S,))
         self.db.execute("DELETE FROM mail WHERE created < ?", (now - MAIL_TTL_S,))
+        self.db.execute("DELETE FROM install_codes WHERE expires <= ?", (now,))
         return [Path(p) for _, p in old]

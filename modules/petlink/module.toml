@@ -14,16 +14,27 @@ port = 8098
 share_port = 10000
 share_path = "/petlink"
 tailscale = "tailscale"
+# Local path to a petlink exe to serve instead of the newest GitHub release (testing before CI publishes one).
+exe_override = ""
 
 [[actions]]
 id = "user.add"
 label = "Add friend"
 icon = "user-plus"
-description = "Adds a person and returns their one-line invite (it holds their secret token, shown only once)."
+description = "Adds a person and returns a one-time download link for their personal PetLink installer (the one-line invite is the fallback; it holds their secret token)."
 ai = "never"
 timeout_s = 30
 params.name = { type = "string", description = "Their name" }
 params.bow_hue = { type = "int", description = "Bow colour as a hue, 0-359 (0 red, 120 green, 210 blue)", default = 0, min = 0, max = 359 }
+
+[[actions]]
+id = "user.relink"
+label = "New download link"
+icon = "refresh-cw"
+description = "Makes a fresh one-time download link for an existing friend and replaces their token, so the old file stops working (for 'I lost it')."
+ai = "never"
+timeout_s = 30
+params.name = { type = "string", description = "Their name" }
 
 [[actions]]
 id = "user.remove"

@@ -5,9 +5,10 @@ import json
 import logging
 import re
 import secrets
+import struct
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -38,11 +39,15 @@ class Relay:
         hourly_upload: int = 200 * 2**20,
         store_limit: int = 2 * 2**30,
         per_minute: int = 30,
+        install_per_minute: int = 20,
+        exe_source: Callable[[], Awaitable[Path | None]] | None = None,
     ) -> None:
         self.store, self.files_dir, self.clock = store, files_dir, clock
         self.log = log or logging.getLogger("petlink")
         self.max_file, self.hourly_upload, self.store_limit, self.per_minute = max_file, hourly_upload, store_limit, per_minute
         files_dir.mkdir(parents=True, exist_ok=True)
+        self.install_per_minute, self.exe_source = install_per_minute, exe_source
+        self.installs: deque[float] = deque()
         self.sockets: dict[str, web.WebSocketResponse] = {}
         self.presence: dict[str, str] = {}
         self.visits: dict[str, str] = {}  # visitor -> host
@@ -55,6 +60,7 @@ class Relay:
             app.router.add_get(f"{prefix}/ws", self.ws)
             app.router.add_put(f"{prefix}/files/{{id}}", self.put_file)
             app.router.add_get(f"{prefix}/files/{{id}}", self.get_file)
+            app.router.add_get(f"{prefix}/install/{{code}}", self.install)
         return app
 
     def online(self) -> list[str]:
@@ -290,6 +296,34 @@ class Relay:
         self.store.drop_file(row.id)
         row.path.unlink(missing_ok=True)
         return resp
+
+    # -- one-time installer download ---------------------------------------------------------
+
+    async def install(self, request: web.Request) -> web.Response:
+        # Behind Funnel every request comes from 127.0.0.1, so the limit is global, not per address.
+        now = self.clock()
+        while self.installs and self.installs[0] < now - 60:
+            self.installs.popleft()
+        self.installs.append(now)
+        if len(self.installs) > self.install_per_minute:
+            return web.Response(status=429, text="Too many tries, wait a minute.")
+        gone = web.Response(status=404, text="This download link is used up or expired. Ask for a new one.")
+        code = request.match_info["code"]
+        if self.store.take_install_code(code, consume=False) is None:
+            return gone
+        exe = await self.exe_source() if self.exe_source else None
+        if exe is None:
+            return web.Response(status=503, text="PetLink isn't published yet")  # the code stays valid
+        taken = self.store.take_install_code(code)
+        if taken is None:  # lost a race with another request
+            return gone
+        invite = taken[1].encode()
+        body = await asyncio.to_thread(exe.read_bytes) + invite + struct.pack("<I", len(invite)) + b"PLINVITE"
+        return web.Response(
+            body=body,
+            content_type="application/octet-stream",
+            headers={"Content-Disposition": 'attachment; filename="PetLink.exe"'},
+        )
 
     def cleanup(self) -> int:
         paths = self.store.expire(self.clock())
