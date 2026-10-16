@@ -1,5 +1,6 @@
-//! Things on the desktop that pets can go after: a slice of cake you can drag and throw, and a
-//! room to add more kinds later. Pure logic (the drawing and the mouse live in `app.rs`).
+//! Things on the desktop that pets can go after: a slice of cake you can drag and throw, a ball
+//! of yarn she bats about (with a trailing thread that drapes over windows), and room for more
+//! kinds. Pure logic (the drawing and the mouse live in `app.rs`).
 
 use crate::pet::{HALF_W, JUMP_MAX_UP, JUMP_MIN_UP, JUMP_REACH_X, Pet, floor_span};
 use crate::world::{Rect, World};
@@ -7,7 +8,6 @@ use crate::world::{Rect, World};
 const GRAVITY: f32 = 1400.0;
 /// An impact faster than this bounces back up by `BOUNCE`; slower ones come to rest.
 const BOUNCE_MIN_SPEED: f32 = 120.0;
-const BOUNCE: f32 = 0.35;
 const BOUNCE_VX_DAMP: f32 = 0.7;
 /// A pet can take the treat when it is this close sideways...
 const EAT_REACH_X: f32 = 22.0;
@@ -15,10 +15,20 @@ const EAT_REACH_X: f32 = 22.0;
 const EAT_REACH_UP: f32 = 48.0;
 /// A treat dragged faster than this is being kept away from her.
 const TEASE_SPEED: f32 = 60.0;
+/// A rolling ball slows by this fraction per second and stops below the minimum speed.
+const ROLL_FRICTION: f32 = 1.6;
+const ROLL_MIN_SPEED: f32 = 8.0;
+/// The yarn thread: points, and the gap between them in sprite pixels.
+const ROPE_START: usize = 10;
+const ROPE_MAX: usize = 46;
+/// Each swat unwinds this many more points of thread.
+const UNRAVEL_PER_SWAT: usize = 3;
+const ROPE_SEG: f32 = 2.2;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
     Cake,
+    Yarn,
 }
 
 impl Kind {
@@ -26,13 +36,32 @@ impl Kind {
     pub fn size(self) -> (f32, f32) {
         match self {
             Kind::Cake => (16.0, 11.0),
+            Kind::Yarn => (11.0, 11.0),
         }
     }
 
     pub fn edible(self) -> bool {
+        self == Kind::Cake
+    }
+
+    /// Something she plays with (bats about) instead of eating.
+    pub fn toy(self) -> bool {
+        self == Kind::Yarn
+    }
+
+    fn bounce(self) -> f32 {
         match self {
-            Kind::Cake => true,
+            Kind::Cake => 0.35,
+            Kind::Yarn => 0.55,
         }
+    }
+
+    fn rolls(self) -> bool {
+        self == Kind::Yarn
+    }
+
+    fn spins(self) -> bool {
+        self == Kind::Yarn
     }
 }
 
@@ -42,6 +71,8 @@ pub enum Motion {
     Held,
     Falling,
     Resting,
+    /// Moving along a floor (a ball), slowing down.
+    Rolling,
 }
 
 /// `x` is the middle and `y` the bottom, like a pet's feet.
@@ -56,6 +87,11 @@ pub struct Object {
     /// How fast it moved over the last frame (px/s): being dragged away shows up here.
     pub speed: f32,
     last: (f32, f32),
+    /// The yarn's trailing thread.
+    pub rope: Option<Rope>,
+    /// How far a ball has turned (radians) and how fast it is turning.
+    pub angle: f32,
+    omega: f32,
 }
 
 impl Object {
@@ -69,6 +105,26 @@ impl Object {
             motion: Motion::Falling,
             speed: 0.0,
             last: (x, y),
+            rope: (kind == Kind::Yarn).then(|| Rope::trailing(x, y, -1.0)),
+            angle: 0.0,
+            omega: 0.0,
+        }
+    }
+
+    /// Where the thread is tied: the middle of the ball.
+    fn anchor(&self, px: f32) -> (f32, f32) {
+        (self.x, self.y - self.kind.size().1 * px / 2.0)
+    }
+
+    /// A swat: it flies off at (vx, vy).
+    pub fn nudge(&mut self, vx: f32, vy: f32) {
+        if self.motion != Motion::Held {
+            self.vx = vx;
+            self.vy = vy;
+            self.motion = Motion::Falling;
+            if self.kind.spins() {
+                self.omega = if vx >= 0.0 { 12.0 } else { -12.0 };
+            }
         }
     }
 
@@ -107,6 +163,32 @@ impl Object {
     pub fn step(&mut self, dt: f32, world: &World, px: f32) {
         match self.motion {
             Motion::Held => {}
+            Motion::Rolling => {
+                self.vx *= (1.0 - ROLL_FRICTION * dt).max(0.0);
+                self.x += self.vx * dt;
+                let half = self.kind.size().0 * px / 2.0;
+                // rolling without slipping: v = omega * r
+                self.omega = self.vx / half;
+                self.angle += self.omega * dt;
+                let (left, right) = (world.screen.x + half, world.screen.right() - half);
+                if self.x < left || self.x > right {
+                    self.x = self.x.clamp(left, right);
+                    self.vx = -self.vx * 0.6;
+                    self.omega = -self.omega * 0.8;
+                }
+                let supported = world
+                    .floor_below(self.x, self.y - 1.0)
+                    .is_some_and(|f| (f - self.y).abs() < 1.0);
+                if !supported {
+                    // rolled off the edge of a window: fall with the speed it had
+                    self.vy = 0.0;
+                    self.motion = Motion::Falling;
+                } else if self.vx.abs() < ROLL_MIN_SPEED {
+                    self.vx = 0.0;
+                    self.omega = 0.0;
+                    self.motion = Motion::Resting;
+                }
+            }
             Motion::Resting => {
                 // The window it sat on moved away: fall again.
                 let supported = world
@@ -119,18 +201,21 @@ impl Object {
             Motion::Falling => {
                 let half = self.kind.size().0 * px / 2.0;
                 self.vy += GRAVITY * dt;
+                self.angle += self.omega * dt;
+                self.omega *= (1.0 - 0.3 * dt).max(0.0);
                 let old_y = self.y;
                 self.x += self.vx * dt;
                 self.y += self.vy * dt;
                 let (left, right) = (world.screen.x + half, world.screen.right() - half);
                 if self.x < left || self.x > right {
                     self.x = self.x.clamp(left, right);
-                    self.vx = -self.vx * BOUNCE;
+                    self.vx = -self.vx * self.kind.bounce();
+                    self.omega = -self.omega * 0.8;
                 }
                 let top = world.screen.y + self.kind.size().1 * px;
                 if self.y < top {
                     self.y = top;
-                    self.vy = self.vy.abs() * BOUNCE;
+                    self.vy = self.vy.abs() * self.kind.bounce();
                 }
                 if self.vy > 0.0
                     && let Some(f) = world.floor_below(self.x, old_y)
@@ -138,14 +223,107 @@ impl Object {
                 {
                     self.y = f;
                     if self.vy > BOUNCE_MIN_SPEED {
-                        self.vy = -self.vy * BOUNCE;
+                        if self.kind.spins() {
+                            // a bounce sets it spinning the way it is travelling
+                            let spin = 9.0 + (self.vy / 120.0).min(8.0);
+                            self.omega = if self.vx >= 0.0 { spin } else { -spin };
+                        }
+                        self.vy = -self.vy * self.kind.bounce();
                         self.vx *= BOUNCE_VX_DAMP;
                     } else {
-                        self.vx = 0.0;
                         self.vy = 0.0;
-                        self.motion = Motion::Resting;
+                        if self.kind.rolls() && self.vx.abs() >= ROLL_MIN_SPEED {
+                            self.motion = Motion::Rolling;
+                        } else {
+                            self.vx = 0.0;
+                            self.omega = 0.0;
+                            self.motion = Motion::Resting;
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// The yarn's thread: a chain of points (Verlet integration) tied to the ball. It falls under
+/// gravity, lies on floors and window tops, drapes over their edges and drags behind the ball.
+#[derive(Clone, Debug)]
+pub struct Rope {
+    p: Vec<(f32, f32)>,
+    prev: Vec<(f32, f32)>,
+}
+
+impl Rope {
+    /// A thread that starts out stretched along the floor behind the ball (`dir` -1 = to its
+    /// left). Starting spread out matters: a thread folded onto one point can never lie down.
+    pub fn trailing(x: f32, y: f32, dir: f32) -> Rope {
+        let pts: Vec<(f32, f32)> = (0..ROPE_START)
+            .map(|i| (x + dir * i as f32 * ROPE_SEG * 0.9, y))
+            .collect();
+        Rope {
+            p: pts.clone(),
+            prev: pts,
+        }
+    }
+
+    pub fn points(&self) -> &[(f32, f32)] {
+        &self.p
+    }
+
+    /// Unwinds more thread from the ball (up to a limit): new points start at the tail.
+    pub fn unravel(&mut self, extra: usize) {
+        let (last, prev) = (*self.p.last().unwrap(), *self.prev.last().unwrap());
+        for _ in 0..extra {
+            if self.p.len() >= ROPE_MAX {
+                break;
+            }
+            self.p.push(last);
+            self.prev.push(prev);
+        }
+    }
+
+    fn step(&mut self, anchor: (f32, f32), dt: f32, world: &World, px: f32) {
+        let seg = ROPE_SEG * px;
+        let n = self.p.len();
+        self.p[0] = anchor;
+        self.prev[0] = anchor;
+        for i in 1..n {
+            let (x, y) = self.p[i];
+            let (ox, oy) = self.prev[i];
+            self.prev[i] = (x, y);
+            self.p[i] = (
+                x + (x - ox) * 0.98,
+                y + (y - oy) * 0.995 + GRAVITY * dt * dt,
+            );
+        }
+        for _ in 0..8 {
+            for i in 0..n - 1 {
+                let (ax, ay) = self.p[i];
+                let (bx, by) = self.p[i + 1];
+                let d = (bx - ax).hypot(by - ay).max(1e-4);
+                let k = (d - seg) / d;
+                let (dx, dy) = ((bx - ax) * k, (by - ay) * k);
+                if i == 0 {
+                    self.p[i + 1] = (bx - dx, by - dy);
+                } else {
+                    self.p[i] = (ax + dx * 0.5, ay + dy * 0.5);
+                    self.p[i + 1] = (bx - dx * 0.5, by - dy * 0.5);
+                }
+            }
+            for i in 1..n {
+                let (mut x, mut y) = self.p[i];
+                if let Some(f) = world.floor_below(x, self.prev[i].1.min(y))
+                    && y > f
+                {
+                    y = f;
+                    // lying on it: friction takes most of the sideways motion
+                    let (ox, _) = self.prev[i];
+                    self.prev[i] = (x - (x - ox) * 0.3, y);
+                }
+                x = x.clamp(world.screen.x, world.screen.right());
+                y = y.clamp(world.screen.y, world.ground());
+                self.p[i] = (x, y);
             }
         }
     }
@@ -156,6 +334,8 @@ impl Object {
 pub enum Chase {
     Going,
     Ate,
+    /// Close enough to a calm toy to swat it.
+    Bat,
 }
 
 /// One move over the floors: a jump up (possibly a little sideways) or a walk off an edge.
@@ -317,17 +497,79 @@ pub fn chase(pet: &mut Pet, o: &Object, world: &World, dt: f32) -> Chase {
     Chase::Going
 }
 
+/// Playing with a toy: run to it, swat it when it is calm and close, lose interest after a few.
+fn play_with(pet: &mut Pet, o: &Object, world: &World, px: f32) -> Chase {
+    if !pet.free_to_chase() || !pet.wants_to_play() || o.motion == Motion::Held {
+        return Chase::Going;
+    }
+    let span = floor_span(world, pet.x, pet.y);
+    let near = |x: f32| x.clamp(span.0 + HALF_W, span.1 - HALF_W);
+    let obj_floor = world.floor_below(o.x, o.y).unwrap_or(world.ground());
+    let (here, target) = (
+        floor_at(world, pet.x, pet.y),
+        floor_at(world, o.x, obj_floor),
+    );
+    if here.is_some() && here == target {
+        // She can only swat it with her body: the ball has to overlap her sprite. A ball
+        // above her head is out of reach, however close it is sideways.
+        let (me, it) = (pet.hitbox(px), o.hitbox(px));
+        let touching =
+            me.x < it.right() && it.x < me.right() && me.y < it.y + it.h && it.y < me.y + me.h;
+        if touching {
+            if pet.bat_ready() {
+                return Chase::Bat;
+            }
+            pet.face(o.x);
+        } else {
+            pet.chase_to(near(o.x));
+        }
+        return Chase::Going;
+    }
+    match match (here, target) {
+        (Some(h), Some(t)) => route(world, h, t, o.x),
+        _ => None,
+    } {
+        Some(Step::Jump {
+            take_off,
+            land_x,
+            y,
+        }) => {
+            if (pet.x - take_off).abs() > 6.0 {
+                pet.chase_to(take_off);
+            } else {
+                pet.jump_to(y, land_x);
+            }
+        }
+        Some(Step::Walk { to_x }) => pet.chase_to(to_x),
+        None => {
+            if (near(o.x) - pet.x).abs() > EAT_REACH_X {
+                pet.chase_to(near(o.x));
+            }
+        }
+    }
+    Chase::Going
+}
+
 #[derive(Default)]
 pub struct Objects {
     pub items: Vec<Object>,
+    /// A little state for varying swats without a random-number dependency.
+    swats: u32,
+    /// Points per sprite pixel, as of the last step (a swat needs it to tell what she touches).
+    px: f32,
 }
 
 impl Objects {
     pub fn step(&mut self, dt: f32, world: &World, px: f32) {
+        self.px = px;
         for o in &mut self.items {
             o.speed = (o.x - o.last.0).hypot(o.y - o.last.1) / dt.max(1e-3);
             o.step(dt, world, px);
             o.last = (o.x, o.y);
+            let anchor = o.anchor(px);
+            if let Some(r) = &mut o.rope {
+                r.step(anchor, dt, world, px);
+            }
         }
     }
 
@@ -345,6 +587,38 @@ impl Objects {
         if chase(pets[who], &o, world, dt) == Chase::Ate {
             self.items.remove(i);
             pets[who].eat();
+            return Some(who);
+        }
+        None
+    }
+}
+
+impl Objects {
+    /// Sends the closest bored-free pet to play with the first toy; returns which pet (an index
+    /// into `pets`) swatted it this frame, if one did. The toy then flies off.
+    pub fn play(&mut self, pets: &mut [&mut Pet], world: &World, dt: f32) -> Option<usize> {
+        let _ = dt;
+        let i = self.items.iter().position(|o| o.kind.toy())?;
+        let o = self.items[i].clone();
+        let who = (0..pets.len())
+            .filter(|&k| pets[k].free_to_chase() && pets[k].wants_to_play())
+            .min_by(|&a, &b| {
+                let d = |p: &Pet| (p.x - o.x).abs() + 2.0 * (p.y - o.y).abs();
+                d(pets[a]).total_cmp(&d(pets[b]))
+            })?;
+        if play_with(pets[who], &o, world, self.px) == Chase::Bat {
+            // away from her, a little differently each time
+            self.swats = self.swats.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            let r1 = ((self.swats >> 16) & 0xff) as f32 / 255.0;
+            let r2 = ((self.swats >> 8) & 0xff) as f32 / 255.0;
+            // forward, the way she is facing
+            let dir = if pets[who].facing_left { -1.0 } else { 1.0 };
+            let toward = o.x + dir;
+            pets[who].bat(toward);
+            self.items[i].nudge(dir * (240.0 + 200.0 * r1), -(320.0 + 220.0 * r2));
+            if let Some(r) = &mut self.items[i].rope {
+                r.unravel(UNRAVEL_PER_SWAT);
+            }
             return Some(who);
         }
         None
@@ -389,7 +663,10 @@ mod tests {
 
     /// Runs a pet after one cake until it is eaten; returns the seconds it took.
     fn run_chase(w: &World, pet: &mut Pet, cake: Object, max_secs: f32) -> Option<f32> {
-        let mut objects = Objects { items: vec![cake] };
+        let mut objects = Objects {
+            items: vec![cake],
+            ..Default::default()
+        };
         let mut rng = StdRng::seed_from_u64(3);
         for i in 0..(max_secs * 60.0) as usize {
             objects.step(1.0 / 60.0, w, 1.0);
@@ -399,6 +676,267 @@ mod tests {
             }
         }
         None
+    }
+
+    /// Settles a yarn ball and its thread on the floor.
+    fn settle_with_rope(o: &mut Object, w: &World, secs: f32) {
+        for _ in 0..(secs * 60.0) as usize {
+            o.step(1.0 / 60.0, w, 1.0);
+            let a = o.anchor(1.0);
+            if let Some(r) = &mut o.rope {
+                r.step(a, 1.0 / 60.0, w, 1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn yarn_is_a_toy_not_food_and_has_a_thread() {
+        let y = Object::new(Kind::Yarn, 300.0, 300.0);
+        assert!(y.kind.toy() && !y.kind.edible());
+        assert!(y.rope.is_some());
+        assert!(Object::new(Kind::Cake, 1.0, 1.0).rope.is_none());
+    }
+
+    #[test]
+    fn a_thrown_yarn_ball_rolls_to_a_stop_on_the_ground() {
+        let w = world(&[]);
+        let mut o = Object::new(Kind::Yarn, 400.0, 1032.0);
+        o.motion = Motion::Resting;
+        o.grab();
+        o.throw(500.0, 0.0);
+        let mut rolled = false;
+        for _ in 0..(8.0 * 60.0) as usize {
+            o.step(1.0 / 60.0, &w, 1.0);
+            rolled |= o.motion == Motion::Rolling;
+        }
+        assert!(rolled, "it should roll, not just stop");
+        assert_eq!(o.motion, Motion::Resting);
+        assert!(o.x > 500.0 && o.x < 1920.0);
+    }
+
+    #[test]
+    fn a_yarn_ball_rolls_off_the_edge_of_a_window_and_falls_to_the_ground() {
+        let w = world(&[window(300.0, 700.0, 400.0)]);
+        let mut o = Object::new(Kind::Yarn, 640.0, 700.0);
+        o.motion = Motion::Resting;
+        o.nudge(300.0, 0.0);
+        settle(&mut o, &w, 6.0);
+        assert!(o.x > 700.0, "it should have left the window: {}", o.x);
+        assert!(
+            (o.y - 1032.0).abs() < 0.5,
+            "it should end on the ground: {}",
+            o.y
+        );
+    }
+
+    #[test]
+    fn the_thread_lies_on_the_floor_and_stays_tied_to_the_ball() {
+        let w = world(&[]);
+        let mut o = Object::new(Kind::Yarn, 600.0, 1032.0);
+        o.motion = Motion::Resting;
+        settle_with_rope(&mut o, &w, 4.0);
+        let pts = o.rope.as_ref().unwrap().points();
+        let (ax, ay) = o.anchor(1.0);
+        assert_eq!(pts[0], (ax, ay));
+        for &(x, y) in pts {
+            assert!(x.is_finite() && y.is_finite());
+            assert!(y <= 1032.0 + 0.5, "the thread sank below the floor: {y}");
+        }
+        assert!(
+            pts.iter().skip(1).all(|p| p.1 > 1032.0 - 6.0),
+            "it should lie flat"
+        );
+        let reach = pts
+            .iter()
+            .map(|p| (p.0 - ax).hypot(p.1 - ay))
+            .fold(0.0_f32, f32::max);
+        assert!(
+            reach < pts.len() as f32 * ROPE_SEG + 1.0,
+            "stretched to {reach}"
+        );
+    }
+
+    #[test]
+    fn the_thread_drapes_over_a_window_edge() {
+        let w = world(&[window(300.0, 700.0, 400.0)]);
+        // the ball rests near the right edge of the window top: the thread hangs off the end
+        let mut o = Object::new(Kind::Yarn, 690.0, 700.0);
+        o.motion = Motion::Resting;
+        o.rope = Some(Rope::trailing(690.0, 700.0, 1.0));
+        settle_with_rope(&mut o, &w, 5.0);
+        let pts = o.rope.as_ref().unwrap().points();
+        assert!(
+            pts.iter().any(|p| p.1 > 705.0),
+            "some of it should hang down over the edge: {pts:?}"
+        );
+        assert!(
+            pts.iter().any(|p| (p.1 - 700.0).abs() < 6.0),
+            "some of it should lie on the window"
+        );
+    }
+
+    #[test]
+    fn she_bats_the_yarn_about_then_gets_bored_for_a_while() {
+        let w = world(&[]);
+        let mut pet = Pet::new(300.0, 1032.0);
+        let mut ball = Object::new(Kind::Yarn, 900.0, 1032.0);
+        ball.motion = Motion::Resting;
+        let mut objects = Objects {
+            items: vec![ball],
+            ..Default::default()
+        };
+        let mut rng = StdRng::seed_from_u64(3);
+        let mut bats = Vec::new();
+        for i in 0..(75.0 * 60.0) as usize {
+            objects.step(1.0 / 60.0, &w, 1.0);
+            pet.step(1.0 / 60.0, &w, &mut rng);
+            if objects.play(&mut [&mut pet], &w, 1.0 / 60.0).is_some() {
+                bats.push(i as f32 / 60.0);
+            }
+            assert!(
+                (0.0..=1920.0).contains(&objects.items[0].x),
+                "the ball left the screen"
+            );
+        }
+        assert!(
+            bats.len() >= 8,
+            "she should keep playing: {} bats",
+            bats.len()
+        );
+        // after seven bats there is a long pause before the eighth
+        assert!(
+            bats[7] - bats[6] > 20.0,
+            "bored for a while: {:?}",
+            &bats[..8]
+        );
+    }
+
+    #[test]
+    fn she_only_swats_a_ball_that_overlaps_her_sprite() {
+        let w = world(&[]);
+        let mut rng = StdRng::seed_from_u64(3);
+        let try_it = |ball_x: f32, ball_y: f32, frames: usize| -> bool {
+            let mut pet = Pet::new(500.0, 1032.0);
+            let mut ball = Object::new(Kind::Yarn, ball_x, ball_y);
+            ball.motion = Motion::Resting; // held in place (even if floating) for the check
+            let mut objects = Objects {
+                items: vec![ball],
+                ..Default::default()
+            };
+            let mut rng = StdRng::seed_from_u64(3);
+            let mut swatted = false;
+            for _ in 0..frames {
+                objects.px = 1.0;
+                // keep the ball exactly where the test puts it
+                objects.items[0].x = ball_x;
+                objects.items[0].y = ball_y;
+                pet.step(1.0 / 60.0, &w, &mut rng);
+                if objects.play(&mut [&mut pet], &w, 1.0 / 60.0).is_some() {
+                    swatted = true;
+                    break;
+                }
+            }
+            swatted
+        };
+        let _ = &mut rng;
+        assert!(
+            try_it(500.0, 1032.0, 10),
+            "a ball at her feet is hers to swat"
+        );
+        assert!(
+            !try_it(500.0, 1032.0 - 200.0, 120),
+            "a ball far above her head is out of reach"
+        );
+        assert!(
+            !try_it(500.0, 1032.0 - 80.0, 120),
+            "so is one above the top of her sprite"
+        );
+        assert!(
+            try_it(560.0, 1032.0, 600),
+            "she walks over to a ball on the floor and swats it"
+        );
+    }
+
+    #[test]
+    fn yarn_is_never_eaten_even_when_she_stands_on_it() {
+        let w = world(&[]);
+        let mut pet = Pet::new(700.0, 1032.0);
+        let mut ball = Object::new(Kind::Yarn, 700.0, 1032.0);
+        ball.motion = Motion::Resting;
+        let mut objects = Objects {
+            items: vec![ball],
+            ..Default::default()
+        };
+        let mut rng = StdRng::seed_from_u64(3);
+        for _ in 0..600 {
+            objects.step(1.0 / 60.0, &w, 1.0);
+            pet.step(1.0 / 60.0, &w, &mut rng);
+            assert!(objects.chase(&mut [&mut pet], &w, 1.0 / 60.0).is_none());
+        }
+        assert_eq!(objects.items.len(), 1);
+    }
+
+    #[test]
+    fn a_bouncing_yarn_ball_spins_and_a_resting_one_does_not() {
+        let w = world(&[]);
+        let mut o = Object::new(Kind::Yarn, 300.0, 400.0);
+        o.vx = 300.0;
+        let mut seen = Vec::new();
+        for _ in 0..(1.5 * 60.0) as usize {
+            o.step(1.0 / 60.0, &w, 1.0);
+            seen.push(o.angle);
+        }
+        assert!(o.angle.abs() > 3.0, "it should have turned: {}", o.angle);
+        let steps = seen
+            .windows(2)
+            .filter(|p| (p[1] - p[0]).abs() > 1e-4)
+            .count();
+        assert!(
+            steps > 20,
+            "it should turn continuously, not in jumps: {steps}"
+        );
+        settle(&mut o, &w, 10.0);
+        let a = o.angle;
+        settle(&mut o, &w, 1.0);
+        assert_eq!(o.angle, a, "a ball at rest holds still");
+        let mut cake = Object::new(Kind::Cake, 300.0, 400.0);
+        cake.vx = 300.0;
+        settle(&mut cake, &w, 3.0);
+        assert_eq!(cake.angle, 0.0, "a cake does not spin");
+    }
+
+    #[test]
+    fn a_swat_sends_the_ball_up_and_each_swat_unwinds_more_thread() {
+        let w = world(&[]);
+        let mut pet = Pet::new(300.0, 1032.0);
+        let mut ball = Object::new(Kind::Yarn, 900.0, 1032.0);
+        ball.motion = Motion::Resting;
+        let mut objects = Objects {
+            items: vec![ball],
+            ..Default::default()
+        };
+        let mut rng = StdRng::seed_from_u64(3);
+        let start = objects.items[0].rope.as_ref().unwrap().points().len();
+        let mut swats = 0;
+        for _ in 0..(40.0 * 60.0) as usize {
+            objects.step(1.0 / 60.0, &w, 1.0);
+            pet.step(1.0 / 60.0, &w, &mut rng);
+            if objects.play(&mut [&mut pet], &w, 1.0 / 60.0).is_some() {
+                swats += 1;
+                assert!(
+                    objects.items[0].vy <= -320.0,
+                    "swatted up: {}",
+                    objects.items[0].vy
+                );
+                let len = objects.items[0].rope.as_ref().unwrap().points().len();
+                assert_eq!(
+                    len,
+                    (start + swats * UNRAVEL_PER_SWAT).min(ROPE_MAX),
+                    "after {swats} swats"
+                );
+            }
+        }
+        assert!(swats >= 5, "only {swats} swats");
     }
 
     #[test]
@@ -456,7 +994,10 @@ mod tests {
         let mut pet = Pet::new(300.0, 1032.0);
         let mut cake = Object::new(Kind::Cake, 400.0, 900.0);
         cake.grab();
-        let mut objects = Objects { items: vec![cake] };
+        let mut objects = Objects {
+            items: vec![cake],
+            ..Default::default()
+        };
         let mut rng = StdRng::seed_from_u64(3);
         let mut hopped = false;
         for _ in 0..(20.0 * 60.0) as usize {
@@ -508,7 +1049,10 @@ mod tests {
         let mut pet = Pet::new(300.0, 1032.0);
         let mut cake = Object::new(Kind::Cake, 800.0, 300.0);
         cake.motion = Motion::Resting;
-        let mut objects = Objects { items: vec![cake] };
+        let mut objects = Objects {
+            items: vec![cake],
+            ..Default::default()
+        };
         let mut rng = StdRng::seed_from_u64(3);
         let mut hopped = false;
         for _ in 0..(40.0 * 60.0) as usize {
@@ -533,7 +1077,10 @@ mod tests {
         secs: f32,
         mut each: impl FnMut(usize, &mut Objects),
     ) -> bool {
-        let mut objects = Objects { items: vec![cake] };
+        let mut objects = Objects {
+            items: vec![cake],
+            ..Default::default()
+        };
         let mut rng = StdRng::seed_from_u64(3);
         for i in 0..(secs * 60.0) as usize {
             each(i, &mut objects);
@@ -621,7 +1168,10 @@ mod tests {
         let mut far = Pet::new(1500.0, 1032.0);
         let mut cake = Object::new(Kind::Cake, 700.0, 1032.0);
         cake.motion = Motion::Resting;
-        let mut objects = Objects { items: vec![cake] };
+        let mut objects = Objects {
+            items: vec![cake],
+            ..Default::default()
+        };
         let mut rng = StdRng::seed_from_u64(3);
         let mut ate = None;
         for _ in 0..(20.0 * 60.0) as usize {

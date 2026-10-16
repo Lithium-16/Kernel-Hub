@@ -20,6 +20,10 @@ const HOP_GAP_S: f32 = 0.45;
 const ANGER_AFTER_S: f32 = 6.0;
 const ANGER_COOLDOWN_S: f32 = 15.0;
 const ANGRY_S: f32 = 2.8;
+/// Playing with a toy: a pause between bats, how many before she gets bored, and for how long.
+const BAT_GAP_S: f32 = 0.9;
+const BATS_BEFORE_BORED: u8 = 7;
+const BORED_S: f32 = 25.0;
 const FRAME_S: f32 = 0.1;
 /// Bouncing on landing: an impact faster than the minimum bounces back up by the factor.
 const BOUNCE_MIN_SPEED: f32 = 150.0;
@@ -212,6 +216,9 @@ pub struct Pet {
     hop_cd: f32,
     /// Seconds of failing to get a treat (negative while she is cooling off).
     frustration: f32,
+    bored: f32,
+    bats: u8,
+    bat_cd: f32,
     /// The sound this pet wants played (bounce, purr, meow); the app takes it.
     sound: Option<Sound>,
     hover_t: f32,
@@ -242,6 +249,9 @@ impl Pet {
             emote_cd: rand::rng().random_range(EMOTE_MIN_S..EMOTE_MAX_S),
             hop_cd: 0.0,
             frustration: 0.0,
+            bored: 0.0,
+            bats: 0,
+            bat_cd: 0.0,
             sound: None,
             hover_t: 0.0,
             hold: 0.0,
@@ -392,6 +402,26 @@ impl Pet {
 
     pub fn is_hopping(&self) -> bool {
         self.state == State::Hop
+    }
+
+    pub fn wants_to_play(&self) -> bool {
+        self.bored <= 0.0
+    }
+
+    pub fn bat_ready(&self) -> bool {
+        self.bat_cd <= 0.0
+    }
+
+    /// She swats a toy towards `toward_x`: a little hop, a pause, and after a few she is bored.
+    pub fn bat(&mut self, toward_x: f32) {
+        self.face(toward_x);
+        self.hop();
+        self.bat_cd = BAT_GAP_S;
+        self.bats += 1;
+        if self.bats >= BATS_BEFORE_BORED {
+            self.bats = 0;
+            self.bored = BORED_S;
+        }
     }
 
     /// A moment more of failing to get a treat; true when she has had enough.
@@ -592,6 +622,8 @@ impl Pet {
             self.set(State::Idle);
         }
         self.hop_cd = (self.hop_cd - dt).max(0.0);
+        self.bored = (self.bored - dt).max(0.0);
+        self.bat_cd = (self.bat_cd - dt).max(0.0);
         if self.state == State::Hop {
             // Hopping for something she can't reach is what wears her patience down.
             self.frustration += dt;
@@ -842,6 +874,28 @@ mod tests {
         }
         assert!(heard.contains(&Sound::Bounce), "heard {heard:?}");
         assert_eq!(p.take_sound(), None, "taking a sound clears it");
+    }
+
+    #[test]
+    fn batting_a_toy_seven_times_bores_her_for_a_while() {
+        let mut p = Pet::new(500.0, 1032.0);
+        let w = world(&[]);
+        let mut rng = StdRng::seed_from_u64(1);
+        assert!(p.wants_to_play() && p.bat_ready());
+        p.bat(600.0);
+        assert!(!p.bat_ready(), "a short pause between bats");
+        assert!(!p.facing_left, "she faces the toy");
+        for _ in 0..6 {
+            for _ in 0..70 {
+                p.step(1.0 / 60.0, &w, &mut rng);
+            }
+            p.bat(600.0);
+        }
+        assert!(!p.wants_to_play(), "seven bats and she loses interest");
+        for _ in 0..(26.0 * 60.0) as usize {
+            p.step(1.0 / 60.0, &w, &mut rng);
+        }
+        assert!(p.wants_to_play(), "interested again after a while");
     }
 
     #[test]
