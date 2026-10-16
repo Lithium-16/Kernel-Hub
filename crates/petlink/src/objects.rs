@@ -131,11 +131,6 @@ impl Object {
         }
     }
 
-    /// Which quarter turn to draw (0..4): sprites turn in whole quarters to stay crisp.
-    pub fn quarter(&self) -> usize {
-        ((self.angle / std::f32::consts::FRAC_PI_2).floor() as i64).rem_euclid(4) as usize
-    }
-
     pub fn hitbox(&self, px: f32) -> Rect {
         let (w, h) = self.kind.size();
         Rect {
@@ -835,15 +830,19 @@ mod tests {
         let w = world(&[]);
         let mut o = Object::new(Kind::Yarn, 300.0, 400.0);
         o.vx = 300.0;
-        let mut quarters = std::collections::HashSet::new();
+        let mut seen = Vec::new();
         for _ in 0..(1.5 * 60.0) as usize {
             o.step(1.0 / 60.0, &w, 1.0);
-            quarters.insert(o.quarter());
+            seen.push(o.angle);
         }
         assert!(o.angle.abs() > 3.0, "it should have turned: {}", o.angle);
+        let steps = seen
+            .windows(2)
+            .filter(|p| (p[1] - p[0]).abs() > 1e-4)
+            .count();
         assert!(
-            quarters.len() >= 3,
-            "it should pass through several quarter turns: {quarters:?}"
+            steps > 20,
+            "it should turn continuously, not in jumps: {steps}"
         );
         settle(&mut o, &w, 10.0);
         let a = o.angle;
