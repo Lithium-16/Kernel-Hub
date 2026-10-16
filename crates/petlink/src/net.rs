@@ -364,6 +364,7 @@ mod tests {
             bow_hue: None,
             peek: false,
             wander: true,
+            sounds: true,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         let tx = std::sync::Mutex::new(tx);

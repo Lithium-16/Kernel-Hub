@@ -9,6 +9,7 @@ use crate::net::{Net, NetCmd, NetEvent};
 use crate::pet::{Emote, Event, Pet, State};
 use crate::protocol::{Envelope, FileRef, Msg, Person, PresenceState, TouchKind, new_id};
 use crate::social::Social;
+use crate::sounds::{self, Sound};
 use crate::sprites::Sprites;
 use crate::tray::{Tray, TrayAction};
 use crate::win;
@@ -25,6 +26,8 @@ const IDLE_AWAY_SECS: u64 = 300;
 const DOOR_W: f32 = 32.0;
 const DOOR_H: f32 = 32.0;
 const BUBBLE_S: u64 = 4;
+/// Sounds are quiet on purpose: they play next to whatever the owner is doing.
+const SOUND_VOLUME: f32 = 0.3;
 /// A visiting pet on an errand (mail, peek) that hasn't finished by now is sent home.
 const ERRAND_MAX: Duration = Duration::from_secs(30);
 
@@ -253,6 +256,7 @@ pub struct PetApp {
     hearts: Hearts,
     social: Social,
     games: Games,
+    sound_cache: HashMap<Sound, &'static [u8]>,
     /// The peek I am waiting on was asked while visiting: she stays when it is answered.
     peek_from_visit: bool,
     /// Seconds until my pet may wander off to visit by herself.
@@ -439,6 +443,7 @@ impl PetApp {
             hearts: Hearts::default(),
             social: Social::new(fast, &mut rand::rng()),
             games: Games::new(fast, &mut rand::rng()),
+            sound_cache: HashMap::new(),
             peek_from_visit: false,
             next_auto_in: auto_gap(&mut rand::rng()) / fast.max(1.0),
             auto_trip: false,
@@ -533,7 +538,20 @@ impl PetApp {
         }
     }
 
+    /// Plays a sound unless they are switched off, a fullscreen app is in front, or the owner is away.
+    fn play(&mut self, s: Sound) {
+        if !self.config.sounds || self.hidden || self.away {
+            return;
+        }
+        let wav = *self
+            .sound_cache
+            .entry(s)
+            .or_insert_with(|| Box::leak(sounds::wav(s, SOUND_VOLUME).into_boxed_slice()));
+        win::play_wav(wav);
+    }
+
     fn pat_hearts(&mut self, x: f32, y: f32) {
+        self.play(Sound::Mew);
         let y = y - 50.0 * self.px();
         self.hearts.burst(x, y, 3, &mut rand::rng());
     }
@@ -609,6 +627,7 @@ impl PetApp {
                 // My own toggle is the truth, not what the relay remembers: tell it again.
                 self.tray.set_peek(self.my_peek);
                 self.tray.set_wander(self.config.wander);
+                self.tray.set_sounds(self.config.sounds);
                 self.send_to_relay(Msg::PeekAllow { on: self.my_peek });
                 let hue = self.config.bow_hue.unwrap_or(me.bow_hue);
                 if hue != self.my_hue {
@@ -740,6 +759,7 @@ impl PetApp {
             Msg::Mail { mail_id, .. } => {
                 let door = self.world.door_x;
                 if add_parcel(&mut self.parcels, env, door) {
+                    self.play(Sound::Chime);
                     self.save_parcels();
                     self.jobs.push_back(Job::Deliver(mail_id));
                 }
@@ -811,7 +831,11 @@ impl PetApp {
                 // link already brings her home via Presence/Disconnected.
             }
             // The pet reacts on screen; no door notification for every touch.
-            Msg::Touch { .. } => {}
+            Msg::Touch { what } => self.play(match what {
+                TouchKind::Pat => Sound::Mew,
+                TouchKind::Poke => Sound::Boing,
+                TouchKind::Yeet => Sound::Whoosh,
+            }),
             Msg::Error { code, message, .. } => {
                 self.bubble(message);
                 if code == "offline" && self.my_pet_away {
@@ -839,6 +863,7 @@ impl PetApp {
     }
 
     fn spawn_visitor(&mut self, job: Job) {
+        self.play(Sound::Door);
         let mut pet = Pet::new(self.world.door_x, self.world.ground());
         pet.enter_from_door(&self.world);
         pet.set_owner_away(self.friend_away);
@@ -949,6 +974,7 @@ impl PetApp {
             Stage::Leaving => {
                 if ev == Some(Event::ReachedDoor) {
                     self.visitor = None;
+                    self.play(Sound::Door);
                 } else if !matches!(
                     v.pet.state,
                     State::Exit | State::Fall | State::Thrown | State::Held
@@ -1001,11 +1027,15 @@ impl PetApp {
             let mut nobody = Pet::new(0.0, 0.0);
             self.games.cancel(&mut self.mine, &mut nobody);
         }
+        for s in self.games.take_sounds() {
+            self.play(s);
+        }
     }
 
     /// The pose is over: take one snapshot (on a thread) and send it to the friend.
     fn on_peek_done(&mut self, peek_id: String) {
         tracing::info!("peek pose done; taking the snapshot");
+        self.play(Sound::Click);
         let (tx, ctx) = (self.capture_tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
             let r = win::capture_primary_jpeg(1920, 80).map_err(|e| format!("{e:#}"));
@@ -1080,6 +1110,7 @@ impl PetApp {
     }
 
     fn on_my_pet_at_door(&mut self) {
+        self.play(Sound::Door);
         match std::mem::replace(&mut self.trip, Trip::None) {
             Trip::Visit => {
                 self.my_pet_away = true;
@@ -1184,6 +1215,11 @@ impl PetApp {
                 }
             }
             TrayAction::Visit => self.start_visit(),
+            TrayAction::ToggleSounds => {
+                self.config.sounds = !self.config.sounds;
+                self.save_config();
+                self.tray.set_sounds(self.config.sounds);
+            }
             TrayAction::ToggleWander => {
                 self.config.wander = !self.config.wander;
                 self.save_config();

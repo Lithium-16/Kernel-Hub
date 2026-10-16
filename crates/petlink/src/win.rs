@@ -9,6 +9,7 @@ use windows::Win32::Foundation::{
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
 };
+use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
 use windows::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
 };
@@ -208,6 +209,18 @@ pub fn foreground_is_fullscreen() -> bool {
         let s = screen();
         let r = rect(r);
         r.x <= s.x && r.y <= s.y && r.right() >= s.right() && r.y + r.h >= s.y + s.h
+    }
+}
+
+/// Plays a WAV image from memory without waiting for it to finish.
+pub fn play_wav(wav: &'static [u8]) {
+    // SAFETY: with SND_MEMORY the pointer is the WAV image itself, which is 'static.
+    unsafe {
+        let _ = PlaySoundW(
+            PCWSTR(wav.as_ptr().cast()),
+            None,
+            SND_MEMORY | SND_ASYNC | SND_NODEFAULT,
+        );
     }
 }
 
