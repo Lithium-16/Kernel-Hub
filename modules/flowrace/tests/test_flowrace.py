@@ -59,7 +59,7 @@ async def test_share_with_anyone_then_the_tailnet_then_stop(tmp_path):
     out = await g.share("anyone with the link")
     assert out["link"] == f"https://{DNS}" and g.sharing == "public"
     assert ["funnel", "--bg", "--yes", "--https=443", "http://127.0.0.1:8095"] in ts.calls
-    assert ["serve", "--https=443", "off"] in ts.calls  # the other kind is switched off first
+    assert ["serve", "--https=443", "--set-path=/", "off"] in ts.calls  # the other kind is switched off first
     await g.share("my tailnet")
     assert g.sharing == "tailnet"
     await g.unshare()

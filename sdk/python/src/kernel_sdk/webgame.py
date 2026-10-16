@@ -90,16 +90,17 @@ def tail(text: str, lines: int = 12) -> str:
     return "\n".join(text.strip().splitlines()[-lines:])
 
 
-def share_url(dns_name: str, port: int) -> str:
+def share_url(dns_name: str, port: int, path: str = "/") -> str:
     host = dns_name.rstrip(".")
-    return f"https://{host}" if port == 443 else f"https://{host}:{port}"
+    base = f"https://{host}" if port == 443 else f"https://{host}:{port}"
+    return base if path == "/" else base + path
 
 
-def sharing_from(serve_status: dict[str, Any], dns_name: str, https_port: int, game_port: int) -> str:
+def sharing_from(serve_status: dict[str, Any], dns_name: str, https_port: int, game_port: int, path: str = "/") -> str:
     """'public', 'tailnet' or 'off', from `tailscale serve status --json`."""
     key = f"{dns_name.rstrip('.')}:{https_port}"
     handlers = ((serve_status.get("Web") or {}).get(key) or {}).get("Handlers") or {}
-    proxy = str((handlers.get("/") or {}).get("Proxy", ""))
+    proxy = str((handlers.get(path) or {}).get("Proxy", ""))
     if not re.search(rf"(127\.0\.0\.1|localhost):{game_port}/?$", proxy):
         return "off"
     return "public" if (serve_status.get("AllowFunnel") or {}).get(key) else "tailnet"
@@ -117,8 +118,10 @@ class TailscaleShare:
         emit: Callable[..., None] | None = None,
         log: logging.Logger | None = None,
         run: Callable[..., Ran] = run_command,
+        path: str = "/",
     ) -> None:
         self.title = title
+        self.path = path
         self.settings = settings
         self.port = port
         self.emit = emit or (lambda *a, **k: None)
@@ -161,8 +164,8 @@ class TailscaleShare:
         except (ActionError, ValueError):
             self.sharing, self.link = "unknown", ""
             return
-        self.sharing = sharing_from(status, dns, port, self.port)
-        self.link = share_url(dns, port) if self.sharing != "off" else ""
+        self.sharing = sharing_from(status, dns, port, self.port, self.path)
+        self.link = share_url(dns, port, self.path) if self.sharing != "off" else ""
 
     async def share(self, who: str) -> dict[str, Any]:
         kind = WHO.get(who)
@@ -171,8 +174,8 @@ class TailscaleShare:
         port = self._https_port()
         ts = self._tailscale()
         # Switch off the other kind first, so the two don't both claim the port.
-        await asyncio.to_thread(self.run, [ts, "funnel" if kind == "serve" else "serve", f"--https={port}", "off"], timeout=30)
-        cmd = [ts, kind, "--bg", "--yes", f"--https={port}", f"http://127.0.0.1:{self.port}"]
+        await asyncio.to_thread(self.run, [ts, "funnel" if kind == "serve" else "serve", f"--https={port}", f"--set-path={self.path}", "off"], timeout=30)
+        cmd = [ts, kind, "--bg", "--yes", f"--https={port}"] + ([f"--set-path={self.path}"] if self.path != "/" else []) + [f"http://127.0.0.1:{self.port}"]
         r = await asyncio.to_thread(self.run, cmd, timeout=40)
         if r.code != 0 and "--yes" in r.out:  # an older Tailscale without --yes
             cmd.remove("--yes")
@@ -196,8 +199,8 @@ class TailscaleShare:
     async def unshare(self) -> dict[str, Any]:
         port = self._https_port()
         ts = self._tailscale()
-        await asyncio.to_thread(self.run, [ts, "funnel", f"--https={port}", "off"], timeout=30)
-        await asyncio.to_thread(self.run, [ts, "serve", f"--https={port}", "off"], timeout=30)
+        await asyncio.to_thread(self.run, [ts, "funnel", f"--https={port}", f"--set-path={self.path}", "off"], timeout=30)
+        await asyncio.to_thread(self.run, [ts, "serve", f"--https={port}", f"--set-path={self.path}", "off"], timeout=30)
         await asyncio.to_thread(self.refresh_sharing)
         self.emit("share.off", f"{self.title} is no longer shared")
         return {"sharing": self.sharing}
