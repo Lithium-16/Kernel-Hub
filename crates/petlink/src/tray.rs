@@ -15,6 +15,7 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 pub enum TrayAction {
     WriteLetter,
     TogglePeek,
+    ToggleWander,
     Visit,
     /// A hue; only changes how my own pet looks (friends see the hue the relay has).
     BowColour(u16),
@@ -58,6 +59,7 @@ impl Parts {
         let letter = MenuItem::new("Write letter…", true, None);
         let peek = CheckMenuItem::new("Let friend peek", true, peek_on, None);
         let visit = MenuItem::new("Send to visit", true, None);
+        let wander = CheckMenuItem::new("Let pets wander", true, true, None);
         let bows = Submenu::new("Bow colour", true);
         let mut bow_items = Vec::new();
         for (name, hue) in BOWS {
@@ -86,6 +88,7 @@ impl Parts {
         add(letter.id(), TrayAction::WriteLetter);
         add(peek.id(), TrayAction::TogglePeek);
         add(visit.id(), TrayAction::Visit);
+        add(wander.id(), TrayAction::ToggleWander);
         add(autostart.id(), TrayAction::Autostart);
         add(update.id(), TrayAction::CheckUpdates);
         add(uninstall.id(), TrayAction::Uninstall);
@@ -95,6 +98,7 @@ impl Parts {
             &letter,
             &peek,
             &visit,
+            &wander,
             &PredefinedMenuItem::separator(),
             &bows,
             &sizes,
@@ -120,6 +124,7 @@ impl Parts {
             dotted,
             peek,
             visit,
+            wander,
             autostart,
             actions,
         })
@@ -128,6 +133,7 @@ impl Parts {
 
 enum Cmd {
     Peek(bool),
+    Wander(bool),
     Friend(String),
     Visiting(bool),
     /// Drop the icon (so no ghost stays behind), then ack.
@@ -143,6 +149,7 @@ struct Parts {
     dotted: Icon,
     peek: CheckMenuItem,
     visit: MenuItem,
+    wander: CheckMenuItem,
     autostart: CheckMenuItem,
     actions: HashMap<MenuId, TrayAction>,
 }
@@ -158,6 +165,7 @@ impl Parts {
                     self.plain.clone()
                 }));
             }
+            Cmd::Wander(on) => self.wander.set_checked(on),
             Cmd::Friend(name) => self.peek.set_text(format!("Let {name} peek")),
             Cmd::Visiting(away) => {
                 self.visit
@@ -277,6 +285,10 @@ impl Tray {
 
     pub fn set_peek(&self, on: bool) {
         self.handle.send(Cmd::Peek(on));
+    }
+
+    pub fn set_wander(&self, on: bool) {
+        self.handle.send(Cmd::Wander(on));
     }
 
     pub fn set_friend(&self, name: &str) {
