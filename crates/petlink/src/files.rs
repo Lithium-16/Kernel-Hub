@@ -76,6 +76,9 @@ pub fn save(dir: &Path, name: &str, bytes: &[u8], source_url: &str) -> std::io::
 
 #[allow(dead_code)]
 pub fn downloads_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("PETLINK_DIR") {
+        return PathBuf::from(d).join("Downloads"); // test setups keep to their own folder
+    }
     std::env::var_os("USERPROFILE")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
