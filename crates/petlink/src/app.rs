@@ -185,6 +185,14 @@ fn plan_peek(
     }
 }
 
+/// The swearing emote cycles through these, in the same 5-wide pixel style as the other emotes.
+const CURSES: [&[&str]; 4] = [
+    &["..X..", "..X..", "..X..", "..X..", ".....", "..X.."],
+    &["XX..X", "XX.X.", "..X..", ".X.XX", "X..XX", "....."],
+    &[".XXX.", "X...X", "X.XX.", "X.X.X", ".XXX.", "....."],
+    &[".X.X.", "XXXXX", ".X.X.", "XXXXX", ".X.X.", "....."],
+];
+
 /// What a visiting pet is here to do.
 #[derive(Clone)]
 enum Job {
@@ -1839,13 +1847,15 @@ impl PetApp {
             State::Sit => &tex.sit,
             State::Sleep => &tex.sit,
             State::Peek => &tex.peek,
-            State::Patted | State::Blush | State::HeadPatted => &tex.pat,
+            State::Patted | State::Blush | State::HeadPatted | State::Angry => &tex.pat,
             State::Dizzy => &tex.fallen,
             _ => &tex.idle,
         };
         let (w, h) = (32.0 * px, 48.0 * px);
         let mut bob = 0.0;
+        let mut shake = 0.0;
         match pet.state {
+            State::Angry => shake = (t * 40.0).sin() * px,
             State::Patted | State::HeadPatted => bob = -(t * 12.0).sin().abs() * 6.0 * px,
             State::Idle => bob = if (t * 2.5).sin() > 0.0 { -px } else { 0.0 },
             _ => {}
@@ -1854,8 +1864,10 @@ impl PetApp {
         if matches!(pet.state, State::Sit | State::Sleep) {
             bob += SIT_FEET_DROP_PX * px;
         }
-        let rect =
-            egui::Rect::from_min_size(Pos2::new(pet.x - w / 2.0, pet.y - h + bob), Vec2::new(w, h));
+        let rect = egui::Rect::from_min_size(
+            Pos2::new(pet.x - w / 2.0 + shake, pet.y - h + bob),
+            Vec2::new(w, h),
+        );
         let uv = if pet.facing_left {
             egui::Rect::from_min_max(Pos2::new(1.0, 0.0), Pos2::new(0.0, 1.0))
         } else {
@@ -1878,6 +1890,37 @@ impl PetApp {
         let p = ui.painter();
         let head = Pos2::new(pet.x, pet.y - 40.0 * px);
         match pet.state {
+            State::Angry => {
+                // The anime anger mark: two thick red arcs over a curved arch, pulsing on her head.
+                const MARK: [&str; 11] = [
+                    "...XXX...XXX...",
+                    "..XXX.....XXX..",
+                    ".XXX.......XXX.",
+                    ".XXX.......XXX.",
+                    ".XXX.......XXX.",
+                    "..XXX.....XXX..",
+                    "...XXX...XXX...",
+                    "...............",
+                    "....XXXXXXX....",
+                    "...XXX...XXX...",
+                    "..XXX.....XXX..",
+                ];
+                let beat = 1.0 + 0.2 * (t * 14.0).sin();
+                let mp = px * beat;
+                let origin = Pos2::new(pet.x + 13.0 * px - 7.5 * mp, pet.y - 40.0 * px - 5.5 * mp);
+                for (ry, row) in MARK.iter().enumerate() {
+                    for (rx, ch) in row.chars().enumerate() {
+                        if ch == 'X' {
+                            let at = origin + Vec2::new(rx as f32, ry as f32) * mp;
+                            p.rect_filled(
+                                egui::Rect::from_min_size(at, Vec2::splat(mp)),
+                                0.0,
+                                Color32::from_rgb(205, 10, 10),
+                            );
+                        }
+                    }
+                }
+            }
             State::Sleep | State::Sit => {
                 // Three Zs drifting up and to the side, each a little bigger than the last.
                 for k in 0..3 {
@@ -1918,6 +1961,8 @@ impl PetApp {
             Emote::Question => &[".XXX.", "X...X", "...X.", "..X..", ".....", "..X.."],
             Emote::Bang => &["..X..", "..X..", "..X..", "..X..", ".....", "..X.."],
             Emote::Heart => &[".....", ".X.X.", "XXXXX", ".XXX.", "..X..", "....."],
+            // Swearing: the symbols flicker through, one per quarter second.
+            Emote::Curse => CURSES[((left * 4.0) as usize) % CURSES.len()],
         };
         let alpha = (left / 0.3).min(1.0); // fade out at the end
         let a = |c: Color32| c.gamma_multiply(alpha);
@@ -1950,7 +1995,7 @@ impl PetApp {
             ],
             Stroke::new(stroke.width + 1.0, white),
         );
-        let ink = if emote == Emote::Heart {
+        let ink = if matches!(emote, Emote::Heart | Emote::Curse) {
             a(Color32::from_rgb(230, 50, 70))
         } else {
             dark
@@ -2032,7 +2077,7 @@ impl PetApp {
             pets.push(&mut v.pet);
         }
         let at = self.objects.items.first().map(|o| (o.x, o.y));
-        if self.objects.chase(&mut pets, &self.world).is_some() {
+        if self.objects.chase(&mut pets, &self.world, dt).is_some() {
             if let Some((x, y)) = at {
                 self.hearts.burst(x, y - 20.0 * px, 3, &mut rand::rng());
             }

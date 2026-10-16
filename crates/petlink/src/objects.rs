@@ -13,6 +13,8 @@ const BOUNCE_VX_DAMP: f32 = 0.7;
 const EAT_REACH_X: f32 = 22.0;
 /// ...and no higher than this above her feet (she stretches up for it).
 const EAT_REACH_UP: f32 = 48.0;
+/// A treat dragged faster than this is being kept away from her.
+const TEASE_SPEED: f32 = 60.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
@@ -51,6 +53,9 @@ pub struct Object {
     vx: f32,
     vy: f32,
     pub motion: Motion,
+    /// How fast it moved over the last frame (px/s): being dragged away shows up here.
+    pub speed: f32,
+    last: (f32, f32),
 }
 
 impl Object {
@@ -62,6 +67,8 @@ impl Object {
             vx: 0.0,
             vy: 0.0,
             motion: Motion::Falling,
+            speed: 0.0,
+            last: (x, y),
         }
     }
 
@@ -236,8 +243,14 @@ fn route(world: &World, from: usize, to: usize, want_x: f32) -> Option<Step> {
 
 /// Sends one pet after one object: along her floor, then window to window (jumping up, or
 /// walking off edges to come down), and when there is no way she waits underneath, hopping.
-pub fn chase(pet: &mut Pet, o: &Object, world: &World) -> Chase {
+pub fn chase(pet: &mut Pet, o: &Object, world: &World, dt: f32) -> Chase {
     if !pet.free_to_chase() {
+        return Chase::Going;
+    }
+    // Being teased (held out of reach, or kept moving away) wears her patience down.
+    let teased = o.motion == Motion::Held || o.speed > TEASE_SPEED;
+    if teased && pet.stew(dt) {
+        pet.get_angry();
         return Chase::Going;
     }
     let span = floor_span(world, pet.x, pet.y);
@@ -258,6 +271,9 @@ pub fn chase(pet: &mut Pet, o: &Object, world: &World) -> Chase {
         }
         pet.face(o.x);
         pet.hop();
+        if !teased && pet.stew(dt) {
+            pet.get_angry();
+        }
         return Chase::Going;
     }
     let step = match (here, target) {
@@ -278,12 +294,15 @@ pub fn chase(pet: &mut Pet, o: &Object, world: &World) -> Chase {
         }
         Some(Step::Walk { to_x }) => pet.chase_to(to_x),
         None => {
-            // No way up from here: wait underneath it and hop.
+            // No way up from here: wait underneath it and hop, getting crosser.
             if (near(o.x) - pet.x).abs() > EAT_REACH_X {
                 pet.chase_to(near(o.x));
             } else {
                 pet.face(o.x);
                 pet.hop();
+            }
+            if !teased && pet.stew(dt) {
+                pet.get_angry();
             }
         }
     }
@@ -298,13 +317,15 @@ pub struct Objects {
 impl Objects {
     pub fn step(&mut self, dt: f32, world: &World, px: f32) {
         for o in &mut self.items {
+            o.speed = (o.x - o.last.0).hypot(o.y - o.last.1) / dt.max(1e-3);
             o.step(dt, world, px);
+            o.last = (o.x, o.y);
         }
     }
 
     /// Sends the closest free pet after the first edible object. Returns which pet (an index
     /// into `pets`) ate it, if one did; the object is gone then.
-    pub fn chase(&mut self, pets: &mut [&mut Pet], world: &World) -> Option<usize> {
+    pub fn chase(&mut self, pets: &mut [&mut Pet], world: &World, dt: f32) -> Option<usize> {
         let i = self.items.iter().position(|o| o.kind.edible())?;
         let o = self.items[i].clone();
         let who = (0..pets.len())
@@ -313,7 +334,7 @@ impl Objects {
                 let d = |p: &Pet| (p.x - o.x).abs() + 2.0 * (p.y - o.y).abs();
                 d(pets[a]).total_cmp(&d(pets[b]))
             })?;
-        if chase(pets[who], &o, world) == Chase::Ate {
+        if chase(pets[who], &o, world, dt) == Chase::Ate {
             self.items.remove(i);
             pets[who].eat();
             return Some(who);
@@ -325,6 +346,7 @@ impl Objects {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pet::State;
     use rand::{SeedableRng, rngs::StdRng};
 
     fn world(windows: &[Rect]) -> World {
@@ -364,7 +386,7 @@ mod tests {
         for i in 0..(max_secs * 60.0) as usize {
             objects.step(1.0 / 60.0, w, 1.0);
             pet.step(1.0 / 60.0, w, &mut rng);
-            if objects.chase(&mut [&mut *pet], w).is_some() {
+            if objects.chase(&mut [&mut *pet], w, 1.0 / 60.0).is_some() {
                 return Some(i as f32 / 60.0);
             }
         }
@@ -431,7 +453,7 @@ mod tests {
         let mut hopped = false;
         for _ in 0..(20.0 * 60.0) as usize {
             pet.step(1.0 / 60.0, &w, &mut rng);
-            assert!(objects.chase(&mut [&mut pet], &w).is_none());
+            assert!(objects.chase(&mut [&mut pet], &w, 1.0 / 60.0).is_none());
             hopped |= pet.is_hopping();
         }
         assert!(hopped, "she should have hopped for it");
@@ -483,7 +505,7 @@ mod tests {
         let mut hopped = false;
         for _ in 0..(40.0 * 60.0) as usize {
             pet.step(1.0 / 60.0, &w, &mut rng);
-            assert!(objects.chase(&mut [&mut pet], &w).is_none());
+            assert!(objects.chase(&mut [&mut pet], &w, 1.0 / 60.0).is_none());
             hopped |= pet.is_hopping();
         }
         assert!(hopped);
@@ -492,6 +514,65 @@ mod tests {
             "she never left the ground for good: {}",
             pet.y
         );
+    }
+
+    /// Runs a pet after a cake for `secs`, calling `each(frame, &mut objects)` before every frame;
+    /// returns whether she got angry at any point.
+    fn angry_within(
+        w: &World,
+        pet: &mut Pet,
+        cake: Object,
+        secs: f32,
+        mut each: impl FnMut(usize, &mut Objects),
+    ) -> bool {
+        let mut objects = Objects { items: vec![cake] };
+        let mut rng = StdRng::seed_from_u64(3);
+        for i in 0..(secs * 60.0) as usize {
+            each(i, &mut objects);
+            objects.step(1.0 / 60.0, w, 1.0);
+            pet.step(1.0 / 60.0, w, &mut rng);
+            let _ = objects.chase(&mut [&mut *pet], w, 1.0 / 60.0);
+            if pet.state == State::Angry {
+                return true;
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn she_gets_angry_when_the_cake_is_out_of_reach_for_good() {
+        let w = world(&[window(500.0, 300.0, 600.0)]);
+        let mut pet = Pet::new(300.0, 1032.0);
+        let mut cake = Object::new(Kind::Cake, 800.0, 300.0);
+        cake.motion = Motion::Resting;
+        assert!(angry_within(&w, &mut pet, cake, 30.0, |_, _| {}));
+    }
+
+    #[test]
+    fn she_gets_angry_when_you_keep_holding_it_away_or_moving_it() {
+        let w = world(&[]);
+        // held up high above her
+        let mut pet = Pet::new(300.0, 1032.0);
+        let mut cake = Object::new(Kind::Cake, 400.0, 800.0);
+        cake.grab();
+        assert!(angry_within(&w, &mut pet, cake, 30.0, |_, _| {}));
+        // dragged along the floor just ahead of her, faster than she can run
+        let mut pet = Pet::new(300.0, 1032.0);
+        let mut cake = Object::new(Kind::Cake, 700.0, 1032.0);
+        cake.grab();
+        let got = angry_within(&w, &mut pet, cake, 40.0, |i, o| {
+            o.items[0].drag_to(700.0 + (i as f32 * 3.0) % 900.0, 1032.0);
+        });
+        assert!(got, "she never lost her temper while it was dragged away");
+    }
+
+    #[test]
+    fn she_stays_calm_when_she_can_simply_get_it() {
+        let w = world(&[]);
+        let mut pet = Pet::new(300.0, 1032.0);
+        let mut cake = Object::new(Kind::Cake, 900.0, 1032.0);
+        cake.motion = Motion::Resting;
+        assert!(!angry_within(&w, &mut pet, cake, 30.0, |_, _| {}));
     }
 
     #[test]
@@ -521,7 +602,7 @@ mod tests {
         for _ in 0..(20.0 * 60.0) as usize {
             near.step(1.0 / 60.0, &w, &mut rng);
             far.step(1.0 / 60.0, &w, &mut rng);
-            if let Some(i) = objects.chase(&mut [&mut near, &mut far], &w) {
+            if let Some(i) = objects.chase(&mut [&mut near, &mut far], &w, 1.0 / 60.0) {
                 ate = Some(i);
                 break;
             }
