@@ -6,6 +6,7 @@ use crate::fx::Hearts;
 use crate::games::{Games, Hand, Prop, Who, auto_gap, auto_stay};
 use crate::mailui::{self, Compose, MailAction};
 use crate::net::{Net, NetCmd, NetEvent};
+use crate::objects::{Kind, Motion, Object, Objects};
 use crate::pet::{Emote, Event, Pet, State};
 use crate::protocol::{Envelope, FileRef, Msg, Person, PresenceState, TouchKind, new_id};
 use crate::social::Social;
@@ -184,6 +185,14 @@ fn plan_peek(
     }
 }
 
+/// The swearing emote cycles through these, in the same 5-wide pixel style as the other emotes.
+const CURSES: [&[&str]; 4] = [
+    &["..X..", "..X..", "..X..", "..X..", ".....", "..X.."],
+    &["XX..X", "XX.X.", "..X..", ".X.XX", "X..XX", "....."],
+    &[".XXX.", "X...X", "X.XX.", "X.X.X", ".XXX.", "....."],
+    &[".X.X.", "XXXXX", ".X.X.", "XXXXX", ".X.X.", "....."],
+];
+
 /// What a visiting pet is here to do.
 #[derive(Clone)]
 enum Job {
@@ -214,6 +223,8 @@ enum Target {
     Mine,
     Visitor,
     Door,
+    /// A treat or another thing lying about.
+    Object(usize),
     Parcel(usize),
     /// A letter of mine that failed to go out.
     Outgoing(usize),
@@ -267,6 +278,7 @@ pub struct PetApp {
     hearts: Hearts,
     social: Social,
     games: Games,
+    objects: Objects,
     sound_cache: HashMap<Sound, &'static [u8]>,
     /// The peek I am waiting on was asked while visiting: she stays when it is answered.
     peek_from_visit: bool,
@@ -454,6 +466,7 @@ impl PetApp {
             hearts: Hearts::default(),
             social: Social::new(fast, &mut rand::rng()),
             games: Games::new(fast, &mut rand::rng()),
+            objects: Objects::default(),
             sound_cache: HashMap::new(),
             peek_from_visit: false,
             next_auto_in: auto_gap(&mut rand::rng()) / fast.max(1.0),
@@ -1562,6 +1575,14 @@ impl PetApp {
 
     fn target_at(&self, p: Pos2) -> Option<Target> {
         let px = self.px();
+        if let Some(i) = self
+            .objects
+            .items
+            .iter()
+            .rposition(|o| inside(o.hitbox(px), p))
+        {
+            return Some(Target::Object(i));
+        }
         if !self.my_pet_hidden() && inside(self.mine.hitbox(px), p) {
             return Some(Target::Mine);
         }
@@ -1617,6 +1638,7 @@ impl PetApp {
             let feet = match target {
                 Target::Mine => Some(Pos2::new(self.mine.x, self.mine.y)),
                 Target::Visitor => self.visitor.as_ref().map(|v| Pos2::new(v.pet.x, v.pet.y)),
+                Target::Object(i) => self.objects.items.get(i).map(|o| Pos2::new(o.x, o.y)),
                 _ => None,
             };
             self.drag = Some(DragState {
@@ -1633,6 +1655,17 @@ impl PetApp {
         d.last.push((now, cur));
         d.last
             .retain(|(t, _)| now.duration_since(*t) <= Duration::from_millis(80));
+        if let Target::Object(i) = d.target
+            && let Some(o) = self.objects.items.get_mut(i)
+        {
+            if !d.grabbed && cur.distance(d.start) > 4.0 {
+                o.grab();
+                d.grabbed = true;
+            }
+            if d.grabbed {
+                o.drag_to(cur.x - d.grab_off.x, cur.y - d.grab_off.y);
+            }
+        }
         let pet = match d.target {
             Target::Mine => Some(&mut self.mine),
             Target::Visitor => self.visitor.as_mut().map(|v| &mut v.pet),
@@ -1662,6 +1695,11 @@ impl PetApp {
             };
             match d.target {
                 Target::Mine => self.mine.throw(vx, vy),
+                Target::Object(i) => {
+                    if let Some(o) = self.objects.items.get_mut(i) {
+                        o.throw(vx, vy);
+                    }
+                }
                 Target::Visitor => {
                     if let Some(v) = &mut self.visitor {
                         v.pet.throw(vx, vy);
@@ -1698,6 +1736,7 @@ impl PetApp {
             }
             Target::Parcel(i) => self.open_parcel(ctx, i),
             Target::Outgoing(i) => self.retry_outgoing(i),
+            Target::Object(_) => {}
         }
     }
 
@@ -1722,6 +1761,7 @@ impl PetApp {
         let can = self.can_interact();
         let peek_ok = self.peek_plan() != PeekPlan::No;
         let away = self.my_pet_away;
+        let no_treat = self.objects.items.is_empty();
         let resp = egui::Area::new(egui::Id::new("door_menu"))
             .fixed_pos(pos)
             .order(egui::Order::Foreground)
@@ -1732,6 +1772,12 @@ impl PetApp {
                     }
                     if ui.add_enabled(peek_ok, egui::Button::new("Peek")).clicked() {
                         action = Some(1);
+                    }
+                    if ui
+                        .add_enabled(no_treat, egui::Button::new("Get treat"))
+                        .clicked()
+                    {
+                        action = Some(3);
                     }
                     let label = if away { "Call home" } else { "Send to visit" };
                     if ui
@@ -1755,6 +1801,10 @@ impl PetApp {
             Some(0) => self.open_compose(),
             Some(1) => self.start_peek(),
             Some(2) => self.start_visit(),
+            Some(3) => self
+                .objects
+                .items
+                .push(Object::new(Kind::Cake, pos.x + 60.0, pos.y)),
             _ => {}
         }
     }
@@ -1790,18 +1840,22 @@ impl PetApp {
         let walk = &tex.walk[pet.frame % 8];
         let img = match pet.state {
             _ if pet.carry_posing() => &tex.carry,
-            State::Carry | State::Wander { .. } | State::Approach { .. } => walk,
+            State::Carry | State::Wander { .. } | State::Approach { .. } | State::Chase { .. } => {
+                walk
+            }
             State::Enter | State::Exit => walk,
             State::Sit => &tex.sit,
             State::Sleep => &tex.sit,
             State::Peek => &tex.peek,
-            State::Patted | State::Blush | State::HeadPatted => &tex.pat,
+            State::Patted | State::Blush | State::HeadPatted | State::Angry => &tex.pat,
             State::Dizzy => &tex.fallen,
             _ => &tex.idle,
         };
         let (w, h) = (32.0 * px, 48.0 * px);
         let mut bob = 0.0;
+        let mut shake = 0.0;
         match pet.state {
+            State::Angry => shake = (t * 40.0).sin() * px,
             State::Patted | State::HeadPatted => bob = -(t * 12.0).sin().abs() * 6.0 * px,
             State::Idle => bob = if (t * 2.5).sin() > 0.0 { -px } else { 0.0 },
             _ => {}
@@ -1810,8 +1864,10 @@ impl PetApp {
         if matches!(pet.state, State::Sit | State::Sleep) {
             bob += SIT_FEET_DROP_PX * px;
         }
-        let rect =
-            egui::Rect::from_min_size(Pos2::new(pet.x - w / 2.0, pet.y - h + bob), Vec2::new(w, h));
+        let rect = egui::Rect::from_min_size(
+            Pos2::new(pet.x - w / 2.0 + shake, pet.y - h + bob),
+            Vec2::new(w, h),
+        );
         let uv = if pet.facing_left {
             egui::Rect::from_min_max(Pos2::new(1.0, 0.0), Pos2::new(0.0, 1.0))
         } else {
@@ -1834,6 +1890,81 @@ impl PetApp {
         let p = ui.painter();
         let head = Pos2::new(pet.x, pet.y - 40.0 * px);
         match pet.state {
+            State::Angry => {
+                // A little storm cloud over her head with a flickering lightning bolt. Drawn and
+                // reviewed with the pixel-art skill: k ink, d/m/l cloud shadow/base/light,
+                // o/y/w bolt edge/body/core. Whole pixels only; it bobs one pixel.
+                const BOLT: [&str; 20] = [
+                    "........kk..kkkk......",
+                    "......kkllkkllllkk....",
+                    ".....klllmmllmmmmdk...",
+                    "....kllmmmmmmmmmmdk...",
+                    "..kkllmmmmmmmmmmmmdk..",
+                    ".klllmmmmmmmmmmmmmmk..",
+                    ".klmmmmmmmmmmmmmmmmdk.",
+                    "kllmmmmmmmmmmmmmmmdddk",
+                    ".kmmmmmmmmmmmmmmmddddk",
+                    ".kddmmmmmmmmwwodddddk.",
+                    "..kkdddddddwyodddddk..",
+                    "....kkddddwyydddkkk...",
+                    "......kkkwyyywok......",
+                    ".......kwyyyyok.......",
+                    "......koooyyok........",
+                    ".......kkkyyk.........",
+                    "........kwyok.........",
+                    "........kyok..........",
+                    ".......kwok...........",
+                    ".......kok............",
+                ];
+                const PLAIN: [&str; 20] = [
+                    "........kk..kkkk......",
+                    "......kkllkkllllkk....",
+                    ".....klllmmllmmmmdk...",
+                    "....kllmmmmmmmmmmdk...",
+                    "..kkllmmmmmmmmmmmmdk..",
+                    ".klllmmmmmmmmmmmmmmk..",
+                    ".klmmmmmmmmmmmmmmmmdk.",
+                    "kllmmmmmmmmmmmmmmmdddk",
+                    ".kmmmmmmmmmmmmmmmddddk",
+                    ".kddmmmmmmmmmmddddddk.",
+                    "..kkdddddddddddddddk..",
+                    "....kkddddddddddkkk...",
+                    "......kkkkkkkkkk......",
+                    "......................",
+                    "......................",
+                    "......................",
+                    "......................",
+                    "......................",
+                    "......................",
+                    "......................",
+                ];
+                let rows: &[&str] = if (t * 6.0) as i32 % 3 != 0 {
+                    &BOLT
+                } else {
+                    &PLAIN
+                };
+                let bob = if (t * 4.0).sin() > 0.0 { 0.0 } else { px };
+                let origin = Pos2::new(
+                    (pet.x - 11.0 * px).round(),
+                    (pet.y - 64.0 * px + bob).round(),
+                );
+                for (ry, row) in rows.iter().enumerate() {
+                    for (rx, ch) in row.chars().enumerate() {
+                        let c = match ch {
+                            'k' => Color32::from_rgb(22, 19, 31),
+                            'd' => Color32::from_rgb(75, 78, 115),
+                            'm' => Color32::from_rgb(111, 115, 156),
+                            'l' => Color32::from_rgb(163, 168, 212),
+                            'o' => Color32::from_rgb(224, 138, 30),
+                            'y' => Color32::from_rgb(255, 210, 63),
+                            'w' => Color32::from_rgb(255, 244, 168),
+                            _ => continue,
+                        };
+                        let at = origin + Vec2::new(rx as f32, ry as f32) * px;
+                        p.rect_filled(egui::Rect::from_min_size(at, Vec2::splat(px)), 0.0, c);
+                    }
+                }
+            }
             State::Sleep | State::Sit => {
                 // Three Zs drifting up and to the side, each a little bigger than the last.
                 for k in 0..3 {
@@ -1874,6 +2005,8 @@ impl PetApp {
             Emote::Question => &[".XXX.", "X...X", "...X.", "..X..", ".....", "..X.."],
             Emote::Bang => &["..X..", "..X..", "..X..", "..X..", ".....", "..X.."],
             Emote::Heart => &[".....", ".X.X.", "XXXXX", ".XXX.", "..X..", "....."],
+            // Swearing: the symbols flicker through, one per quarter second.
+            Emote::Curse => CURSES[((left * 4.0) as usize) % CURSES.len()],
         };
         let alpha = (left / 0.3).min(1.0); // fade out at the end
         let a = |c: Color32| c.gamma_multiply(alpha);
@@ -1906,7 +2039,7 @@ impl PetApp {
             ],
             Stroke::new(stroke.width + 1.0, white),
         );
-        let ink = if emote == Emote::Heart {
+        let ink = if matches!(emote, Emote::Heart | Emote::Curse) {
             a(Color32::from_rgb(230, 50, 70))
         } else {
             dark
@@ -1963,6 +2096,80 @@ impl PetApp {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /// Things lying about fall, rest, and get chased and eaten by whichever pet is closest.
+    fn step_objects(&mut self, dt: f32) {
+        let px = self.px();
+        self.objects.step(dt, &self.world, px);
+        if self.objects.items.is_empty() {
+            return;
+        }
+        let mine_here = !self.my_pet_hidden();
+        let visitor_here = self
+            .visitor
+            .as_ref()
+            .is_some_and(|v| matches!(v.job, Job::Visit) && v.stage == Stage::Working);
+        let mut pets: Vec<&mut Pet> = Vec::new();
+        if mine_here {
+            pets.push(&mut self.mine);
+        }
+        if visitor_here && let Some(v) = &mut self.visitor {
+            pets.push(&mut v.pet);
+        }
+        let at = self.objects.items.first().map(|o| (o.x, o.y));
+        if self.objects.chase(&mut pets, &self.world, dt).is_some() {
+            if let Some((x, y)) = at {
+                self.hearts.burst(x, y - 20.0 * px, 3, &mut rand::rng());
+            }
+            self.play(Sound::Munch);
+        }
+    }
+
+    fn draw_objects(&self, ui: &egui::Ui) {
+        const CAKE: [&str; 11] = [
+            ".......RR.......",
+            ".......rR.K.....",
+            "..KKKKKKKKKKKK..",
+            ".KWWWWWWWWWWWWK.",
+            ".KWWWWWWWWWWWWK.",
+            ".KCCCCCCCCCCCCK.",
+            ".KPPPPPPPPPPPPK.",
+            ".KCCCCCCCCCCCCK.",
+            ".KCCCCCCCCCCCCK.",
+            ".KBBBBBBBBBBBBK.",
+            "..KKKKKKKKKKKK..",
+        ];
+        let px = self.px();
+        let p = ui.painter();
+        for o in &self.objects.items {
+            let rows: &[&str] = match o.kind {
+                Kind::Cake => &CAKE,
+            };
+            let lift = if o.motion == Motion::Held {
+                -2.0 * px
+            } else {
+                0.0
+            };
+            let (w, h) = o.kind.size();
+            let origin = Pos2::new(o.x - w * px / 2.0, o.y - h * px + lift);
+            for (ry, row) in rows.iter().enumerate() {
+                for (rx, ch) in row.chars().enumerate() {
+                    let c = match ch {
+                        'K' => Color32::from_rgb(74, 44, 42),
+                        'W' => Color32::from_rgb(255, 246, 240),
+                        'C' => Color32::from_rgb(247, 214, 140),
+                        'P' => Color32::from_rgb(240, 120, 150),
+                        'B' => Color32::from_rgb(120, 70, 50),
+                        'R' => Color32::from_rgb(214, 40, 60),
+                        'r' => Color32::from_rgb(255, 130, 140),
+                        _ => continue,
+                    };
+                    let at = origin + Vec2::new(rx as f32, ry as f32) * px;
+                    p.rect_filled(egui::Rect::from_min_size(at, Vec2::splat(px)), 0.0, c);
                 }
             }
         }
@@ -2033,6 +2240,7 @@ impl PetApp {
             self.draw_pet(ui, &v.pet, tex);
             self.draw_emote(ui, &v.pet);
         }
+        self.draw_objects(ui);
         self.draw_props(ui);
         self.draw_hearts(ui);
         for o in self.outgoing.iter().filter(|o| !o.failed.is_empty()) {
@@ -2138,6 +2346,7 @@ impl eframe::App for PetApp {
         self.step_mine(dt, &mut rng);
         self.step_visitor(dt, &mut rng);
         self.step_social(dt, &mut rng);
+        self.step_objects(dt);
         self.hearts.update(dt);
         self.bubbles
             .retain(|(_, t)| t.elapsed() < Duration::from_secs(BUBBLE_S));
