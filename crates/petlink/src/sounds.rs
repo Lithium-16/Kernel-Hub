@@ -71,16 +71,19 @@ fn noise(secs: f32, swell: bool) -> Vec<f32> {
         .collect()
 }
 
-/// A low rumble that pulses about 25 times a second.
+/// A soft, warm purr: a low sine with a quiet octave, pulsing gently about 20 times a second and
+/// fading in and out slowly. Kept well under full scale: a sustained low tone is much louder to
+/// the ear than a short blip of the same peak, and the first version clipped and hurt.
 fn purr(secs: f32) -> Vec<f32> {
     let n = (secs * RATE as f32) as usize;
     (0..n)
         .map(|i| {
             let t = i as f32 / RATE as f32;
             let s = i as f32 / n as f32;
-            let tone = (TAU * 95.0 * t).sin() + 0.5 * (TAU * 190.0 * t).sin();
-            let pulse = 0.55 + 0.45 * (TAU * 25.0 * t).sin();
-            tone * pulse * (s * std::f32::consts::PI).sin() * 0.7
+            let tone = (TAU * 120.0 * t).sin() + 0.25 * (TAU * 240.0 * t).sin();
+            let pulse = 0.75 + 0.25 * (TAU * 20.0 * t).sin();
+            let env = (s * std::f32::consts::PI).sin().powf(1.6);
+            tone * pulse * env * 0.28
         })
         .collect()
 }
@@ -254,6 +257,27 @@ mod tests {
             (crossings as f32 / secs) < 1500.0,
             "{} crossings/s",
             crossings as f32 / secs
+        );
+    }
+
+    #[test]
+    fn no_sound_clips_and_the_purr_is_soft_and_click_free() {
+        for s in ALL {
+            let x = samples(s);
+            let peak = x.iter().fold(0.0_f32, |m, v| m.max(v.abs()));
+            assert!(
+                peak <= 1.0,
+                "{s:?} clips at {peak}: it saturates and sounds harsh"
+            );
+        }
+        let p = samples(Sound::Purr);
+        let peak = p.iter().fold(0.0_f32, |m, v| m.max(v.abs()));
+        assert!(peak <= 0.45, "purr too loud: {peak}");
+        let edge = RATE as usize / 100; // first and last 10 ms
+        let rms = |w: &[f32]| (w.iter().map(|v| v * v).sum::<f32>() / w.len() as f32).sqrt();
+        assert!(
+            rms(&p[..edge]) < 0.02 && rms(&p[p.len() - edge..]) < 0.02,
+            "purr starts or ends with a click"
         );
     }
 

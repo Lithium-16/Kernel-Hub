@@ -1891,35 +1891,73 @@ impl PetApp {
         let head = Pos2::new(pet.x, pet.y - 40.0 * px);
         match pet.state {
             State::Angry => {
-                // The anime anger mark: two tapered arcs bowing inward over a frown arch, in
-                // three reds (D shadow, R base, L light). Drawn and reviewed with the pixel-art
-                // skill; exactly mirrored, whole pixels only, beating one pixel up and down.
-                const MARK: [&str; 13] = [
-                    "..LL...........LL..",
-                    "..LRR.........RRL..",
-                    "...RRD.......DRR...",
-                    "...LRR.......RRL...",
-                    "...LRRD.....DRRL...",
-                    "...LRRD.....DRRL...",
-                    "...LRDD.....DDRL...",
-                    "...LRD.......DRL...",
-                    "...LDD.......DDL...",
-                    "..LLD...LLL...DLL..",
-                    "..DDD.LLLRLLL.DDD..",
-                    "..D...DDDDDDD...D..",
-                    "......D.....D......",
+                // A little storm cloud over her head with a flickering lightning bolt. Drawn and
+                // reviewed with the pixel-art skill: k ink, d/m/l cloud shadow/base/light,
+                // o/y/w bolt edge/body/core. Whole pixels only; it bobs one pixel.
+                const BOLT: [&str; 20] = [
+                    "........kk..kkkk......",
+                    "......kkllkkllllkk....",
+                    ".....klllmmllmmmmdk...",
+                    "....kllmmmmmmmmmmdk...",
+                    "..kkllmmmmmmmmmmmmdk..",
+                    ".klllmmmmmmmmmmmmmmk..",
+                    ".klmmmmmmmmmmmmmmmmdk.",
+                    "kllmmmmmmmmmmmmmmmdddk",
+                    ".kmmmmmmmmmmmmmmmddddk",
+                    ".kddmmmmmmmmwwodddddk.",
+                    "..kkdddddddwyodddddk..",
+                    "....kkddddwyydddkkk...",
+                    "......kkkwyyywok......",
+                    ".......kwyyyyok.......",
+                    "......koooyyok........",
+                    ".......kkkyyk.........",
+                    "........kwyok.........",
+                    "........kyok..........",
+                    ".......kwok...........",
+                    ".......kok............",
                 ];
-                let beat = if (t * 9.0).sin() > 0.0 { 0.0 } else { px };
+                const PLAIN: [&str; 20] = [
+                    "........kk..kkkk......",
+                    "......kkllkkllllkk....",
+                    ".....klllmmllmmmmdk...",
+                    "....kllmmmmmmmmmmdk...",
+                    "..kkllmmmmmmmmmmmmdk..",
+                    ".klllmmmmmmmmmmmmmmk..",
+                    ".klmmmmmmmmmmmmmmmmdk.",
+                    "kllmmmmmmmmmmmmmmmdddk",
+                    ".kmmmmmmmmmmmmmmmddddk",
+                    ".kddmmmmmmmmmmddddddk.",
+                    "..kkdddddddddddddddk..",
+                    "....kkddddddddddkkk...",
+                    "......kkkkkkkkkk......",
+                    "......................",
+                    "......................",
+                    "......................",
+                    "......................",
+                    "......................",
+                    "......................",
+                    "......................",
+                ];
+                let rows: &[&str] = if (t * 6.0) as i32 % 3 != 0 {
+                    &BOLT
+                } else {
+                    &PLAIN
+                };
+                let bob = if (t * 4.0).sin() > 0.0 { 0.0 } else { px };
                 let origin = Pos2::new(
-                    (pet.x - 2.0 * px).round(),
-                    (pet.y - 59.0 * px + beat).round(),
+                    (pet.x - 11.0 * px).round(),
+                    (pet.y - 64.0 * px + bob).round(),
                 );
-                for (ry, row) in MARK.iter().enumerate() {
+                for (ry, row) in rows.iter().enumerate() {
                     for (rx, ch) in row.chars().enumerate() {
                         let c = match ch {
-                            'L' => Color32::from_rgb(255, 106, 82),
-                            'R' => Color32::from_rgb(212, 20, 28),
-                            'D' => Color32::from_rgb(143, 10, 20),
+                            'k' => Color32::from_rgb(22, 19, 31),
+                            'd' => Color32::from_rgb(75, 78, 115),
+                            'm' => Color32::from_rgb(111, 115, 156),
+                            'l' => Color32::from_rgb(163, 168, 212),
+                            'o' => Color32::from_rgb(224, 138, 30),
+                            'y' => Color32::from_rgb(255, 210, 63),
+                            'w' => Color32::from_rgb(255, 244, 168),
                             _ => continue,
                         };
                         let at = origin + Vec2::new(rx as f32, ry as f32) * px;
