@@ -10,6 +10,10 @@ const IDLE: &[u8] = include_bytes!("../assets/idle.png");
 const SIT: &[u8] = include_bytes!("../assets/sit.png");
 const SLEEP: &[u8] = include_bytes!("../assets/sleep.png");
 const CARRY: &[u8] = include_bytes!("../assets/carry.png");
+const PAT: &[u8] = include_bytes!("../assets/pat.png");
+const FALLEN: &[u8] = include_bytes!("../assets/fallen.png");
+const DOOR: &[u8] = include_bytes!("../assets/door.png");
+const DOOR_LIT: &[u8] = include_bytes!("../assets/door_lit.png");
 const PARCEL: &[u8] = include_bytes!("../assets/parcel.png");
 /// walk.json: 64x64 cells, row 1 is the 8-frame walk facing east.
 const CELL: u32 = 64;
@@ -32,6 +36,10 @@ pub struct Sprites {
     pub sit: Rgba,
     pub sleep: Rgba,
     pub carry: Rgba,
+    pub pat: Rgba,
+    pub fallen: Rgba,
+    pub door: Rgba,
+    pub door_lit: Rgba,
     pub parcel: Rgba,
 }
 
@@ -138,13 +146,20 @@ impl Sprites {
             sit: decode(SIT, "sit.png")?,
             sleep: decode(SLEEP, "sleep.png")?,
             carry: decode(CARRY, "carry.png")?,
+            pat: decode(PAT, "pat.png")?,
+            fallen: decode(FALLEN, "fallen.png")?,
+            door: decode(DOOR, "door.png")?,
+            door_lit: decode(DOOR_LIT, "door_lit.png")?,
             parcel: decode(PARCEL, "parcel.png")?,
         };
-        for img in s
-            .walk
-            .iter_mut()
-            .chain([&mut s.idle, &mut s.sit, &mut s.sleep, &mut s.carry])
-        {
+        for img in s.walk.iter_mut().chain([
+            &mut s.idle,
+            &mut s.sit,
+            &mut s.sleep,
+            &mut s.carry,
+            &mut s.pat,
+            &mut s.fallen,
+        ]) {
             recolor_bows(img, bow_hue);
         }
         Ok(s)
@@ -190,6 +205,10 @@ mod tests {
         let s = Sprites::load(0).unwrap();
         assert_eq!(s.walk.len(), 8);
         assert!(s.walk.iter().all(|f| f.dimensions() == (32, 48)));
+        assert_eq!(s.pat.dimensions(), (32, 48));
+        assert_eq!(s.fallen.dimensions(), (32, 48));
+        assert_eq!(s.door.dimensions(), (32, 32));
+        assert_eq!(s.door_lit.dimensions(), (32, 32));
         assert_eq!(s.parcel.dimensions(), (15, 12));
         assert_eq!(mirror(&s.idle).get_pixel(0, 20), s.idle.get_pixel(31, 20));
     }
