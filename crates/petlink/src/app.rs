@@ -143,6 +143,33 @@ fn add_parcel(parcels: &mut Vec<Parcel>, mail: Envelope, door_x: f32) -> bool {
     true
 }
 
+/// How a peek request starts, given the state of my pet and the friend.
+#[derive(Debug, PartialEq)]
+enum PeekPlan {
+    WalkFromHome,
+    AskInPlace,
+    No,
+}
+
+fn plan_peek(
+    can_interact: bool,
+    friend_peek: bool,
+    trip_none: bool,
+    away: bool,
+    pending: bool,
+    back_soon: bool,
+) -> PeekPlan {
+    if !(can_interact && friend_peek && trip_none) {
+        PeekPlan::No
+    } else if away {
+        if pending { PeekPlan::No } else { PeekPlan::AskInPlace }
+    } else if back_soon {
+        PeekPlan::No
+    } else {
+        PeekPlan::WalkFromHome
+    }
+}
+
 /// What a visiting pet is here to do.
 #[derive(Clone)]
 enum Job {
@@ -226,6 +253,8 @@ pub struct PetApp {
     hearts: Hearts,
     social: Social,
     games: Games,
+    /// The peek I am waiting on was asked while visiting: she stays when it is answered.
+    peek_from_visit: bool,
     /// Seconds until my pet may wander off to visit by herself.
     next_auto_in: f32,
     /// The visit I am walking to / on is an automatic one.
@@ -410,6 +439,7 @@ impl PetApp {
             hearts: Hearts::default(),
             social: Social::new(fast, &mut rand::rng()),
             games: Games::new(fast, &mut rand::rng()),
+            peek_from_visit: false,
             next_auto_in: auto_gap(&mut rand::rng()) / fast.max(1.0),
             auto_trip: false,
             auto_leave_at: None,
@@ -544,6 +574,7 @@ impl PetApp {
         );
         self.trip = Trip::None;
         self.peek_pending = None;
+        self.peek_from_visit = false;
         if self.auto_trip {
             self.next_auto_in = auto_gap(&mut rand::rng()) / self.fast.max(1.0);
         }
@@ -554,6 +585,15 @@ impl PetApp {
             self.mine.enter_from_door(&self.world);
         }
         self.tray.set_visiting(false);
+    }
+
+    /// A peek was answered (or timed out): she goes home only if the peek took her out.
+    fn end_peek(&mut self) {
+        let stay = std::mem::take(&mut self.peek_from_visit);
+        self.peek_pending = None;
+        if !stay {
+            self.bring_my_pet_home();
+        }
     }
 
     fn can_interact(&self) -> bool {
@@ -687,8 +727,7 @@ impl PetApp {
                     return;
                 }
                 tracing::info!("peek result (denied: {denied})");
-                self.peek_pending = None;
-                self.bring_my_pet_home();
+                self.end_peek();
                 if denied || file_id.is_empty() {
                     let msg = format!("{} isn't letting you peek right now", self.friend_name());
                     self.bubble(msg);
@@ -757,6 +796,8 @@ impl PetApp {
             Msg::VisitEnd { declined } => {
                 if declined && self.my_pet_away && self.auto_leave_at.is_some() {
                     self.bring_my_pet_home();
+                    // Turned away: don't knock again for a while.
+                    self.next_auto_in = 600.0 / self.fast.max(1.0);
                 }
                 self.jobs.retain(|j| !matches!(j, Job::Visit));
                 if let Some(v) = &mut self.visitor
@@ -1004,10 +1045,9 @@ impl PetApp {
         if let Some((_, deadline)) = &self.peek_pending
             && Instant::now() > *deadline
         {
-            self.peek_pending = None;
             let msg = format!("{} did not answer", self.friend_name());
             self.bubble(msg);
-            self.bring_my_pet_home();
+            self.end_peek();
         }
     }
 
@@ -1067,9 +1107,15 @@ impl PetApp {
     }
 
     fn on_my_pet_at_door_for_peek(&mut self) {
+        self.my_pet_away = true;
+        self.send_peek_request(false);
+    }
+
+    /// `from_visit`: my pet is already at the friend's and stays there afterwards.
+    fn send_peek_request(&mut self, from_visit: bool) {
         let peek_id = new_id();
         tracing::info!("asking {} for a peek", self.friend_name());
-        self.my_pet_away = true;
+        self.peek_from_visit = from_visit;
         self.peek_pending = Some((peek_id.clone(), Instant::now() + Duration::from_secs(30)));
         self.send_to_friend(Msg::PeekRequest { peek_id });
     }
@@ -1603,7 +1649,7 @@ impl PetApp {
         let Some(pos) = self.door_menu else { return };
         let mut action = None;
         let can = self.can_interact();
-        let peek_ok = can && self.friend_peek && !self.my_pet_away;
+        let peek_ok = self.peek_plan() != PeekPlan::No;
         let away = self.my_pet_away;
         let resp = egui::Area::new(egui::Id::new("door_menu"))
             .fixed_pos(pos)
@@ -1642,14 +1688,26 @@ impl PetApp {
         }
     }
 
+    fn peek_plan(&self) -> PeekPlan {
+        plan_peek(
+            self.can_interact(),
+            self.friend_peek,
+            self.trip == Trip::None,
+            self.my_pet_away,
+            self.peek_pending.is_some(),
+            self.mine_back_at.is_some(),
+        )
+    }
+
     fn start_peek(&mut self) {
-        if self.can_interact()
-            && self.friend_peek
-            && self.trip == Trip::None
-            && !self.my_pet_hidden()
-        {
-            self.trip = Trip::Peek;
-            self.mine.exit_to_door();
+        match self.peek_plan() {
+            PeekPlan::WalkFromHome => {
+                self.trip = Trip::Peek;
+                self.mine.exit_to_door();
+            }
+            // Already at the friend's: ask right there, she stays.
+            PeekPlan::AskInPlace => self.send_peek_request(true),
+            PeekPlan::No => {}
         }
     }
 
@@ -2062,6 +2120,19 @@ impl eframe::App for PetApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn peek_plan_walks_from_home_asks_in_place_or_refuses() {
+        use PeekPlan::*;
+        // (can_interact, friend_peek, trip_none, away, pending, back_soon)
+        assert_eq!(plan_peek(true, true, true, false, false, false), WalkFromHome);
+        assert_eq!(plan_peek(true, true, true, true, false, false), AskInPlace);
+        assert_eq!(plan_peek(true, true, true, true, true, false), No, "one at a time");
+        assert_eq!(plan_peek(true, false, true, true, false, false), No, "friend says no");
+        assert_eq!(plan_peek(false, true, true, true, false, false), No, "friend offline");
+        assert_eq!(plan_peek(true, true, false, false, false, false), No, "already on a trip");
+        assert_eq!(plan_peek(true, true, true, false, false, true), No, "delivering mail");
+    }
 
     fn mail(id: &str) -> Envelope {
         Envelope::new(
