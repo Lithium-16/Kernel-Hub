@@ -446,6 +446,7 @@ impl Pet {
             return;
         }
         let to_x = (self.x + rng.random_range(-300.0..300.0)).clamp(left, right);
+        tracing::info!("wander: {:.0} -> {to_x:.0}", self.x);
         self.set(State::Wander { to_x });
     }
 
@@ -607,11 +608,11 @@ impl Pet {
             }
             State::Wander { to_x } => {
                 if self.walk_towards(to_x, dt) {
-                    self.set(if rng.random_bool(0.3) {
-                        State::Sit
-                    } else {
-                        State::Idle
-                    });
+                    let sit = rng.random_bool(0.3);
+                    if sit {
+                        tracing::info!("sit at {:.0}", self.x);
+                    }
+                    self.set(if sit { State::Sit } else { State::Idle });
                 }
                 None
             }
