@@ -3,7 +3,7 @@
 
 use crate::config::Config;
 use crate::fx::Hearts;
-use crate::games::{Games, Hand, Prop, Who};
+use crate::games::{Games, Hand, Prop, Who, auto_gap, auto_stay};
 use crate::mailui::{self, Compose, MailAction};
 use crate::net::{Net, NetCmd, NetEvent};
 use crate::pet::{Emote, Event, Pet, State};
@@ -226,6 +226,11 @@ pub struct PetApp {
     hearts: Hearts,
     social: Social,
     games: Games,
+    /// Seconds until my pet may wander off to visit by herself.
+    next_auto_in: f32,
+    /// The visit I am walking to / on is an automatic one.
+    auto_trip: bool,
+    auto_leave_at: Option<Instant>,
     /// Debug testing: divides the random waits (PETLINK_FAST).
     fast: f32,
     jobs: VecDeque<Job>,
@@ -405,6 +410,9 @@ impl PetApp {
             hearts: Hearts::default(),
             social: Social::new(fast, &mut rand::rng()),
             games: Games::new(fast, &mut rand::rng()),
+            next_auto_in: auto_gap(&mut rand::rng()) / fast.max(1.0),
+            auto_trip: false,
+            auto_leave_at: None,
             fast,
             jobs: VecDeque::new(),
             my_pet_away: false,
@@ -536,6 +544,11 @@ impl PetApp {
         );
         self.trip = Trip::None;
         self.peek_pending = None;
+        if self.auto_trip {
+            self.next_auto_in = auto_gap(&mut rand::rng()) / self.fast.max(1.0);
+        }
+        self.auto_trip = false;
+        self.auto_leave_at = None;
         if self.my_pet_away {
             self.my_pet_away = false;
             self.mine.enter_from_door(&self.world);
@@ -555,6 +568,7 @@ impl PetApp {
                 tracing::info!("connected as {} with {} friend(s)", me.name, friends.len());
                 // My own toggle is the truth, not what the relay remembers: tell it again.
                 self.tray.set_peek(self.my_peek);
+                self.tray.set_wander(self.config.wander);
                 self.send_to_relay(Msg::PeekAllow { on: self.my_peek });
                 let hue = self.config.bow_hue.unwrap_or(me.bow_hue);
                 if hue != self.my_hue {
@@ -714,10 +728,21 @@ impl PetApp {
                     });
                 }
             }
-            Msg::VisitStart { hue } => {
+            Msg::VisitStart { hue, auto } => {
                 if let Some(h) = hue.filter(|h| *h != self.friend_hue) {
                     self.friend_hue = h;
                     self.friend_tex = None;
+                }
+                if auto && (self.hidden || self.away || !self.config.wander) {
+                    // Busy, away or not wanting visitors: send her straight back.
+                    self.send_to_friend(Msg::VisitEnd { declined: true });
+                    return;
+                }
+                if auto && self.trip == Trip::Visit && self.auto_trip {
+                    // We both set off at once: only one pet goes (the other one stays home).
+                    self.trip = Trip::None;
+                    self.auto_trip = false;
+                    self.mine.release();
                 }
                 // A visitor already on the way out doesn't count: a quick re-visit must queue behind it.
                 let has_visit = self
@@ -729,7 +754,10 @@ impl PetApp {
                     self.jobs.push_back(Job::Visit);
                 }
             }
-            Msg::VisitEnd => {
+            Msg::VisitEnd { declined } => {
+                if declined && self.my_pet_away && self.auto_leave_at.is_some() {
+                    self.bring_my_pet_home();
+                }
                 self.jobs.retain(|j| !matches!(j, Job::Visit));
                 if let Some(v) = &mut self.visitor
                     && matches!(v.job, Job::Visit)
@@ -1015,7 +1043,15 @@ impl PetApp {
         match std::mem::replace(&mut self.trip, Trip::None) {
             Trip::Visit => {
                 self.my_pet_away = true;
-                self.send_to_friend(Msg::VisitStart { hue: Some(self.my_hue) });
+                let auto = self.auto_trip;
+                self.send_to_friend(Msg::VisitStart {
+                    hue: Some(self.my_hue),
+                    auto,
+                });
+                if auto {
+                    let stay = auto_stay(&mut rand::rng()) / self.fast.max(1.0);
+                    self.auto_leave_at = Some(Instant::now() + Duration::from_secs_f32(stay));
+                }
                 self.tray.set_visiting(true);
             }
             Trip::Peek => self.on_my_pet_at_door_for_peek(),
@@ -1040,12 +1076,46 @@ impl PetApp {
 
     fn start_visit(&mut self) {
         if self.my_pet_away {
-            self.send_to_friend(Msg::VisitEnd);
+            self.send_to_friend(Msg::VisitEnd { declined: false });
             self.bring_my_pet_home();
         } else if self.can_interact() && self.trip == Trip::None && !self.my_pet_hidden() {
             self.trip = Trip::Visit;
+            self.auto_trip = false;
             self.mine.exit_to_door();
         }
+    }
+
+    /// Now and then my pet wanders over to the friend's desktop on her own, and comes back.
+    fn pump_auto_visit(&mut self, dt: f32) {
+        if let Some(t) = self.auto_leave_at
+            && Instant::now() >= t
+            && self.my_pet_away
+            && self.peek_pending.is_none()
+        {
+            self.start_visit(); // away: calls her home
+            return;
+        }
+        if self.my_pet_away || self.trip != Trip::None || !self.wander_ok() {
+            return;
+        }
+        self.next_auto_in -= dt;
+        if self.next_auto_in <= 0.0 {
+            self.next_auto_in = auto_gap(&mut rand::rng()) / self.fast.max(1.0);
+            self.start_visit();
+            self.auto_trip = self.trip == Trip::Visit;
+        }
+    }
+
+    fn wander_ok(&self) -> bool {
+        self.config.wander
+            && self.can_interact()
+            && !self.friend_away
+            && !self.away
+            && !self.hidden
+            && self.visitor.is_none()
+            && self.jobs.is_empty()
+            && self.peek_pending.is_none()
+            && !self.my_pet_hidden()
     }
 
     fn on_tray(&mut self, a: TrayAction) {
@@ -1068,6 +1138,11 @@ impl PetApp {
                 }
             }
             TrayAction::Visit => self.start_visit(),
+            TrayAction::ToggleWander => {
+                self.config.wander = !self.config.wander;
+                self.save_config();
+                self.tray.set_wander(self.config.wander);
+            }
             TrayAction::BowColour(h) => {
                 self.config.bow_hue = Some(h);
                 self.save_config();
@@ -1919,6 +1994,7 @@ impl eframe::App for PetApp {
             self.bubble(note);
         }
         self.pump_jobs();
+        self.pump_auto_visit(dt);
         self.pump_outgoing();
         let cur = (!self.hidden).then(|| {
             let c = self.cursor_pt();

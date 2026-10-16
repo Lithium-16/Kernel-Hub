@@ -363,6 +363,7 @@ mod tests {
             scale: 2,
             bow_hue: None,
             peek: false,
+            wander: true,
         };
         let (tx, rx) = std::sync::mpsc::channel();
         let tx = std::sync::Mutex::new(tx);
@@ -399,7 +400,7 @@ mod tests {
         let mut o = Outbox::open(path.clone());
         o.push(mail("m1"));
         o.push(mail("m2"));
-        o.push(Envelope::new("u_fr", Msg::VisitStart { hue: None }));
+        o.push(Envelope::new("u_fr", Msg::VisitStart { hue: None, auto: false }));
         o.push(mail("m1")); // same mail again: kept once
         drop(o);
         let mut o = Outbox::open(path.clone());

@@ -9,6 +9,18 @@ use rand::Rng;
 /// Wait between games, in seconds (divided by `k` in debug testing).
 const GAP_MIN_S: f32 = 20.0;
 const GAP_MAX_S: f32 = 45.0;
+/// Automatic visits: seconds between starts and how long one lasts (min, max).
+pub const AUTO_GAP_S: (f32, f32) = (120.0, 240.0);
+pub const AUTO_STAY_S: (f32, f32) = (60.0, 120.0);
+
+pub fn auto_gap(rng: &mut impl Rng) -> f32 {
+    rng.random_range(AUTO_GAP_S.0..AUTO_GAP_S.1)
+}
+
+pub fn auto_stay(rng: &mut impl Rng) -> f32 {
+    rng.random_range(AUTO_STAY_S.0..AUTO_STAY_S.1)
+}
+
 /// A game that has not finished by now is called off.
 const GAME_MAX_S: f32 = 45.0;
 /// Rock paper scissors: when the hands are shown and when the round is over.
@@ -545,6 +557,17 @@ mod tests {
                 t += 0.1;
             }
             t
+        }
+    }
+
+    #[test]
+    fn automatic_visit_timings_stay_in_range() {
+        let mut rng = StdRng::seed_from_u64(1);
+        for _ in 0..200 {
+            let g = auto_gap(&mut rng);
+            let s = auto_stay(&mut rng);
+            assert!((AUTO_GAP_S.0..AUTO_GAP_S.1).contains(&g));
+            assert!((AUTO_STAY_S.0..AUTO_STAY_S.1).contains(&s));
         }
     }
 
