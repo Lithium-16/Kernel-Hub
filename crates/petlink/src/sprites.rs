@@ -8,7 +8,7 @@ pub type Rgba = RgbaImage;
 const WALK: &[u8] = include_bytes!("../assets/walk.png");
 const IDLE: &[u8] = include_bytes!("../assets/idle.png");
 const SIT: &[u8] = include_bytes!("../assets/sit.png");
-const SLEEP: &[u8] = include_bytes!("../assets/sleep.png");
+const PEEK: &[u8] = include_bytes!("../assets/peek.png");
 const CARRY: &[u8] = include_bytes!("../assets/carry.png");
 const PAT: &[u8] = include_bytes!("../assets/pat.png");
 const FALLEN: &[u8] = include_bytes!("../assets/fallen.png");
@@ -21,12 +21,16 @@ const WALK_ROW: u32 = 1;
 const POSE_W: u32 = 32;
 const POSE_H: u32 = 48;
 
+/// The seated sprite's tail curls this many pixel rows below her feet; drawing her this much
+/// lower puts the feet on the ground.
+pub const SIT_FEET_DROP_PX: f32 = 2.0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum Pose {
     Idle,
     Sit,
-    Sleep,
+    Peek,
     Carry,
 }
 
@@ -34,7 +38,8 @@ pub struct Sprites {
     pub walk: Vec<Rgba>,
     pub idle: Rgba,
     pub sit: Rgba,
-    pub sleep: Rgba,
+    /// The magnifying-glass pose.
+    pub peek: Rgba,
     pub carry: Rgba,
     pub pat: Rgba,
     pub fallen: Rgba,
@@ -144,7 +149,7 @@ impl Sprites {
                 .collect(),
             idle: decode(IDLE, "idle.png")?,
             sit: decode(SIT, "sit.png")?,
-            sleep: decode(SLEEP, "sleep.png")?,
+            peek: decode(PEEK, "peek.png")?,
             carry: decode(CARRY, "carry.png")?,
             pat: decode(PAT, "pat.png")?,
             fallen: decode(FALLEN, "fallen.png")?,
@@ -155,7 +160,7 @@ impl Sprites {
         for img in s.walk.iter_mut().chain([
             &mut s.idle,
             &mut s.sit,
-            &mut s.sleep,
+            &mut s.peek,
             &mut s.carry,
             &mut s.pat,
             &mut s.fallen,
@@ -170,7 +175,7 @@ impl Sprites {
         match p {
             Pose::Idle => &self.idle,
             Pose::Sit => &self.sit,
-            Pose::Sleep => &self.sleep,
+            Pose::Peek => &self.peek,
             Pose::Carry => &self.carry,
         }
     }
@@ -178,6 +183,26 @@ impl Sprites {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_seated_pose_sinks_by_exactly_the_tail_below_the_feet() {
+        let img = image::load_from_memory(SIT).unwrap().to_rgba8();
+        let lowest = |x0: u32, x1: u32| {
+            (0..img.height())
+                .rev()
+                .find(|&y| (x0..x1).any(|x| img.get_pixel(x, y)[3] > 20))
+                .unwrap()
+        };
+        // the right half is her legs and shoes, the left bottom corner is the tail tip
+        let feet = lowest(16, img.width());
+        let anything = lowest(0, img.width());
+        assert_eq!((anything - feet) as f32, SIT_FEET_DROP_PX);
+        assert_eq!(
+            anything,
+            img.height() - 1,
+            "the sprite sits on the bottom row"
+        );
+    }
+
     use super::*;
 
     #[test]
