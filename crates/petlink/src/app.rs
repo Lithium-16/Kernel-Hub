@@ -146,6 +146,15 @@ fn add_parcel(parcels: &mut Vec<Parcel>, mail: Envelope, door_x: f32) -> bool {
     true
 }
 
+/// A pat gets a mew or a quick chirp, so it isn't the same noise every time.
+fn pat_sound() -> Sound {
+    if rand::random::<bool>() {
+        Sound::Mew
+    } else {
+        Sound::Mrrp
+    }
+}
+
 /// How a peek request starts, given the state of my pet and the friend.
 #[derive(Debug, PartialEq)]
 enum PeekPlan {
@@ -555,7 +564,7 @@ impl PetApp {
     }
 
     fn pat_hearts(&mut self, x: f32, y: f32) {
-        self.play(Sound::Mew);
+        self.play(pat_sound());
         let y = y - 50.0 * self.px();
         self.hearts.burst(x, y, 3, &mut rand::rng());
     }
@@ -843,7 +852,7 @@ impl PetApp {
             }
             // The pet reacts on screen; no door notification for every touch.
             Msg::Touch { what } => self.play(match what {
-                TouchKind::Pat => Sound::Mew,
+                TouchKind::Pat => pat_sound(),
                 TouchKind::Poke => Sound::Boing,
                 TouchKind::Yeet => Sound::Whoosh,
             }),
