@@ -405,7 +405,7 @@ impl Pet {
         }
     }
 
-    fn show_emote(&mut self, e: Emote) {
+    pub fn show_emote(&mut self, e: Emote) {
         tracing::info!("emote: {e:?}");
         self.emote = Some((e, EMOTE_SHOW_S));
     }

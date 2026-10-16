@@ -3,6 +3,7 @@
 
 use crate::config::Config;
 use crate::fx::Hearts;
+use crate::games::{Games, Hand, Prop, Who};
 use crate::mailui::{self, Compose, MailAction};
 use crate::net::{Net, NetCmd, NetEvent};
 use crate::pet::{Emote, Event, Pet, State};
@@ -224,6 +225,7 @@ pub struct PetApp {
     visitor: Option<Visitor>,
     hearts: Hearts,
     social: Social,
+    games: Games,
     /// Debug testing: divides the random waits (PETLINK_FAST).
     fast: f32,
     jobs: VecDeque<Job>,
@@ -402,6 +404,7 @@ impl PetApp {
             visitor: None,
             hearts: Hearts::default(),
             social: Social::new(fast, &mut rand::rng()),
+            games: Games::new(fast, &mut rand::rng()),
             fast,
             jobs: VecDeque::new(),
             my_pet_away: false,
@@ -774,6 +777,7 @@ impl PetApp {
         #[cfg(debug_assertions)]
         pet.set_timescale(self.fast);
         self.social = Social::new(self.fast, &mut rand::rng());
+        self.games = Games::new(self.fast, &mut rand::rng());
         self.visitor = Some(Visitor {
             pet,
             job,
@@ -902,7 +906,18 @@ impl PetApp {
             && matches!(v.job, Job::Visit)
             && v.stage == Stage::Working
         {
-            self.social.update(
+            if !self.games.busy() {
+                self.social.update(
+                    dt,
+                    &self.world,
+                    &mut self.mine,
+                    &mut v.pet,
+                    px,
+                    rng,
+                    &mut self.hearts,
+                );
+            }
+            self.games.update(
                 dt,
                 &self.world,
                 &mut self.mine,
@@ -910,7 +925,12 @@ impl PetApp {
                 px,
                 rng,
                 &mut self.hearts,
+                self.social.busy(),
             );
+        } else if self.games.busy() {
+            // The visit is over or the pets are apart: call the game off.
+            let mut nobody = Pet::new(0.0, 0.0);
+            self.games.cancel(&mut self.mine, &mut nobody);
         }
     }
 
@@ -1705,6 +1725,50 @@ impl PetApp {
         }
     }
 
+    /// The ball in fetch and the hands in rock paper scissors, drawn from shapes.
+    fn draw_props(&self, ui: &egui::Ui) {
+        let px = self.px();
+        let p = ui.painter();
+        let mut props = self.games.props();
+        if let Some(v) = &self.visitor {
+            props.extend(self.games.hand_props(&self.mine, &v.pet, px));
+        }
+        for prop in props {
+            match prop {
+                Prop::Ball { x, y } => {
+                    p.circle_filled(Pos2::new(x, y), 5.0 * px, Color32::from_rgb(240, 90, 70));
+                }
+                Prop::Hand { hand, x, y, .. } => {
+                    let c = Color32::from_rgb(245, 225, 200);
+                    let ink = Stroke::new(1.5 * px, Color32::from_rgb(60, 40, 40));
+                    let at = Pos2::new(x, y);
+                    match hand {
+                        Hand::Rock => {
+                            p.circle(at, 6.0 * px, c, ink);
+                        }
+                        Hand::Paper => {
+                            p.rect(
+                                egui::Rect::from_center_size(at, Vec2::new(12.0, 14.0) * px),
+                                2.0 * px,
+                                c,
+                                ink,
+                                egui::StrokeKind::Middle,
+                            );
+                        }
+                        Hand::Scissors => {
+                            for dx in [-4.0, 4.0] {
+                                p.line_segment(
+                                    [at + Vec2::new(0.0, 6.0) * px, at + Vec2::new(dx, -7.0) * px],
+                                    Stroke::new(2.5 * px, c),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn draw_hearts(&self, ui: &egui::Ui) {
         const HEART: [&str; 4] = [".X.X.", "XXXXX", ".XXX.", "..X.."];
         let px = self.px();
@@ -1759,14 +1823,18 @@ impl PetApp {
             egui::Image::new((t.id(), t.size_vec2())).paint_at(ui, r);
             let _ = px;
         }
-        if !self.my_pet_hidden() {
+        let hiding = self.games.hidden();
+        if !self.my_pet_hidden() && hiding != Some(Who::A) {
             self.draw_pet(ui, &self.mine, &self.my_tex);
             self.draw_emote(ui, &self.mine);
         }
-        if let (Some(v), Some(tex)) = (&self.visitor, &self.friend_tex) {
+        if let (Some(v), Some(tex)) = (&self.visitor, &self.friend_tex)
+            && hiding != Some(Who::B)
+        {
             self.draw_pet(ui, &v.pet, tex);
             self.draw_emote(ui, &v.pet);
         }
+        self.draw_props(ui);
         self.draw_hearts(ui);
         for o in self.outgoing.iter().filter(|o| !o.failed.is_empty()) {
             let r = to_egui(self.parcel_rect(self.failed_x(&o.mail)));
