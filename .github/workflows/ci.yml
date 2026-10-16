@@ -108,6 +108,14 @@ jobs:
           key: release
       - uses: astral-sh/setup-uv@v6
       - run: cargo build --release -p kernel-node
+      - name: Build petlink.exe
+        env:
+          PETLINK_BUILD: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          cargo build --release -p petlink
+          cp target/release/petlink.exe petlink-windows-x64.exe
+          sha256sum petlink-windows-x64.exe > petlink-windows-x64.exe.sha256
       - name: Package kernel-node-windows-x64.zip
         run: |
           set -euo pipefail
@@ -129,6 +137,8 @@ jobs:
           path: |
             kernel-node-windows-x64.zip
             kernel-node-windows-x64.zip.sha256
+            petlink-windows-x64.exe
+            petlink-windows-x64.exe.sha256
           if-no-files-found: error
 
   release:
@@ -153,9 +163,10 @@ jobs:
           gh release create "node-build-${{ github.run_number }}" \
             kernel-node-windows-x64.zip kernel-node-windows-x64.zip.sha256 \
             kernel-desktop-setup.exe kernel-desktop-setup.exe.sha256 \
+            petlink-windows-x64.exe petlink-windows-x64.exe.sha256 \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "Node build ${{ github.run_number }}" \
-            --notes "Kernel from $GITHUB_SHA. Installed nodes find it with Node > Check for updates, the desktop app with Settings > App updates."
+            --notes "Kernel from $GITHUB_SHA. Installed nodes find it with Node > Check for updates, the desktop app with Settings > App updates. PetLink: petlink-windows-x64.exe (updates itself)."
 
   python:
     name: Python SDK and modules (${{ matrix.os }})

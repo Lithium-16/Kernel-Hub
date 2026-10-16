@@ -1,0 +1,63 @@
+id = "petlink"
+name = "PetLink"
+icon = "mail"
+version = "0.1.0"
+runtime = "python"
+entry = "main.py"
+
+# The relay for PetLink, the linked desktop pets: each friend's petlink.exe connects here to
+# send mail, peek and visit. It only listens on this PC; Share makes it reachable through
+# Tailscale Funnel on a path of the https port (it can share the port with Party Games).
+# Add a user to get the one-line invite they paste into petlink.exe on first run.
+[settings]
+port = 8098
+share_port = 10000
+share_path = "/petlink"
+tailscale = "tailscale"
+# Local path to a petlink exe to serve instead of the newest GitHub release (testing before CI publishes one).
+exe_override = ""
+
+[[actions]]
+id = "user.add"
+label = "Add friend"
+icon = "user-plus"
+description = "Adds a person and returns a one-time download link for their personal PetLink installer (the one-line invite is a fallback, and stops working once the link is used: the download carries a fresh token)."
+ai = "never"
+timeout_s = 30
+params.name = { type = "string", description = "Their name" }
+params.bow_hue = { type = "int", description = "Bow colour as a hue, 0-359 (0 red, 120 green, 210 blue)", default = 0, min = 0, max = 359 }
+
+[[actions]]
+id = "user.relink"
+label = "New download link"
+icon = "refresh-cw"
+description = "Makes a fresh one-time download link for an existing friend and replaces their token, so the old file stops working (for 'I lost it')."
+ai = "never"
+timeout_s = 30
+params.name = { type = "string", description = "Their name" }
+
+[[actions]]
+id = "user.remove"
+label = "Remove friend"
+icon = "user-minus"
+description = "Removes a person; their pet can't connect any more."
+ai = "never"
+timeout_s = 30
+params.name = { type = "string", description = "Their name" }
+
+[[actions]]
+id = "share.start"
+label = "Share"
+icon = "share-2"
+description = "Makes the relay reachable by anyone with the link (Tailscale Funnel). Each pet still needs its token."
+ai = "never"
+timeout_s = 120
+params.who = { type = "enum", options = ["anyone with the link"], default = "anyone with the link" }
+
+[[actions]]
+id = "share.stop"
+label = "Stop sharing"
+icon = "lock"
+description = "Takes the relay off the internet; pets show their door as closed."
+ai = "safe"
+timeout_s = 90
