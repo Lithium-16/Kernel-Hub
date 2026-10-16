@@ -30,6 +30,8 @@ pub enum Sound {
     Purr,
     /// Nom: a treat was eaten.
     Munch,
+    /// A quick trilled chirp.
+    Mrrp,
 }
 
 /// A sine glide from `f0` to `f1` Hz over `secs`, with a quick attack and a fading tail.
@@ -81,18 +83,46 @@ fn purr(secs: f32) -> Vec<f32> {
         .collect()
 }
 
+/// An impact: a low body that drops in pitch and dies fast, with a short knock on top.
+fn thump() -> Vec<f32> {
+    let n = (0.18 * RATE as f32) as usize;
+    let mut phase = 0.0_f32;
+    let mut x: u32 = 0x9E37_79B9;
+    (0..n)
+        .map(|i| {
+            let s = i as f32 / n as f32;
+            let f = 40.0 + 120.0 * (-s * 14.0).exp();
+            phase += TAU * f / RATE as f32;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            let knock = ((x as f32 / u32::MAX as f32) * 2.0 - 1.0) * (-s * 90.0).exp() * 0.5;
+            (phase.sin() * (-s * 9.0).exp() * 0.9 + knock).clamp(-1.0, 1.0)
+        })
+        .collect()
+}
+
+/// A soft marimba-like pluck: a sine with a couple of quiet overtones and a quick fade.
+fn pluck(freq: f32, secs: f32) -> Vec<f32> {
+    let n = (secs * RATE as f32) as usize;
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / RATE as f32;
+            let s = i as f32 / n as f32;
+            let tone = (TAU * freq * t).sin()
+                + 0.3 * (TAU * 2.0 * freq * t).sin()
+                + 0.08 * (TAU * 4.0 * freq * t).sin();
+            tone * (t / 0.003).min(1.0) * (-s * 5.0).exp() * 0.7
+        })
+        .collect()
+}
+
 fn samples(s: Sound) -> Vec<f32> {
     let cat = |parts: Vec<Vec<f32>>| parts.into_iter().flatten().collect::<Vec<f32>>();
     match s {
-        Sound::Chime => cat(vec![
-            glide(880.0, 880.0, 0.12, 0.0),
-            glide(1320.0, 1320.0, 0.25, 0.0),
-        ]),
+        Sound::Chime => cat(vec![pluck(880.0, 0.12), pluck(1319.0, 0.3)]),
         Sound::Door => glide(420.0, 760.0, 0.09, 0.0),
-        Sound::Mew => cat(vec![
-            glide(620.0, 980.0, 0.12, 12.0),
-            glide(980.0, 700.0, 0.16, 12.0),
-        ]),
+        Sound::Mew => cat(vec![pluck(784.0, 0.08), pluck(1047.0, 0.22)]),
         Sound::Boing => glide(260.0, 520.0, 0.22, 25.0),
         Sound::Click => noise(0.04, false),
         Sound::TaDa => cat(vec![
@@ -101,20 +131,22 @@ fn samples(s: Sound) -> Vec<f32> {
             glide(1320.0, 1320.0, 0.3, 0.0),
         ]),
         Sound::Whoosh => noise(0.22, true),
-        Sound::Bounce => cat(vec![
-            glide(340.0, 110.0, 0.14, 0.0),
-            glide(180.0, 300.0, 0.08, 20.0),
-        ]),
+        Sound::Bounce => thump(),
         Sound::Meow => cat(vec![
-            glide(520.0, 860.0, 0.14, 10.0),
-            glide(860.0, 700.0, 0.16, 10.0),
-            glide(700.0, 380.0, 0.22, 8.0),
+            pluck(1047.0, 0.09),
+            pluck(784.0, 0.09),
+            pluck(587.0, 0.3),
+        ]),
+        Sound::Mrrp => cat(vec![
+            pluck(880.0, 0.05),
+            pluck(988.0, 0.05),
+            pluck(1175.0, 0.14),
         ]),
         Sound::Purr => purr(0.9),
         Sound::Munch => cat(vec![
-            glide(330.0, 300.0, 0.06, 0.0),
-            glide(262.0, 240.0, 0.06, 0.0),
-            glide(392.0, 392.0, 0.12, 0.0),
+            pluck(330.0, 0.06),
+            pluck(262.0, 0.06),
+            pluck(392.0, 0.12),
         ]),
         Sound::Giggle => cat(vec![
             glide(900.0, 1100.0, 0.06, 0.0),
@@ -155,8 +187,9 @@ pub fn wav(s: Sound, volume: f32) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    const ALL: [Sound; 12] = [
+    const ALL: [Sound; 13] = [
         Sound::Munch,
+        Sound::Mrrp,
         Sound::Bounce,
         Sound::Meow,
         Sound::Purr,
@@ -194,6 +227,26 @@ mod tests {
             );
             assert!(peak(&w) > 1000, "{s:?} is silent");
         }
+    }
+
+    #[test]
+    fn bounce_is_a_thump_that_dies_away() {
+        let w = wav(Sound::Bounce, 1.0);
+        let pcm: Vec<i16> = w[44..]
+            .chunks_exact(2)
+            .map(|b| i16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        let n = (RATE as usize * 30) / 1000;
+        let peak = |s: &[i16]| s.iter().map(|v| v.saturating_abs()).max().unwrap_or(0);
+        assert!(peak(&pcm[..n]) > 4 * peak(&pcm[pcm.len() - n..]));
+        // mostly low: few zero crossings per second compared with a 1 kHz tone
+        let crossings = pcm.windows(2).filter(|p| (p[0] < 0) != (p[1] < 0)).count();
+        let secs = pcm.len() as f32 / RATE as f32;
+        assert!(
+            (crossings as f32 / secs) < 1500.0,
+            "{} crossings/s",
+            crossings as f32 / secs
+        );
     }
 
     #[test]

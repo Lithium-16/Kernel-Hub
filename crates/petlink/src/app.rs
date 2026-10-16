@@ -11,7 +11,7 @@ use crate::pet::{Emote, Event, Pet, State};
 use crate::protocol::{Envelope, FileRef, Msg, Person, PresenceState, TouchKind, new_id};
 use crate::social::Social;
 use crate::sounds::{self, Sound};
-use crate::sprites::Sprites;
+use crate::sprites::{SIT_FEET_DROP_PX, Sprites};
 use crate::tray::{Tray, TrayAction};
 use crate::win;
 use crate::world::{Rect, World};
@@ -27,8 +27,6 @@ const IDLE_AWAY_SECS: u64 = 300;
 const DOOR_W: f32 = 32.0;
 const DOOR_H: f32 = 32.0;
 const BUBBLE_S: u64 = 4;
-/// Sounds are quiet on purpose: they play next to whatever the owner is doing.
-const SOUND_VOLUME: f32 = 0.3;
 /// A visiting pet on an errand (mail, peek) that hasn't finished by now is sent home.
 const ERRAND_MAX: Duration = Duration::from_secs(30);
 
@@ -40,7 +38,7 @@ pub struct Tex {
     walk_top: Vec<u32>,
     idle: TextureHandle,
     sit: TextureHandle,
-    sleep: TextureHandle,
+    peek: TextureHandle,
     carry: TextureHandle,
     pat: TextureHandle,
     fallen: TextureHandle,
@@ -74,7 +72,7 @@ impl Tex {
                 .collect(),
             idle: load("idle", &s.idle),
             sit: load("sit", &s.sit),
-            sleep: load("sleep", &s.sleep),
+            peek: load("peek", &s.peek),
             carry: load("carry", &s.carry),
             pat: load("pat", &s.pat),
             fallen: load("fallen", &s.fallen),
@@ -145,6 +143,15 @@ fn add_parcel(parcels: &mut Vec<Parcel>, mail: Envelope, door_x: f32) -> bool {
         open: false,
     });
     true
+}
+
+/// A pat gets a mew or a quick chirp, so it isn't the same noise every time.
+fn pat_sound() -> Sound {
+    if rand::random::<bool>() {
+        Sound::Mew
+    } else {
+        Sound::Mrrp
+    }
 }
 
 /// How a peek request starts, given the state of my pet and the friend.
@@ -552,15 +559,16 @@ impl PetApp {
         if !self.config.sounds || self.hidden || self.away {
             return;
         }
+        let volume = f32::from(self.config.volume) / 100.0;
         let wav = *self
             .sound_cache
             .entry(s)
-            .or_insert_with(|| Box::leak(sounds::wav(s, SOUND_VOLUME).into_boxed_slice()));
+            .or_insert_with(|| Box::leak(sounds::wav(s, volume).into_boxed_slice()));
         win::play_wav(wav);
     }
 
     fn pat_hearts(&mut self, x: f32, y: f32) {
-        self.play(Sound::Mew);
+        self.play(pat_sound());
         let y = y - 50.0 * self.px();
         self.hearts.burst(x, y, 3, &mut rand::rng());
     }
@@ -848,7 +856,7 @@ impl PetApp {
             }
             // The pet reacts on screen; no door notification for every touch.
             Msg::Touch { what } => self.play(match what {
-                TouchKind::Pat => Sound::Mew,
+                TouchKind::Pat => pat_sound(),
                 TouchKind::Poke => Sound::Boing,
                 TouchKind::Yeet => Sound::Whoosh,
             }),
@@ -1234,6 +1242,12 @@ impl PetApp {
                 }
             }
             TrayAction::Visit => self.start_visit(),
+            TrayAction::Volume(pct) => {
+                self.config.volume = pct;
+                self.save_config();
+                self.sound_cache.clear();
+                self.play(Sound::Chime); // so the new level can be heard
+            }
             TrayAction::ToggleSounds => {
                 self.config.sounds = !self.config.sounds;
                 self.save_config();
@@ -1823,7 +1837,8 @@ impl PetApp {
             }
             State::Enter | State::Exit => walk,
             State::Sit => &tex.sit,
-            State::Sleep => &tex.sleep,
+            State::Sleep => &tex.sit,
+            State::Peek => &tex.peek,
             State::Patted | State::Blush | State::HeadPatted => &tex.pat,
             State::Dizzy => &tex.fallen,
             _ => &tex.idle,
@@ -1834,6 +1849,10 @@ impl PetApp {
             State::Patted | State::HeadPatted => bob = -(t * 12.0).sin().abs() * 6.0 * px,
             State::Idle => bob = if (t * 2.5).sin() > 0.0 { -px } else { 0.0 },
             _ => {}
+        }
+        // The seated pose has its tail curled below her feet: sink it so the feet touch the ground.
+        if matches!(pet.state, State::Sit | State::Sleep) {
+            bob += SIT_FEET_DROP_PX * px;
         }
         let rect =
             egui::Rect::from_min_size(Pos2::new(pet.x - w / 2.0, pet.y - h + bob), Vec2::new(w, h));
@@ -1859,15 +1878,19 @@ impl PetApp {
         let p = ui.painter();
         let head = Pos2::new(pet.x, pet.y - 40.0 * px);
         match pet.state {
-            State::Sleep => {
-                let rise = (t * 12.0) % 30.0;
-                p.text(
-                    head + Vec2::new(14.0 * px, -rise),
-                    Align2::CENTER_CENTER,
-                    "z",
-                    FontId::proportional(14.0),
-                    Color32::from_white_alpha(((1.0 - rise / 30.0) * 255.0) as u8),
-                );
+            State::Sleep | State::Sit => {
+                // Three Zs drifting up and to the side, each a little bigger than the last.
+                for k in 0..3 {
+                    let phase = (t * 0.45 + k as f32 / 3.0).fract();
+                    let alpha = (phase * std::f32::consts::PI).sin();
+                    p.text(
+                        head + Vec2::new((12.0 + 14.0 * phase) * px, -(6.0 + 34.0 * phase) * px),
+                        Align2::CENTER_CENTER,
+                        "Z",
+                        FontId::proportional((9.0 + 9.0 * phase) * px.max(1.0)),
+                        Color32::from_rgba_unmultiplied(210, 225, 255, (alpha * 255.0) as u8),
+                    );
+                }
             }
             State::Dizzy => {
                 for k in 0..3 {
@@ -1878,20 +1901,6 @@ impl PetApp {
                         Color32::from_rgb(255, 220, 60),
                     );
                 }
-            }
-            State::Peek => {
-                let dir = if pet.facing_left { -1.0 } else { 1.0 };
-                let hand = Pos2::new(pet.x + dir * 12.0 * px, pet.y - 22.0 * px);
-                let lens = hand + Vec2::new(dir * 6.0, -6.0);
-                p.circle_stroke(
-                    lens,
-                    7.0,
-                    Stroke::new(2.0, Color32::from_rgb(230, 230, 240)),
-                );
-                p.line_segment(
-                    [hand, lens + Vec2::new(-dir * 5.0, 5.0)],
-                    Stroke::new(2.0, Color32::from_rgb(150, 100, 60)),
-                );
             }
             _ => {}
         }
