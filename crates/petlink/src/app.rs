@@ -2106,6 +2106,13 @@ impl eframe::App for PetApp {
         }
         self.pump_jobs();
         self.pump_auto_visit(dt);
+        let heard = [
+            self.mine.take_sound(),
+            self.visitor.as_mut().and_then(|v| v.pet.take_sound()),
+        ];
+        for s in heard.into_iter().flatten() {
+            self.play(s);
+        }
         self.pump_outgoing();
         let cur = (!self.hidden).then(|| {
             let c = self.cursor_pt();
