@@ -343,6 +343,7 @@ mod tests {
                 mail_id: id.into(),
                 text: "hi".into(),
                 files: vec![],
+                hue: None,
             },
         )
     }

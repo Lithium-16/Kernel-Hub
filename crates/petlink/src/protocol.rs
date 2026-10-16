@@ -85,6 +85,9 @@ pub enum Msg {
         text: String,
         #[serde(default)]
         files: Vec<FileRef>,
+        /// The sender's bow colour, for the pet that brings it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hue: Option<u16>,
     },
     #[serde(rename = "delivered")]
     Delivered { mail_id: String },
@@ -93,7 +96,11 @@ pub enum Msg {
     #[serde(rename = "peek.allow")]
     PeekAllow { on: bool },
     #[serde(rename = "peek.request")]
-    PeekRequest { peek_id: String },
+    PeekRequest {
+        peek_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hue: Option<u16>,
+    },
     #[serde(rename = "peek.result")]
     PeekResult {
         peek_id: String,
@@ -132,6 +139,21 @@ pub enum Msg {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn mail_and_peek_carry_an_optional_bow_colour() {
+        let old: Msg = serde_json::from_str(r#"{"kind":"mail","mail_id":"m"}"#).unwrap();
+        assert!(matches!(old, Msg::Mail { hue: None, .. }));
+        let old: Msg = serde_json::from_str(r#"{"kind":"peek.request","peek_id":"p"}"#).unwrap();
+        assert_eq!(old, Msg::PeekRequest { peek_id: "p".into(), hue: None });
+        let json = serde_json::to_value(Msg::PeekRequest { peek_id: "p".into(), hue: Some(120) }).unwrap();
+        assert_eq!(json["hue"], 120);
+        let plain = serde_json::to_value(Msg::PeekRequest { peek_id: "p".into(), hue: None }).unwrap();
+        assert!(plain.get("hue").is_none());
+        let mail = Msg::Mail { mail_id: "m".into(), text: String::new(), files: vec![], hue: Some(30) };
+        let back: Msg = serde_json::from_value(serde_json::to_value(&mail).unwrap()).unwrap();
+        assert_eq!(back, mail);
+    }
 
     #[test]
     fn visit_messages_carry_optional_flags_and_old_ones_still_parse() {
