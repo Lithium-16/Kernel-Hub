@@ -6,6 +6,7 @@ mod app;
 mod config;
 mod files;
 mod fx;
+mod games;
 mod install;
 #[cfg(windows)]
 mod mailui;
