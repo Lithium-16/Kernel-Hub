@@ -11,6 +11,7 @@ mod install;
 #[cfg(windows)]
 mod mailui;
 mod net;
+mod objects;
 mod pet;
 mod protocol;
 mod social;
