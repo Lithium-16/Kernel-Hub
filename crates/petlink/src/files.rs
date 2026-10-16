@@ -2,14 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
-#[allow(dead_code)]
 const DANGEROUS: &[&str] = &["exe", "bat", "cmd", "ps1", "vbs", "js", "msi", "scr", "lnk"];
-#[allow(dead_code)]
 const RESERVED: &[&str] = &[
     "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "LPT1", "LPT2", "LPT3",
 ];
 
-#[allow(dead_code)]
 pub fn is_dangerous(name: &str) -> bool {
     Path::new(name)
         .extension()
@@ -17,7 +14,6 @@ pub fn is_dangerous(name: &str) -> bool {
         .is_some_and(|e| DANGEROUS.contains(&e.to_ascii_lowercase().as_str()))
 }
 
-#[allow(dead_code)]
 pub fn safe_name(name: &str) -> String {
     let last = name.rsplit(['/', '\\']).next().unwrap_or("");
     let cleaned: String = last
@@ -36,7 +32,6 @@ pub fn safe_name(name: &str) -> String {
     }
 }
 
-#[allow(dead_code)]
 pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let first = dir.join(name);
     if !first.exists() {
@@ -55,7 +50,6 @@ pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
         .expect("some free name")
 }
 
-#[allow(dead_code)]
 pub fn save(dir: &Path, name: &str, bytes: &[u8], source_url: &str) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let path = unique_path(dir, &safe_name(name));
@@ -74,7 +68,6 @@ pub fn save(dir: &Path, name: &str, bytes: &[u8], source_url: &str) -> std::io::
     Ok(path)
 }
 
-#[allow(dead_code)]
 pub fn downloads_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("PETLINK_DIR") {
         return PathBuf::from(d).join("Downloads"); // test setups keep to their own folder

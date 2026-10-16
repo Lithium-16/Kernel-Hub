@@ -10,7 +10,7 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
 };
-use windows::Win32::System::SystemInformation::GetTickCount;
+use windows::Win32::System::SystemInformation::{GetLocalTime, GetTickCount};
 use windows::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId};
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
@@ -206,6 +206,38 @@ pub fn single_instance(name: &str) -> bool {
         let _ = CreateMutexW(None, true, PCWSTR(wide.as_ptr()));
         GetLastError() != ERROR_ALREADY_EXISTS
     }
+}
+
+/// Local date and time as (year, month, day, hour, minute).
+pub fn local_time() -> (u16, u16, u16, u16, u16) {
+    // SAFETY: GetLocalTime has no preconditions.
+    let t = unsafe { GetLocalTime() };
+    (t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute)
+}
+
+/// One snapshot of the primary monitor as a JPEG, at most `max_w` wide.
+pub fn capture_primary_jpeg(max_w: u32, quality: u8) -> anyhow::Result<Vec<u8>> {
+    use image::{DynamicImage, RgbaImage, imageops::FilterType};
+    let monitors = xcap::Monitor::all().context("listing monitors")?;
+    let primary = monitors
+        .into_iter()
+        .find(|m| m.is_primary().unwrap_or(false))
+        .context("no primary monitor")?;
+    let shot = primary.capture_image().context("capturing the screen")?;
+    // xcap may link another version of `image`: go through raw pixels.
+    let (w, h) = (shot.width(), shot.height());
+    let img = RgbaImage::from_raw(w, h, shot.into_raw()).context("odd screenshot buffer")?;
+    let img = if w > max_w {
+        image::imageops::resize(&img, max_w, (h * max_w / w).max(1), FilterType::Triangle)
+    } else {
+        img
+    };
+    let rgb = DynamicImage::ImageRgba8(img).to_rgb8();
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality)
+        .encode_image(&rgb)
+        .context("encoding the JPEG")?;
+    Ok(out)
 }
 
 const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");

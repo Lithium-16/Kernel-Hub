@@ -113,7 +113,6 @@ pub struct Windows {
     pub autosave: bool,
 }
 
-#[allow(dead_code)]
 pub struct Lens {
     pub texture: TextureHandle,
     pub bytes: Vec<u8>,
@@ -199,7 +198,6 @@ impl Windows {
         });
     }
 
-    #[allow(dead_code)]
     pub fn download_peek(
         &mut self,
         ctx: &egui::Context,
@@ -450,5 +448,74 @@ pub fn save_file(r: &mut Reading, f: &FileRef, config: &Config) {
 }
 
 impl Windows {
-    fn show_lens(&mut self, _ctx: &egui::Context, _config: &Config) {}
+    fn show_lens(&mut self, ctx: &egui::Context, config: &Config) {
+        let Some(l) = &mut self.lens else { return };
+        let mut close = false;
+        ctx.show_viewport_immediate(
+            ViewportId::from_hash_of("lens"),
+            ViewportBuilder::default()
+                .with_title(l.title.clone())
+                .with_inner_size([900.0, 560.0]),
+            |ui, _| {
+                if ui.ctx().input(|i| i.viewport().close_requested()) {
+                    close = true;
+                    return;
+                }
+                egui::CentralPanel::default().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button("Save").clicked() {
+                            let (y, mo, d, h, mi) = crate::win::local_time();
+                            let name = format!("peek-{y:04}-{mo:02}-{d:02}-{h:02}{mi:02}.jpg");
+                            l.status = match files::save(
+                                &files::downloads_dir(),
+                                &name,
+                                &l.bytes,
+                                &config.files_url(),
+                            ) {
+                                Ok(p) => {
+                                    tracing::info!("saved {}", p.display());
+                                    "Saved to Downloads\\PetLink".to_owned()
+                                }
+                                Err(e) => format!("Could not save: {e}"),
+                            };
+                        }
+                        ui.label(&l.status);
+                        ui.weak("wheel to zoom, drag to move");
+                    });
+                    let area = ui.available_rect_before_wrap();
+                    let resp = ui.allocate_rect(area, egui::Sense::click_and_drag());
+                    let size = l.texture.size_vec2();
+                    let fit = (area.width() / size.x).min(area.height() / size.y);
+                    let center = area.center() + l.offset;
+                    if resp.hovered()
+                        && let Some(p) = ui.input(|i| i.pointer.hover_pos())
+                    {
+                        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+                        let zoom = (l.zoom * (1.0 + scroll * 0.004)).clamp(1.0, 8.0);
+                        // Keep the point under the cursor where it is.
+                        let new_center = p - (p - center) * (zoom / l.zoom);
+                        l.zoom = zoom;
+                        l.offset = new_center - area.center();
+                    }
+                    l.offset += resp.drag_delta();
+                    if l.zoom <= 1.0 {
+                        l.offset = egui::Vec2::ZERO;
+                    }
+                    let shown = size * fit * l.zoom;
+                    let slack = ((shown - area.size()) / 2.0).max(egui::Vec2::ZERO);
+                    l.offset = l.offset.clamp(-slack, slack);
+                    let rect = egui::Rect::from_center_size(area.center() + l.offset, shown);
+                    ui.painter_at(area).image(
+                        l.texture.id(),
+                        rect,
+                        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::Pos2::new(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                });
+            },
+        );
+        if close {
+            self.lens = None;
+        }
+    }
 }

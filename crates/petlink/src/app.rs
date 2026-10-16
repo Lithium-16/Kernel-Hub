@@ -15,6 +15,7 @@ use egui::{
 };
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 const IDLE_AWAY_SECS: u64 = 300;
@@ -108,7 +109,6 @@ struct DragState {
 enum Trip {
     None,
     Visit,
-    #[allow(dead_code)]
     Peek,
     Mail,
 }
@@ -156,8 +156,15 @@ pub struct PetApp {
     bubbles: Vec<(String, Instant)>,
     away: bool,
     hidden: bool,
+    /// My peek request waiting for an answer: (peek id, deadline).
+    peek_pending: Option<(String, Instant)>,
+    /// Snapshots being taken for the friend: results come back here.
+    capture_tx: Sender<(String, Result<Vec<u8>, String>)>,
+    capture_rx: Receiver<(String, Result<Vec<u8>, String>)>,
+    /// file id of an uploaded snapshot -> the peek it answers
+    peek_uploads: HashMap<String, String>,
     #[cfg(debug_assertions)]
-    autotest_done: HashSet<String>,
+    autotest_done: HashMap<String, Instant>,
     last_screen: Rect,
     ppp: f32,
     windows: mailui::Windows,
@@ -228,6 +235,7 @@ impl PetApp {
         let my_hue = config.bow_hue.unwrap_or(0);
         let my_tex = Tex::new(&cc.egui_ctx, "me", &Sprites::load(my_hue)?);
         let mine = Pet::new(world.screen.w * 0.5, world.ground());
+        let (capture_tx, capture_rx) = channel();
         let mut app = PetApp {
             config,
             data_dir,
@@ -267,8 +275,12 @@ impl PetApp {
             bubbles: Vec::new(),
             away: false,
             hidden: false,
+            peek_pending: None,
+            capture_tx,
+            capture_rx,
+            peek_uploads: HashMap::new(),
             #[cfg(debug_assertions)]
-            autotest_done: HashSet::new(),
+            autotest_done: HashMap::new(),
             ppp,
             windows: mailui::Windows::default(),
             ctx: cc.egui_ctx.clone(),
@@ -352,6 +364,7 @@ impl PetApp {
 
     fn bring_my_pet_home(&mut self) {
         self.trip = Trip::None;
+        self.peek_pending = None;
         if self.my_pet_away {
             self.my_pet_away = false;
             self.mine.enter_from_door(&self.world);
@@ -405,12 +418,22 @@ impl PetApp {
             NetEvent::Upgrade => self.bubble("Please update PetLink"),
             NetEvent::Uploaded { file_id } => {
                 tracing::info!("uploaded {file_id}");
+                if let Some(peek_id) = self.peek_uploads.remove(&file_id) {
+                    self.send_to_friend(Msg::PeekResult {
+                        peek_id,
+                        file_id: file_id.clone(),
+                        denied: false,
+                    });
+                }
                 for o in &mut self.outgoing {
                     o.pending.remove(&file_id);
                 }
             }
             NetEvent::UploadFailed { file_id, error } => {
                 tracing::warn!("upload {file_id} failed: {error}");
+                if let Some(peek_id) = self.peek_uploads.remove(&file_id) {
+                    self.deny_peek(peek_id);
+                }
                 for o in &mut self.outgoing {
                     if o.pending.remove(&file_id) {
                         o.failed.insert(file_id.clone());
@@ -466,6 +489,25 @@ impl PetApp {
                 }
             }
             Msg::PeekAllow { on } => self.friend_peek = on,
+            Msg::PeekResult {
+                peek_id,
+                file_id,
+                denied,
+            } => {
+                if self.peek_pending.as_ref().map(|(id, _)| id) != Some(&peek_id) {
+                    return;
+                }
+                self.peek_pending = None;
+                self.bring_my_pet_home();
+                if denied || file_id.is_empty() {
+                    let msg = format!("{} isn't letting you peek right now", self.friend_name());
+                    self.bubble(msg);
+                } else {
+                    let (ctx, from) = (self.ctx.clone(), self.friend_name());
+                    self.windows
+                        .download_peek(&ctx, &self.config, file_id, from);
+                }
+            }
             Msg::Mail { .. } => self.jobs.push_back(Job::Deliver(env)),
             Msg::MailRead { .. } => self.mine.pat(),
             Msg::Delivered { mail_id } => {
@@ -625,8 +667,54 @@ impl PetApp {
         }
     }
 
-    /// Placeholder until the capture is wired in.
-    fn on_peek_done(&mut self, _peek_id: String) {}
+    /// The pose is over: take one snapshot (on a thread) and send it to the friend.
+    fn on_peek_done(&mut self, peek_id: String) {
+        tracing::info!("peek pose done; taking the snapshot");
+        let (tx, ctx) = (self.capture_tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let r = win::capture_primary_jpeg(1920, 80).map_err(|e| format!("{e:#}"));
+            let _ = tx.send((peek_id, r));
+            ctx.request_repaint();
+        });
+    }
+
+    fn deny_peek(&self, peek_id: String) {
+        self.send_to_friend(Msg::PeekResult {
+            peek_id,
+            file_id: String::new(),
+            denied: true,
+        });
+    }
+
+    fn pump_captures(&mut self) {
+        while let Ok((peek_id, result)) = self.capture_rx.try_recv() {
+            match result {
+                Ok(bytes) => {
+                    let file_id = format!("f_peek_{}", ulid::Ulid::generate());
+                    tracing::info!("snapshot {} bytes, uploading as {file_id}", bytes.len());
+                    self.peek_uploads.insert(file_id.clone(), peek_id);
+                    let _ = self.net.cmds.send(NetCmd::Upload {
+                        file_id,
+                        to: self.friend_id(),
+                        name: "peek.jpg".into(),
+                        bytes,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("snapshot failed: {e}");
+                    self.deny_peek(peek_id);
+                }
+            }
+        }
+        if let Some((_, deadline)) = &self.peek_pending
+            && Instant::now() > *deadline
+        {
+            self.peek_pending = None;
+            let msg = format!("{} did not answer", self.friend_name());
+            self.bubble(msg);
+            self.bring_my_pet_home();
+        }
+    }
 
     fn step_mine(&mut self, dt: f32, rng: &mut impl rand::Rng) {
         if let Some(t) = self.mine_back_at
@@ -675,7 +763,13 @@ impl PetApp {
         }
     }
 
-    fn on_my_pet_at_door_for_peek(&mut self) {}
+    fn on_my_pet_at_door_for_peek(&mut self) {
+        let peek_id = new_id();
+        tracing::info!("asking {} for a peek", self.friend_name());
+        self.my_pet_away = true;
+        self.peek_pending = Some((peek_id.clone(), Instant::now() + Duration::from_secs(30)));
+        self.send_to_friend(Msg::PeekRequest { peek_id });
+    }
 
     fn start_visit(&mut self) {
         if self.my_pet_away {
@@ -729,7 +823,7 @@ impl PetApp {
             return;
         };
         for step in list.to_string_lossy().split(',') {
-            if self.autotest_done.contains(step) {
+            if self.autotest_done.contains_key(step) {
                 continue;
             }
             let ready = match step {
@@ -738,13 +832,31 @@ impl PetApp {
                     self.can_interact() && self.trip == Trip::None && !self.my_pet_hidden()
                 }
                 "open-mail" => !self.parcels.is_empty(),
+                "peek" => {
+                    self.can_interact()
+                        && self.friend_peek
+                        && self.trip == Trip::None
+                        && !self.my_pet_hidden()
+                }
+                "visit" => self.can_interact() && self.trip == Trip::None && !self.my_pet_hidden(),
+                "call-home" => {
+                    self.my_pet_away
+                        && self
+                            .autotest_done
+                            .get("visit")
+                            .is_some_and(|t| t.elapsed() > Duration::from_secs(30))
+                }
+                "yeet" => self
+                    .visitor
+                    .as_ref()
+                    .is_some_and(|v| matches!(v.job, Job::Visit) && v.stage == Stage::Working),
                 _ => false,
             };
             if !ready {
                 continue;
             }
             tracing::info!("autotest: {step}");
-            self.autotest_done.insert(step.to_owned());
+            self.autotest_done.insert(step.to_owned(), Instant::now());
             match step {
                 "peek-on" if !self.my_peek => {
                     self.my_peek = true;
@@ -762,6 +874,17 @@ impl PetApp {
                     let bat = dir.join("autotest.bat");
                     let _ = std::fs::write(&bat, "@echo hello from autotest\r\n");
                     self.send_letter("hello from autotest".into(), vec![png, bat]);
+                }
+                "peek" => self.start_peek(),
+                "visit" | "call-home" => self.start_visit(),
+                "yeet" => {
+                    if let Some(v) = &mut self.visitor {
+                        v.pet.grab();
+                        v.pet.throw(900.0, -900.0);
+                    }
+                    self.send_to_friend(Msg::Touch {
+                        what: TouchKind::Yeet,
+                    });
                 }
                 "open-mail" => {
                     self.windows.autosave = true;
@@ -1107,7 +1230,16 @@ impl PetApp {
         }
     }
 
-    fn start_peek(&mut self) {}
+    fn start_peek(&mut self) {
+        if self.can_interact()
+            && self.friend_peek
+            && self.trip == Trip::None
+            && !self.my_pet_hidden()
+        {
+            self.trip = Trip::Peek;
+            self.mine.exit_to_door();
+        }
+    }
 
     // ------------------------------------------------------------------ drawing
 
@@ -1333,6 +1465,7 @@ impl eframe::App for PetApp {
         let mut rng = rand::rng();
         #[cfg(debug_assertions)]
         self.autotest();
+        self.pump_captures();
         self.pump_jobs();
         self.pump_outgoing();
         self.step_mine(dt, &mut rng);
