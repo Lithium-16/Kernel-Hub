@@ -3,6 +3,7 @@
 
 use crate::fx::Hearts;
 use crate::pet::{Emote, Pet, State, floor_span};
+use crate::sounds::Sound;
 use crate::world::World;
 use rand::Rng;
 
@@ -22,7 +23,7 @@ pub fn auto_stay(rng: &mut impl Rng) -> f32 {
 }
 
 /// A game that has not finished by now is called off.
-const GAME_MAX_S: f32 = 45.0;
+const GAME_MAX_S: f32 = 60.0;
 /// Rock paper scissors: when the hands are shown and when the round is over.
 const RPS_REVEAL_S: f32 = 1.5;
 const RPS_END_S: f32 = 3.2;
@@ -107,6 +108,7 @@ pub struct Games {
     next_in: f32,
     total: f32,
     run: Option<Run>,
+    sounds: Vec<Sound>,
 }
 
 fn pet<'p>(who: Who, a: &'p mut Pet, b: &'p mut Pet) -> &'p mut Pet {
@@ -148,7 +150,13 @@ impl Games {
             next_in: rng.random_range(GAP_MIN_S..GAP_MAX_S) / k,
             total: 0.0,
             run: None,
+            sounds: Vec::new(),
         }
+    }
+
+    /// The sounds the game wants played since the last call.
+    pub fn take_sounds(&mut self) -> Vec<Sound> {
+        std::mem::take(&mut self.sounds)
     }
 
     pub fn busy(&self) -> bool {
@@ -248,7 +256,7 @@ impl Games {
             return;
         }
         let done = match self.run.as_mut() {
-            Some(run) => step(run, dt, world, a, b, px, rng, hearts),
+            Some(run) => step(run, dt, world, a, b, px, rng, hearts, &mut self.sounds),
             None => false,
         };
         if done {
@@ -270,6 +278,9 @@ impl Games {
     ) {
         tracing::info!("game: {game:?}");
         self.total = 0.0;
+        if game == Game::Fetch {
+            self.sounds.push(Sound::Whoosh);
+        }
         self.run = Some(match game {
             Game::Rps => {
                 a.linger(RPS_END_S + 5.0, b.x);
@@ -306,11 +317,16 @@ impl Games {
                 let hider = if rng.random_bool(0.5) { Who::A } else { Who::B };
                 let span = floor_span(world, a.x, a.y);
                 let seeker_x = pet(hider.other(), a, b).x;
-                let spot_x = if seeker_x < (span.0 + span.1) / 2.0 {
-                    span.1 - 40.0
+                // A short walk away from the seeker (pets only do 40 px/s): the game must end in time.
+                let hx = pet(hider, a, b).x;
+                let dir = if hx >= seeker_x { 1.0 } else { -1.0 };
+                let want = hx + dir * rng.random_range(200.0..320.0_f32);
+                let spot_x = if want > span.0 + 40.0 && want < span.1 - 40.0 {
+                    want
                 } else {
-                    span.0 + 40.0
-                };
+                    hx - dir * 250.0
+                }
+                .clamp(span.0 + 40.0, span.1 - 40.0);
                 pet(hider, a, b).walk_then_linger(spot_x, 60.0, spot_x);
                 pet(hider.other(), a, b).linger(30.0, 2.0 * seeker_x - spot_x);
                 Run::Hide {
@@ -341,6 +357,7 @@ fn step(
     px: f32,
     rng: &mut impl Rng,
     hearts: &mut Hearts,
+    sounds: &mut Vec<Sound>,
 ) -> bool {
     match run {
         Run::Rps {
@@ -376,6 +393,7 @@ fn step(
                         w.headpatted();
                         l.show_emote(Emote::Dots);
                         hearts.burst(w.x, w.y - 50.0 * px, 3, rng);
+                        sounds.push(Sound::TaDa);
                     }
                 }
             }
@@ -464,6 +482,7 @@ fn step(
                         hearts.burst(hx, hy - 50.0 * px, 3, rng);
                         pet(*hider, a, b).headpatted();
                         pet(hider.other(), a, b).show_emote(Emote::Bang);
+                        sounds.push(Sound::Giggle);
                     }
                 }
                 _ => {
@@ -568,6 +587,26 @@ mod tests {
             let s = auto_stay(&mut rng);
             assert!((AUTO_GAP_S.0..AUTO_GAP_S.1).contains(&g));
             assert!((AUTO_STAY_S.0..AUTO_STAY_S.1).contains(&s));
+        }
+    }
+
+    #[test]
+    fn each_game_asks_for_its_sound() {
+        for (game, want) in [
+            (Game::Rps, Sound::TaDa),
+            (Game::Fetch, Sound::Whoosh),
+            (Game::Hide, Sound::Giggle),
+        ] {
+            let mut r = Rig::new();
+            let (w, mut rng) = (world(), StdRng::seed_from_u64(9));
+            r.g.start(game, &w, &mut r.a, &mut r.b, &mut rng);
+            let mut heard = r.g.take_sounds();
+            while r.g.busy() {
+                r.tick(0.1);
+                heard.extend(r.g.take_sounds());
+            }
+            assert!(heard.contains(&want), "{game:?} made {heard:?}");
+            assert!(r.g.take_sounds().is_empty());
         }
     }
 

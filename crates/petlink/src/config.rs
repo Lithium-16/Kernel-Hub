@@ -28,6 +28,9 @@ pub struct Config {
     /// "Let pets wander": pets visit each other by themselves.
     #[serde(default = "default_true")]
     pub wander: bool,
+    /// Little sounds for letters, doors, pats and games.
+    #[serde(default = "default_true")]
+    pub sounds: bool,
 }
 
 #[derive(Deserialize)]
@@ -81,6 +84,7 @@ impl Config {
             bow_hue: None,
             peek: false,
             wander: true,
+            sounds: true,
         })
     }
 
@@ -117,8 +121,23 @@ mod tests {
             bow_hue: None,
             peek: false,
             wander: true,
+            sounds: true,
         };
         assert_eq!(local.files_url(), "http://127.0.0.1:8098/files");
+    }
+
+    #[test]
+    fn sounds_are_on_by_default_and_the_choice_is_kept() {
+        let old = "relay_url = \"ws://x/ws\"
+token = \"t\"
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.toml"), old).unwrap();
+        let mut c = Config::load(dir.path()).unwrap().unwrap();
+        assert!(c.sounds);
+        c.sounds = false;
+        c.save(dir.path()).unwrap();
+        assert!(!Config::load(dir.path()).unwrap().unwrap().sounds);
     }
 
     #[test]
