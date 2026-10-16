@@ -1,0 +1,251 @@
+//! Win32 glue: the screen, taskbar, other windows, input idleness. The only file with `unsafe`.
+#![allow(unsafe_code)]
+
+use crate::world::Rect;
+use anyhow::{Context, bail};
+use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, RECT, TRUE};
+use windows::Win32::Graphics::Dwm::{
+    DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
+};
+use windows::Win32::System::Registry::{
+    HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
+};
+use windows::Win32::System::SystemInformation::GetTickCount;
+use windows::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId};
+use windows::Win32::UI::HiDpi::{
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+use windows::Win32::UI::Shell::{
+    ABM_GETSTATE, ABM_GETTASKBARPOS, ABS_AUTOHIDE, APPBARDATA, SHAppBarMessage,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, FindWindowExW, FindWindowW, GWL_EXSTYLE, GetClassNameW, GetCursorPos,
+    GetForegroundWindow, GetShellWindow, GetSystemMetrics, GetWindowLongW, GetWindowRect,
+    GetWindowTextLengthW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SM_CXSCREEN,
+    SM_CYSCREEN, WS_EX_TOOLWINDOW,
+};
+use windows::core::{BOOL, PCWSTR, w};
+
+fn rect(r: RECT) -> Rect {
+    Rect {
+        x: r.left as f32,
+        y: r.top as f32,
+        w: (r.right - r.left) as f32,
+        h: (r.bottom - r.top) as f32,
+    }
+}
+
+/// Call once, before any window exists, so every coordinate is a physical pixel.
+pub fn set_dpi_aware() {
+    // SAFETY: plain Win32 call with a constant.
+    let _ = unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+}
+
+pub fn screen() -> Rect {
+    // SAFETY: GetSystemMetrics has no preconditions.
+    let (w, h) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+    Rect {
+        x: 0.0,
+        y: 0.0,
+        w: w as f32,
+        h: h as f32,
+    }
+}
+
+/// `None` when the taskbar is auto-hidden or not along the bottom of the primary monitor.
+pub fn taskbar() -> Option<Rect> {
+    let mut data = APPBARDATA {
+        cbSize: std::mem::size_of::<APPBARDATA>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: `data` is a valid APPBARDATA with cbSize set.
+    unsafe {
+        if SHAppBarMessage(ABM_GETSTATE, &mut data) as u32 & ABS_AUTOHIDE != 0 {
+            return None;
+        }
+        if SHAppBarMessage(ABM_GETTASKBARPOS, &mut data) == 0 {
+            return None;
+        }
+    }
+    let r = rect(data.rc);
+    let s = screen();
+    (r.y > s.h / 2.0 && r.w >= s.w / 2.0).then_some(r)
+}
+
+pub fn tray_left() -> f32 {
+    // SAFETY: FindWindow* and GetWindowRect take a valid out pointer.
+    unsafe {
+        if let Ok(tray) = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null())
+            && let Ok(notify) = FindWindowExW(Some(tray), None, w!("TrayNotifyWnd"), PCWSTR::null())
+        {
+            let mut r = RECT::default();
+            if GetWindowRect(notify, &mut r).is_ok() {
+                return r.left as f32;
+            }
+        }
+    }
+    screen().right() - 200.0
+}
+
+unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    // SAFETY: lparam is the &mut Vec<HWND> passed by top_windows.
+    let list = unsafe { &mut *(lparam.0 as *mut Vec<HWND>) };
+    list.push(hwnd);
+    TRUE
+}
+
+/// Visible, non-minimised, non-tool, non-cloaked windows with a title, front-most first.
+pub fn top_windows() -> Vec<Rect> {
+    let mut all: Vec<HWND> = Vec::new();
+    // SAFETY: the callback only touches the Vec behind lparam, alive for the whole call.
+    unsafe {
+        let _ = EnumWindows(Some(collect), LPARAM(&mut all as *mut Vec<HWND> as isize));
+    }
+    // SAFETY: GetCurrentProcessId has no preconditions.
+    let ours = unsafe { GetCurrentProcessId() };
+    let mut out = Vec::new();
+    for hwnd in all {
+        // SAFETY: hwnd came from EnumWindows; every call below tolerates a stale handle.
+        unsafe {
+            if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
+                continue;
+            }
+            if GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0 {
+                continue;
+            }
+            if GetWindowTextLengthW(hwnd) == 0 {
+                continue;
+            }
+            let mut cloaked = 0u32;
+            let _ =
+                DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut _, 4);
+            if cloaked != 0 {
+                continue;
+            }
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(hwnd, Some(&mut pid));
+            if pid == ours {
+                continue;
+            }
+            let mut r = RECT::default();
+            if DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_EXTENDED_FRAME_BOUNDS,
+                &mut r as *mut RECT as *mut _,
+                std::mem::size_of::<RECT>() as u32,
+            )
+            .is_err()
+                && GetWindowRect(hwnd, &mut r).is_err()
+            {
+                continue;
+            }
+            out.push(rect(r));
+        }
+    }
+    out
+}
+
+pub fn cursor() -> (f32, f32) {
+    let mut p = Default::default();
+    // SAFETY: valid out pointer.
+    if unsafe { GetCursorPos(&mut p) }.is_ok() {
+        (p.x as f32, p.y as f32)
+    } else {
+        (-1.0, -1.0)
+    }
+}
+
+pub fn idle_seconds() -> u64 {
+    let mut info = LASTINPUTINFO {
+        cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+        dwTime: 0,
+    };
+    // SAFETY: valid LASTINPUTINFO with cbSize set.
+    unsafe {
+        if !GetLastInputInfo(&mut info).as_bool() {
+            return 0;
+        }
+        u64::from(GetTickCount().wrapping_sub(info.dwTime)) / 1000
+    }
+}
+
+pub fn foreground_is_fullscreen() -> bool {
+    // SAFETY: all handles come from the system and are only passed back to it.
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() || hwnd == GetShellWindow() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == GetCurrentProcessId() {
+            return false;
+        }
+        let mut class = [0u16; 64];
+        let n = GetClassNameW(hwnd, &mut class) as usize;
+        let class = String::from_utf16_lossy(&class[..n]);
+        if class == "Progman" || class == "WorkerW" {
+            return false;
+        }
+        let mut r = RECT::default();
+        if GetWindowRect(hwnd, &mut r).is_err() {
+            return false;
+        }
+        let s = screen();
+        let r = rect(r);
+        r.x <= s.x && r.y <= s.y && r.right() >= s.right() && r.y + r.h >= s.y + s.h
+    }
+}
+
+/// False if another copy with the same `name` runs. The handle is leaked on purpose.
+pub fn single_instance(name: &str) -> bool {
+    let wide: Vec<u16> = format!("Local\\{name}\0").encode_utf16().collect();
+    // SAFETY: `wide` is NUL-terminated and outlives the call.
+    unsafe {
+        let _ = CreateMutexW(None, true, PCWSTR(wide.as_ptr()));
+        GetLastError() != ERROR_ALREADY_EXISTS
+    }
+}
+
+const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+
+pub fn autostart_enabled() -> bool {
+    // SAFETY: null data pointer with null size just probes for existence.
+    unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            RUN_KEY,
+            w!("PetLink"),
+            RRF_RT_REG_SZ,
+            None,
+            None,
+            None,
+        )
+        .0 == 0
+    }
+}
+
+pub fn set_autostart(on: bool) -> anyhow::Result<()> {
+    // SAFETY: the data pointer and byte length describe `wide`, alive for the call.
+    unsafe {
+        if on {
+            let exe = std::env::current_exe().context("exe path")?;
+            let wide: Vec<u16> = format!("\"{}\"\0", exe.display()).encode_utf16().collect();
+            let e = RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                RUN_KEY,
+                w!("PetLink"),
+                REG_SZ.0,
+                Some(wide.as_ptr() as *const _),
+                (wide.len() * 2) as u32,
+            );
+            if e.0 != 0 {
+                bail!("registry write failed ({})", e.0);
+            }
+        } else {
+            let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, w!("PetLink"));
+        }
+    }
+    Ok(())
+}

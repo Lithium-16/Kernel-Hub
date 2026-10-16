@@ -15,6 +15,9 @@ pub struct Config {
     pub token: String,
     #[serde(default = "default_scale")]
     pub scale: u8,
+    /// Overrides how my own pet's bow looks here (friends see the hue the relay has).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bow_hue: Option<u16>,
 }
 
 #[derive(Deserialize)]
@@ -25,6 +28,9 @@ struct Invite {
 
 impl Config {
     pub fn dir() -> PathBuf {
+        if let Some(d) = std::env::var_os("PETLINK_DIR") {
+            return PathBuf::from(d);
+        }
         std::env::var_os("APPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(std::env::temp_dir)
@@ -62,6 +68,7 @@ impl Config {
             relay_url: i.relay_url,
             token: i.token,
             scale: default_scale(),
+            bow_hue: None,
         })
     }
 
@@ -95,6 +102,7 @@ mod tests {
             relay_url: "ws://127.0.0.1:8098/ws".into(),
             token: "t".into(),
             scale: 2,
+            bow_hue: None,
         };
         assert_eq!(local.files_url(), "http://127.0.0.1:8098/files");
     }
