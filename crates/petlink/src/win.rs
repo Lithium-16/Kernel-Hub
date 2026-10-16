@@ -4,7 +4,7 @@
 use crate::world::Rect;
 use anyhow::{Context, bail};
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, RECT, TRUE,
+    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, RECT, TRUE, WPARAM,
 };
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
@@ -13,7 +13,7 @@ use windows::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW,
 };
 use windows::Win32::System::SystemInformation::{GetLocalTime, GetTickCount};
-use windows::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId};
+use windows::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId, GetCurrentThreadId};
 use windows::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
@@ -22,10 +22,12 @@ use windows::Win32::UI::Shell::{
     ABM_GETSTATE, ABM_GETTASKBARPOS, ABS_AUTOHIDE, APPBARDATA, SHAppBarMessage,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, FindWindowExW, FindWindowW, GWL_EXSTYLE, GetClassNameW, GetCursorPos,
-    GetForegroundWindow, GetShellWindow, GetSystemMetrics, GetWindowLongW, GetWindowRect,
-    GetWindowTextLengthW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SM_CXSCREEN,
-    SM_CYSCREEN, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    DispatchMessageW, EnumWindows, FindWindowExW, FindWindowW, GWL_EXSTYLE, GetClassNameW,
+    GetCursorPos, GetForegroundWindow, GetMessageW, GetShellWindow, GetSystemMetrics,
+    GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowThreadProcessId, IsIconic,
+    IsWindowVisible, MSG, PostMessageW, PostThreadMessageW, SM_CXSCREEN, SM_CYSCREEN,
+    TranslateMessage, WM_APP, WM_CANCELMODE, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_EX_TRANSPARENT,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -306,4 +308,36 @@ pub fn set_autostart_for(exe: &std::path::Path) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn thread_id() -> u32 {
+    unsafe { GetCurrentThreadId() }
+}
+
+/// Wakes the message loop of thread `tid` (see `pump_one`).
+pub fn post_wake(tid: u32) {
+    unsafe {
+        let _ = PostThreadMessageW(tid, WM_APP, WPARAM(0), LPARAM(0));
+    }
+}
+
+/// Blocks for one message and dispatches it; false once the loop should end.
+pub fn pump_one() -> bool {
+    unsafe {
+        let mut m = MSG::default();
+        if GetMessageW(&mut m, None, 0, 0).0 <= 0 {
+            return false;
+        }
+        let _ = TranslateMessage(&m);
+        DispatchMessageW(&m);
+        true
+    }
+}
+
+/// Debug autotest: closes a popup menu owned by `hwnd`.
+#[cfg(debug_assertions)]
+pub fn post_cancel_mode(hwnd: isize) {
+    unsafe {
+        let _ = PostMessageW(Some(HWND(hwnd as _)), WM_CANCELMODE, WPARAM(0), LPARAM(0));
+    }
 }

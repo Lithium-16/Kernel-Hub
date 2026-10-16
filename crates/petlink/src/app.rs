@@ -329,6 +329,19 @@ pub fn run(config: Config, data_dir: PathBuf, welcome: bool) -> eframe::Result<(
     )
 }
 
+/// Takes the tray icon down first so no ghost is left, then leaves.
+fn quit_process(
+    cmds: &tokio::sync::mpsc::UnboundedSender<NetCmd>,
+    tray: &crate::tray::TrayHandle,
+) -> ! {
+    tracing::info!("quitting");
+    tray.remove();
+    let _ = cmds.send(NetCmd::Shutdown);
+    // Give the net thread a moment to send its close frame.
+    std::thread::sleep(Duration::from_millis(200));
+    std::process::exit(0);
+}
+
 impl PetApp {
     fn new(
         cc: &eframe::CreationContext<'_>,
@@ -349,7 +362,7 @@ impl PetApp {
         let net = Net::start(config.clone(), data_dir.clone(), move || {
             ctx.request_repaint()
         });
-        let tray = Tray::new(config.peek)?;
+        let tray = Tray::new(config.peek, cc.egui_ctx.clone())?;
         let ppp = cc.egui_ctx.pixels_per_point();
         let world = world_now(ppp);
         tracing::info!(
@@ -1045,20 +1058,32 @@ impl PetApp {
             TrayAction::Autostart => {}
             TrayAction::CheckUpdates => self.check_updates(),
             TrayAction::Uninstall => {
-                let yes = rfd::MessageDialog::new()
-                    .set_title("Uninstall PetLink")
-                    .set_description(
-                        "Remove PetLink and its settings from this computer? Your pet will go away.",
-                    )
-                    .set_buttons(rfd::MessageButtons::YesNo)
-                    .show()
-                    == rfd::MessageDialogResult::Yes;
-                if yes {
-                    match crate::install::uninstall(&self.data_dir) {
-                        Ok(()) => self.quit(),
-                        Err(e) => self.bubble(format!("Couldn't uninstall: {e:#}")),
+                // Modal dialog: never on the frame-loop thread.
+                let (tx, ctx) = (self.note_tx.clone(), self.ctx.clone());
+                let (cmds, tray, dir) = (
+                    self.net.cmds.clone(),
+                    self.tray.handle.clone(),
+                    self.data_dir.clone(),
+                );
+                std::thread::spawn(move || {
+                    let yes = rfd::MessageDialog::new()
+                        .set_title("Uninstall PetLink")
+                        .set_description(
+                            "Remove PetLink and its settings from this computer? Your pet will go away.",
+                        )
+                        .set_buttons(rfd::MessageButtons::YesNo)
+                        .show()
+                        == rfd::MessageDialogResult::Yes;
+                    if yes {
+                        match crate::install::uninstall(&dir) {
+                            Ok(()) => quit_process(&cmds, &tray),
+                            Err(e) => {
+                                let _ = tx.send(format!("Couldn't uninstall: {e:#}"));
+                                ctx.request_repaint();
+                            }
+                        }
                     }
-                }
+                });
             }
             TrayAction::Quit => self.quit(),
         }
@@ -1067,11 +1092,7 @@ impl PetApp {
     /// Exits the process. Closing the overlay viewport alone stops it painting but leaves the
     /// process (and its frozen window) running, so leave explicitly.
     fn quit(&self) -> ! {
-        tracing::info!("quitting");
-        let _ = self.net.cmds.send(NetCmd::Shutdown);
-        // Give the net thread a moment to send its close frame.
-        std::thread::sleep(Duration::from_millis(200));
-        std::process::exit(0);
+        quit_process(&self.net.cmds, &self.tray.handle)
     }
 
     fn save_config(&self) {
@@ -1111,6 +1132,8 @@ impl PetApp {
                             .get("visit")
                             .is_some_and(|t| t.elapsed() > Duration::from_secs(30))
                 }
+                "tray-menu" => self.ticks > 100,
+                "quit-from-tray" => self.ticks > 100,
                 "yeet" => self
                     .visitor
                     .as_ref()
@@ -1123,6 +1146,8 @@ impl PetApp {
             tracing::info!("autotest: {step}");
             self.autotest_done.insert(step.to_owned(), Instant::now());
             match step {
+                "tray-menu" => self.tray.show_menu(),
+                "quit-from-tray" => self.tray.inject(TrayAction::Quit),
                 "peek-on" if !self.my_peek => {
                     self.my_peek = true;
                     self.config.peek = true;
