@@ -32,6 +32,9 @@ reqwest = { version = "0.13", default-features = false, features = ["native-tls"
 zip = { version = "8", default-features = false, features = ["deflate"] }
 sha2 = "0.11"
 hex = "0.4"
+base64 = "0.22"
+rand = "0.9"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 
 [workspace.lints.rust]
