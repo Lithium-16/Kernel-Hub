@@ -236,6 +236,8 @@ pub struct PetApp {
     world: World,
     world_refreshed: Instant,
     passthrough: bool,
+    ticks: u64,
+    last_tick_log: Instant,
     drag: Option<DragState>,
     door_menu: Option<Pos2>,
     bubbles: Vec<(String, Instant)>,
@@ -335,6 +337,15 @@ impl PetApp {
         welcome: bool,
     ) -> anyhow::Result<Self> {
         let ctx = cc.egui_ctx.clone();
+        // Safety net: a repaint request can get lost (the frame loop then sleeps until input
+        // arrives, freezing pets, tray and clicks), so wake it regularly from outside.
+        let beat = cc.egui_ctx.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_millis(50));
+                beat.request_repaint();
+            }
+        });
         let net = Net::start(config.clone(), data_dir.clone(), move || {
             ctx.request_repaint()
         });
@@ -395,6 +406,8 @@ impl PetApp {
             world,
             world_refreshed: Instant::now(),
             passthrough: false,
+            ticks: 0,
+            last_tick_log: Instant::now(),
             drag: None,
             door_menu: None,
             bubbles: if welcome {
@@ -1762,6 +1775,11 @@ impl eframe::App for PetApp {
     /// Everything that isn't painting.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.ppp = ctx.pixels_per_point();
+        self.ticks += 1;
+        if self.last_tick_log.elapsed() >= Duration::from_secs(30) {
+            self.last_tick_log = Instant::now();
+            tracing::info!("frames: {}", self.ticks);
+        }
         self.ensure_textures(ctx);
         while let Ok(ev) = self.net.events.try_recv() {
             self.on_net_event(ev);
