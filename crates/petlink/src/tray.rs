@@ -4,6 +4,8 @@ use crate::sprites::Sprites;
 use crate::win;
 use anyhow::Context;
 use std::collections::HashMap;
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::time::Duration;
 use tray_icon::menu::{
     CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu,
 };
@@ -34,16 +36,6 @@ const BOWS: &[(&str, u16)] = &[
     ("Purple", 270),
 ];
 
-pub struct Tray {
-    icon: TrayIcon,
-    plain: Icon,
-    dotted: Icon,
-    peek: CheckMenuItem,
-    visit: MenuItem,
-    autostart: CheckMenuItem,
-    actions: HashMap<MenuId, TrayAction>,
-}
-
 fn icons() -> anyhow::Result<(Icon, Icon)> {
     let head = image::imageops::crop_imm(&Sprites::load(0)?.idle, 0, 0, 32, 32).to_image();
     let mut dot = head.clone();
@@ -56,8 +48,8 @@ fn icons() -> anyhow::Result<(Icon, Icon)> {
     Ok((mk(head)?, mk(dot)?))
 }
 
-impl Tray {
-    pub fn new(peek_on: bool) -> anyhow::Result<Tray> {
+impl Parts {
+    fn build(peek_on: bool) -> anyhow::Result<Parts> {
         let (plain, dotted) = icons()?;
         let mut actions = HashMap::new();
         let mut add = |id: &MenuId, a: TrayAction| {
@@ -122,7 +114,7 @@ impl Tray {
             })
             .build()
             .context("creating the tray icon")?;
-        Ok(Tray {
+        Ok(Parts {
             icon,
             plain,
             dotted,
@@ -132,9 +124,60 @@ impl Tray {
             actions,
         })
     }
+}
 
-    pub fn poll(&self) -> Option<TrayAction> {
-        let ev = MenuEvent::receiver().try_recv().ok()?;
+enum Cmd {
+    Peek(bool),
+    Friend(String),
+    Visiting(bool),
+    /// Drop the icon (so no ghost stays behind), then ack.
+    Remove(Sender<()>),
+    #[cfg(debug_assertions)]
+    ShowMenu,
+}
+
+/// Lives on the tray thread: `TrayIcon` and the menu items are `!Send`.
+struct Parts {
+    icon: TrayIcon,
+    plain: Icon,
+    dotted: Icon,
+    peek: CheckMenuItem,
+    visit: MenuItem,
+    autostart: CheckMenuItem,
+    actions: HashMap<MenuId, TrayAction>,
+}
+
+impl Parts {
+    fn apply(&self, cmd: Cmd) {
+        match cmd {
+            Cmd::Peek(on) => {
+                self.peek.set_checked(on);
+                let _ = self.icon.set_icon(Some(if on {
+                    self.dotted.clone()
+                } else {
+                    self.plain.clone()
+                }));
+            }
+            Cmd::Friend(name) => self.peek.set_text(format!("Let {name} peek")),
+            Cmd::Visiting(away) => {
+                self.visit
+                    .set_text(if away { "Call home" } else { "Send to visit" })
+            }
+            Cmd::Remove(_) => {}
+            #[cfg(debug_assertions)]
+            Cmd::ShowMenu => {
+                // The menu is modal on this thread; close it from outside after a moment.
+                let hwnd = self.icon.window_handle() as isize;
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_secs(4));
+                    win::post_cancel_mode(hwnd);
+                });
+                self.icon.show_menu();
+            }
+        }
+    }
+
+    fn action(&self, ev: &MenuEvent) -> Option<TrayAction> {
         let action = *self.actions.get(&ev.id)?;
         if action == TrayAction::Autostart
             && let Err(e) = win::set_autostart(self.autostart.is_checked())
@@ -144,22 +187,115 @@ impl Tray {
         }
         Some(action)
     }
+}
+
+/// The tray runs on its own thread with its own message loop: its popup menu is modal, and on
+/// winit's thread that wedged the whole frame loop.
+fn run(
+    peek_on: bool,
+    ctx: egui::Context,
+    cmds: Receiver<Cmd>,
+    out: Sender<TrayAction>,
+    init: Sender<anyhow::Result<u32>>,
+) {
+    let parts = match Parts::build(peek_on) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = init.send(Err(e));
+            return;
+        }
+    };
+    let _ = init.send(Ok(win::thread_id()));
+    while win::pump_one() {
+        while let Ok(cmd) = cmds.try_recv() {
+            if let Cmd::Remove(ack) = cmd {
+                drop(parts);
+                let _ = ack.send(());
+                return;
+            }
+            parts.apply(cmd);
+        }
+        while let Ok(ev) = MenuEvent::receiver().try_recv() {
+            if let Some(a) = parts.action(&ev) {
+                let _ = out.send(a);
+                ctx.request_repaint();
+            }
+        }
+    }
+}
+
+/// The app-side handle; cheap to clone for helper threads.
+#[derive(Clone)]
+pub struct TrayHandle {
+    cmds: Sender<Cmd>,
+    tid: u32,
+}
+
+impl TrayHandle {
+    fn send(&self, c: Cmd) {
+        let _ = self.cmds.send(c);
+        win::post_wake(self.tid);
+    }
+
+    /// Takes the icon off the notification area (waits briefly for the tray thread).
+    pub fn remove(&self) {
+        let (ack, done) = channel();
+        self.send(Cmd::Remove(ack));
+        let _ = done.recv_timeout(Duration::from_millis(500));
+    }
+}
+
+pub struct Tray {
+    pub handle: TrayHandle,
+    actions: Receiver<TrayAction>,
+    #[cfg(debug_assertions)]
+    inject: Sender<TrayAction>,
+}
+
+impl Tray {
+    pub fn new(peek_on: bool, ctx: egui::Context) -> anyhow::Result<Tray> {
+        let (cmds, cmd_rx) = channel();
+        let (out, actions) = channel();
+        let (init, init_rx) = channel();
+        #[cfg(debug_assertions)]
+        let inject = out.clone();
+        std::thread::Builder::new()
+            .name("tray".into())
+            .spawn(move || run(peek_on, ctx, cmd_rx, out, init))?;
+        let tid = init_rx.recv().context("tray thread died")??;
+        Ok(Tray {
+            handle: TrayHandle { cmds, tid },
+            actions,
+            #[cfg(debug_assertions)]
+            inject,
+        })
+    }
+
+    pub fn poll(&self) -> Option<TrayAction> {
+        self.actions.try_recv().ok()
+    }
 
     pub fn set_peek(&self, on: bool) {
-        self.peek.set_checked(on);
-        let _ = self.icon.set_icon(Some(if on {
-            self.dotted.clone()
-        } else {
-            self.plain.clone()
-        }));
+        self.handle.send(Cmd::Peek(on));
     }
 
     pub fn set_friend(&self, name: &str) {
-        self.peek.set_text(format!("Let {name} peek"));
+        self.handle.send(Cmd::Friend(name.to_owned()));
     }
 
     pub fn set_visiting(&self, away: bool) {
-        self.visit
-            .set_text(if away { "Call home" } else { "Send to visit" });
+        self.handle.send(Cmd::Visiting(away));
+    }
+
+    /// Debug autotest: open the context menu (closes itself after 4 s).
+    #[cfg(debug_assertions)]
+    pub fn show_menu(&self) {
+        self.handle.send(Cmd::ShowMenu);
+    }
+
+    /// Debug autotest: as if the user had clicked this item.
+    #[cfg(debug_assertions)]
+    pub fn inject(&self, a: TrayAction) {
+        let _ = self.inject.send(a);
     }
 }
