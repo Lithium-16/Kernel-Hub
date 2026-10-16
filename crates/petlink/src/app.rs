@@ -526,6 +526,11 @@ impl PetApp {
     }
 
     fn bring_my_pet_home(&mut self) {
+        tracing::info!(
+            "bringing my pet home (away: {}, peek pending: {})",
+            self.my_pet_away,
+            self.peek_pending.is_some()
+        );
         self.trip = Trip::None;
         self.peek_pending = None;
         if self.my_pet_away {
@@ -664,6 +669,7 @@ impl PetApp {
                 if self.peek_pending.as_ref().map(|(id, _)| id) != Some(&peek_id) {
                     return;
                 }
+                tracing::info!("peek result (denied: {denied})");
                 self.peek_pending = None;
                 self.bring_my_pet_home();
                 if denied || file_id.is_empty() {
@@ -689,6 +695,12 @@ impl PetApp {
                 );
             }
             Msg::PeekRequest { peek_id } => {
+                tracing::info!(
+                    "peek requested (allowed: {}, hidden: {}, pose ready: {})",
+                    self.my_peek,
+                    self.hidden,
+                    self.friend_tex.is_some()
+                );
                 if self.peek_possible() {
                     self.jobs.push_back(Job::Peek(peek_id));
                 } else {
