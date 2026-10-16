@@ -526,6 +526,11 @@ impl PetApp {
     }
 
     fn bring_my_pet_home(&mut self) {
+        tracing::info!(
+            "bringing my pet home (away: {}, peek pending: {})",
+            self.my_pet_away,
+            self.peek_pending.is_some()
+        );
         self.trip = Trip::None;
         self.peek_pending = None;
         if self.my_pet_away {
@@ -574,9 +579,6 @@ impl PetApp {
                 self.settle_parcels();
                 self.visitor = None;
                 self.jobs.clear();
-                if self.my_pet_away {
-                    self.bubble("Lost the connection; your pet is home");
-                }
                 self.bring_my_pet_home();
             }
             NetEvent::Message(env) => self.on_message(env),
@@ -627,10 +629,6 @@ impl PetApp {
         self.settle_parcels();
         self.visitor = None;
         self.jobs.clear();
-        if self.my_pet_away {
-            let msg = format!("{} is offline", self.friend_name());
-            self.bubble(msg);
-        }
         self.bring_my_pet_home();
     }
 
@@ -671,6 +669,7 @@ impl PetApp {
                 if self.peek_pending.as_ref().map(|(id, _)| id) != Some(&peek_id) {
                     return;
                 }
+                tracing::info!("peek result (denied: {denied})");
                 self.peek_pending = None;
                 self.bring_my_pet_home();
                 if denied || file_id.is_empty() {
@@ -696,6 +695,12 @@ impl PetApp {
                 );
             }
             Msg::PeekRequest { peek_id } => {
+                tracing::info!(
+                    "peek requested (allowed: {}, hidden: {}, pose ready: {})",
+                    self.my_peek,
+                    self.hidden,
+                    self.friend_tex.is_some()
+                );
                 if self.peek_possible() {
                     self.jobs.push_back(Job::Peek(peek_id));
                 } else {
@@ -706,7 +711,11 @@ impl PetApp {
                     });
                 }
             }
-            Msg::VisitStart => {
+            Msg::VisitStart { hue } => {
+                if let Some(h) = hue.filter(|h| *h != self.friend_hue) {
+                    self.friend_hue = h;
+                    self.friend_tex = None;
+                }
                 // A visitor already on the way out doesn't count: a quick re-visit must queue behind it.
                 let has_visit = self
                     .visitor
@@ -729,15 +738,8 @@ impl PetApp {
                 // not recall mine (they would never hear of it and keep a ghost of her). A dropped
                 // link already brings her home via Presence/Disconnected.
             }
-            Msg::Touch { what } => {
-                let verb = match what {
-                    TouchKind::Pat => "patted",
-                    TouchKind::Poke => "poked",
-                    TouchKind::Yeet => "yeeted",
-                };
-                let msg = format!("{} {verb} your pet", self.friend_name());
-                self.bubble(msg);
-            }
+            // The pet reacts on screen; no door notification for every touch.
+            Msg::Touch { .. } => {}
             Msg::Error { code, message, .. } => {
                 self.bubble(message);
                 if code == "offline" && self.my_pet_away {
@@ -993,7 +995,7 @@ impl PetApp {
         match std::mem::replace(&mut self.trip, Trip::None) {
             Trip::Visit => {
                 self.my_pet_away = true;
-                self.send_to_friend(Msg::VisitStart);
+                self.send_to_friend(Msg::VisitStart { hue: Some(self.my_hue) });
                 self.tray.set_visiting(true);
             }
             Trip::Peek => self.on_my_pet_at_door_for_peek(),
