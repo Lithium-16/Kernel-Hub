@@ -15,9 +15,6 @@ const EAT_REACH_X: f32 = 22.0;
 const EAT_REACH_UP: f32 = 48.0;
 /// A treat dragged faster than this is being kept away from her.
 const TEASE_SPEED: f32 = 60.0;
-/// Playing: she can swat a toy from this close, but only once it has nearly stopped.
-const BAT_REACH_X: f32 = 26.0;
-const TOY_CALM_SPEED: f32 = 90.0;
 /// A rolling ball slows by this fraction per second and stops below the minimum speed.
 const ROLL_FRICTION: f32 = 1.6;
 const ROLL_MIN_SPEED: f32 = 8.0;
@@ -427,9 +424,6 @@ fn route(world: &World, from: usize, to: usize, want_x: f32) -> Option<Step> {
 /// Sends one pet after one object: along her floor, then window to window (jumping up, or
 /// walking off edges to come down), and when there is no way she waits underneath, hopping.
 pub fn chase(pet: &mut Pet, o: &Object, world: &World, dt: f32) -> Chase {
-    if o.kind.toy() {
-        return play_with(pet, o, world);
-    }
     // Caught it in mid-hop: the jump adds to her reach.
     if pet.is_hopping()
         && o.motion != Motion::Held
@@ -504,7 +498,7 @@ pub fn chase(pet: &mut Pet, o: &Object, world: &World, dt: f32) -> Chase {
 }
 
 /// Playing with a toy: run to it, swat it when it is calm and close, lose interest after a few.
-fn play_with(pet: &mut Pet, o: &Object, world: &World) -> Chase {
+fn play_with(pet: &mut Pet, o: &Object, world: &World, px: f32) -> Chase {
     if !pet.free_to_chase() || !pet.wants_to_play() || o.motion == Motion::Held {
         return Chase::Going;
     }
@@ -516,12 +510,18 @@ fn play_with(pet: &mut Pet, o: &Object, world: &World) -> Chase {
         floor_at(world, o.x, obj_floor),
     );
     if here.is_some() && here == target {
-        if (o.x - pet.x).abs() > BAT_REACH_X {
-            pet.chase_to(near(o.x));
-        } else if pet.bat_ready() && o.speed < TOY_CALM_SPEED {
-            return Chase::Bat;
-        } else {
+        // She can only swat it with her body: the ball has to overlap her sprite. A ball
+        // above her head is out of reach, however close it is sideways.
+        let (me, it) = (pet.hitbox(px), o.hitbox(px));
+        let touching =
+            me.x < it.right() && it.x < me.right() && me.y < it.y + it.h && it.y < me.y + me.h;
+        if touching {
+            if pet.bat_ready() {
+                return Chase::Bat;
+            }
             pet.face(o.x);
+        } else {
+            pet.chase_to(near(o.x));
         }
         return Chase::Going;
     }
@@ -555,10 +555,13 @@ pub struct Objects {
     pub items: Vec<Object>,
     /// A little state for varying swats without a random-number dependency.
     swats: u32,
+    /// Points per sprite pixel, as of the last step (a swat needs it to tell what she touches).
+    px: f32,
 }
 
 impl Objects {
     pub fn step(&mut self, dt: f32, world: &World, px: f32) {
+        self.px = px;
         for o in &mut self.items {
             o.speed = (o.x - o.last.0).hypot(o.y - o.last.1) / dt.max(1e-3);
             o.step(dt, world, px);
@@ -603,13 +606,15 @@ impl Objects {
                 let d = |p: &Pet| (p.x - o.x).abs() + 2.0 * (p.y - o.y).abs();
                 d(pets[a]).total_cmp(&d(pets[b]))
             })?;
-        if chase(pets[who], &o, world, dt) == Chase::Bat {
+        if play_with(pets[who], &o, world, self.px) == Chase::Bat {
             // away from her, a little differently each time
             self.swats = self.swats.wrapping_mul(1_103_515_245).wrapping_add(12_345);
             let r1 = ((self.swats >> 16) & 0xff) as f32 / 255.0;
             let r2 = ((self.swats >> 8) & 0xff) as f32 / 255.0;
-            let dir = if o.x >= pets[who].x { 1.0 } else { -1.0 };
-            pets[who].bat(o.x);
+            // forward, the way she is facing
+            let dir = if pets[who].facing_left { -1.0 } else { 1.0 };
+            let toward = o.x + dir;
+            pets[who].bat(toward);
             self.items[i].nudge(dir * (240.0 + 200.0 * r1), -(320.0 + 220.0 * r2));
             if let Some(r) = &mut self.items[i].rope {
                 r.unravel(UNRAVEL_PER_SWAT);
@@ -803,6 +808,52 @@ mod tests {
             bats[7] - bats[6] > 20.0,
             "bored for a while: {:?}",
             &bats[..8]
+        );
+    }
+
+    #[test]
+    fn she_only_swats_a_ball_that_overlaps_her_sprite() {
+        let w = world(&[]);
+        let mut rng = StdRng::seed_from_u64(3);
+        let try_it = |ball_x: f32, ball_y: f32, frames: usize| -> bool {
+            let mut pet = Pet::new(500.0, 1032.0);
+            let mut ball = Object::new(Kind::Yarn, ball_x, ball_y);
+            ball.motion = Motion::Resting; // held in place (even if floating) for the check
+            let mut objects = Objects {
+                items: vec![ball],
+                ..Default::default()
+            };
+            let mut rng = StdRng::seed_from_u64(3);
+            let mut swatted = false;
+            for _ in 0..frames {
+                objects.px = 1.0;
+                // keep the ball exactly where the test puts it
+                objects.items[0].x = ball_x;
+                objects.items[0].y = ball_y;
+                pet.step(1.0 / 60.0, &w, &mut rng);
+                if objects.play(&mut [&mut pet], &w, 1.0 / 60.0).is_some() {
+                    swatted = true;
+                    break;
+                }
+            }
+            swatted
+        };
+        let _ = &mut rng;
+        assert!(
+            try_it(500.0, 1032.0, 10),
+            "a ball at her feet is hers to swat"
+        );
+        assert!(
+            !try_it(500.0, 1032.0 - 200.0, 120),
+            "a ball far above her head is out of reach"
+        );
+        assert!(
+            !try_it(500.0, 1032.0 - 80.0, 120),
+            "so is one above the top of her sprite"
+        );
+        assert!(
+            try_it(560.0, 1032.0, 600),
+            "she walks over to a ball on the floor and swats it"
         );
     }
 
