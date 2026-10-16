@@ -244,6 +244,14 @@ fn route(world: &World, from: usize, to: usize, want_x: f32) -> Option<Step> {
 /// Sends one pet after one object: along her floor, then window to window (jumping up, or
 /// walking off edges to come down), and when there is no way she waits underneath, hopping.
 pub fn chase(pet: &mut Pet, o: &Object, world: &World, dt: f32) -> Chase {
+    // Caught it in mid-hop: the jump adds to her reach.
+    if pet.is_hopping()
+        && o.motion != Motion::Held
+        && (o.x - pet.x).abs() <= EAT_REACH_X
+        && pet.y - o.y <= EAT_REACH_UP
+    {
+        return Chase::Ate;
+    }
     if !pet.free_to_chase() {
         return Chase::Going;
     }
@@ -510,7 +518,7 @@ mod tests {
         }
         assert!(hopped);
         assert!(
-            pet.y > 1032.0 - 40.0,
+            pet.y > 1032.0 - 60.0,
             "she never left the ground for good: {}",
             pet.y
         );
@@ -564,6 +572,23 @@ mod tests {
             o.items[0].drag_to(700.0 + (i as f32 * 3.0) % 900.0, 1032.0);
         });
         assert!(got, "she never lost her temper while it was dragged away");
+    }
+
+    #[test]
+    fn she_can_catch_a_cake_just_above_her_with_a_hop() {
+        let w = world(&[]);
+        let mut pet = Pet::new(500.0, 1032.0);
+        let mut cake = Object::new(Kind::Cake, 500.0, 1032.0 - 80.0);
+        cake.motion = Motion::Resting; // floating there, as if tossed up
+        assert_eq!(chase(&mut pet, &cake, &w, 1.0 / 60.0), Chase::Going);
+        pet.hop();
+        let mut rng = StdRng::seed_from_u64(1);
+        let mut caught = false;
+        for _ in 0..40 {
+            pet.step(1.0 / 60.0, &w, &mut rng);
+            caught |= chase(&mut pet, &cake, &w, 1.0 / 60.0) == Chase::Ate;
+        }
+        assert!(caught, "the hop should have got it");
     }
 
     #[test]

@@ -1891,29 +1891,41 @@ impl PetApp {
         let head = Pos2::new(pet.x, pet.y - 40.0 * px);
         match pet.state {
             State::Angry => {
-                // The anime anger mark: two thick red arcs over a curved arch, pulsing on her head.
-                const MARK: [&str; 11] = [
-                    "...XXX...XXX...",
-                    "..XXX.....XXX..",
-                    ".XXX.......XXX.",
-                    ".XXX.......XXX.",
-                    ".XXX.......XXX.",
-                    "..XXX.....XXX..",
-                    "...XXX...XXX...",
-                    "...............",
-                    "....XXXXXXX....",
-                    "...XXX...XXX...",
-                    "..XXX.....XXX..",
+                // The anime anger mark: two thick red arcs over a curved arch, beating above her
+                // head. Whole pixels only (no fractional scaling) so it stays crisp and even.
+                const MARK: [&str; 20] = [
+                    ".......................",
+                    ".....X...........X.....",
+                    "....XXX.........XXX....",
+                    "...XXXX.........XXXX...",
+                    "...XXX...........XXX...",
+                    "..XXXX...........XXXX..",
+                    "..XXX.............XXX..",
+                    "..XXX.............XXX..",
+                    "..XXX.............XXX..",
+                    "..XXX.............XXX..",
+                    "..XXXX...........XXXX..",
+                    "...XXX...........XXX...",
+                    "...XXXX.........XXXX...",
+                    "....XXX.........XXX....",
+                    ".....X...........X.....",
+                    ".......................",
+                    ".........XXXXX.........",
+                    ".......XXXXXXXXX.......",
+                    "......XXX.....XXX......",
+                    ".....XXX.......XXX.....",
                 ];
-                let beat = 1.0 + 0.2 * (t * 14.0).sin();
-                let mp = px * beat;
-                let origin = Pos2::new(pet.x + 13.0 * px - 7.5 * mp, pet.y - 40.0 * px - 5.5 * mp);
+                let beat = if (t * 9.0).sin() > 0.0 { 0.0 } else { px };
+                let origin = Pos2::new(
+                    (pet.x + 14.0 * px - 11.5 * px).round(),
+                    (pet.y - 60.0 * px + beat).round(),
+                );
                 for (ry, row) in MARK.iter().enumerate() {
                     for (rx, ch) in row.chars().enumerate() {
                         if ch == 'X' {
-                            let at = origin + Vec2::new(rx as f32, ry as f32) * mp;
+                            let at = origin + Vec2::new(rx as f32, ry as f32) * px;
                             p.rect_filled(
-                                egui::Rect::from_min_size(at, Vec2::splat(mp)),
+                                egui::Rect::from_min_size(at, Vec2::splat(px)),
                                 0.0,
                                 Color32::from_rgb(205, 10, 10),
                             );

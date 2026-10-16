@@ -14,7 +14,7 @@ pub const HALF_W: f32 = 16.0;
 /// Running after a treat is quicker than a stroll.
 const CHASE_SPEED: f32 = 110.0;
 /// A little hop in place (how high, and the pause before the next one).
-const HOP_H: f32 = 36.0;
+const HOP_H: f32 = 54.0;
 const HOP_GAP_S: f32 = 0.45;
 /// Failing to get a treat for this long makes her angry; she then stays calm for a while.
 const ANGER_AFTER_S: f32 = 6.0;
@@ -390,7 +390,6 @@ impl Pet {
         self.set(State::Hop);
     }
 
-    #[cfg(test)]
     pub fn is_hopping(&self) -> bool {
         self.state == State::Hop
     }
@@ -843,6 +842,24 @@ mod tests {
         }
         assert!(heard.contains(&Sound::Bounce), "heard {heard:?}");
         assert_eq!(p.take_sound(), None, "taking a sound clears it");
+    }
+
+    #[test]
+    fn a_hop_reaches_about_fifty_pixels() {
+        let mut p = Pet::new(500.0, 1032.0);
+        let w = world(&[]);
+        let mut rng = StdRng::seed_from_u64(1);
+        p.hop();
+        let mut apex = 1032.0_f32;
+        for _ in 0..60 {
+            p.step(1.0 / 60.0, &w, &mut rng);
+            apex = apex.min(p.y);
+        }
+        assert!(
+            (50.0..60.0).contains(&(1032.0 - apex)),
+            "apex {}",
+            1032.0 - apex
+        );
     }
 
     #[test]
