@@ -3,7 +3,9 @@
 
 use crate::world::Rect;
 use anyhow::{Context, bail};
-use windows::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, RECT, TRUE};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, RECT, TRUE,
+};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute,
 };
@@ -203,8 +205,15 @@ pub fn single_instance(name: &str) -> bool {
     let wide: Vec<u16> = format!("Local\\{name}\0").encode_utf16().collect();
     // SAFETY: `wide` is NUL-terminated and outlives the call.
     unsafe {
-        let _ = CreateMutexW(None, true, PCWSTR(wide.as_ptr()));
-        GetLastError() != ERROR_ALREADY_EXISTS
+        let handle = CreateMutexW(None, true, PCWSTR(wide.as_ptr()));
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            // Close our handle so the old copy's exit can free the name (update restarts retry).
+            if let Ok(h) = handle {
+                let _ = CloseHandle(h);
+            }
+            return false;
+        }
+        true
     }
 }
 

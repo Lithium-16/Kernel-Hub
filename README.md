@@ -27,6 +27,7 @@ Pluto: **[docs/pluto-setup.md](docs/pluto-setup.md)**. Pairing, the tray and the
 | `modules/comfyui` | ComfyUI queue and saved workflows (prompt, seed, count), stop/clear, free VRAM, model list and downloads, job done/failed alerts |
 | `modules/vram` | shares the GPU: VRAM per app (Ollama, ComfyUI, any process, Roblox), unloads by priority, exclusive apps for video gen |
 | `modules/party` | Jackbox-style party games hosted on this PC: a big-screen host page, phones as controllers, Quip Clash, Bluff Buffet, Shirt Showdown and Drama Club, shared through Tailscale; profiles, seasons, hall of fame, badges and rivalries |
+| `modules/petlink` + `crates/petlink` | PetLink: linked desktop pets for friends; the relay module on Pluto and `petlink.exe` (mail, peek, visits through a taskbar door), see [docs/petlink-design.md](docs/petlink-design.md) |
 | `apps/desktop` | the desktop app: Tauri 2 shell + React. Screens are built from each module's actions and status |
 
 ## Development

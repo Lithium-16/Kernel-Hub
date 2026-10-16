@@ -42,9 +42,16 @@ fn main() -> anyhow::Result<()> {
     let _guard = init_logging(&dir.join("logs"));
     update::cleanup_old();
     win::set_dpi_aware();
-    if !win::single_instance(&instance_name(&dir)) {
-        tracing::info!("another PetLink is already running");
-        return Ok(());
+    // After an update the old copy may still be exiting: give it up to 5 s.
+    let name = instance_name(&dir);
+    let mut tries = 0;
+    while !win::single_instance(&name) {
+        tries += 1;
+        if tries >= 10 {
+            tracing::info!("another PetLink is already running");
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
     let config = match config::Config::load(&dir)? {
         Some(c) => c,
