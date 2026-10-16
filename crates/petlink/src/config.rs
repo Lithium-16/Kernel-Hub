@@ -5,6 +5,10 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+fn default_volume() -> u8 {
+    30
+}
+
 fn default_true() -> bool {
     true
 }
@@ -31,6 +35,9 @@ pub struct Config {
     /// Little sounds for letters, doors, pats and games.
     #[serde(default = "default_true")]
     pub sounds: bool,
+    /// Sound loudness in percent.
+    #[serde(default = "default_volume")]
+    pub volume: u8,
 }
 
 #[derive(Deserialize)]
@@ -85,6 +92,7 @@ impl Config {
             peek: false,
             wander: true,
             sounds: true,
+            volume: default_volume(),
         })
     }
 
@@ -122,8 +130,23 @@ mod tests {
             peek: false,
             wander: true,
             sounds: true,
+            volume: default_volume(),
         };
         assert_eq!(local.files_url(), "http://127.0.0.1:8098/files");
+    }
+
+    #[test]
+    fn volume_defaults_to_thirty_and_is_kept() {
+        let old = "relay_url = \"ws://x/ws\"
+token = \"t\"
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.toml"), old).unwrap();
+        let mut c = Config::load(dir.path()).unwrap().unwrap();
+        assert_eq!(c.volume, 30);
+        c.volume = 70;
+        c.save(dir.path()).unwrap();
+        assert_eq!(Config::load(dir.path()).unwrap().unwrap().volume, 70);
     }
 
     #[test]
