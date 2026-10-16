@@ -1,5 +1,6 @@
 //! One pet: a small state machine with gravity. Pure logic; app.rs draws it.
 
+use crate::sounds::Sound;
 use crate::world::{Rect, World};
 use rand::Rng;
 
@@ -189,6 +190,8 @@ pub struct Pet {
     pub cursor: Option<(f32, f32)>,
     pub emote: Option<(Emote, f32)>,
     emote_cd: f32,
+    /// The sound this pet wants played (bounce, purr, meow); the app takes it.
+    sound: Option<Sound>,
     hover_t: f32,
     hold: f32,
     plan: Plan,
@@ -215,6 +218,7 @@ impl Pet {
             cursor: None,
             emote: None,
             emote_cd: rand::rng().random_range(EMOTE_MIN_S..EMOTE_MAX_S),
+            sound: None,
             hover_t: 0.0,
             hold: 0.0,
             plan: Plan::None,
@@ -317,6 +321,7 @@ impl Pet {
         self.facing_left = face_left;
     }
     pub fn headpatted(&mut self) {
+        self.sound = Some(Sound::Purr);
         self.set(State::HeadPatted);
         self.hold = HEADPAT_S;
     }
@@ -405,8 +410,17 @@ impl Pet {
         }
     }
 
+    pub fn take_sound(&mut self) -> Option<Sound> {
+        self.sound.take()
+    }
+
     pub fn show_emote(&mut self, e: Emote) {
         tracing::info!("emote: {e:?}");
+        self.sound = match e {
+            Emote::Heart => Some(Sound::Purr),
+            Emote::Question | Emote::Bang => Some(Sound::Meow),
+            Emote::Note | Emote::Dots => self.sound,
+        };
         self.emote = Some((e, EMOTE_SHOW_S));
     }
 
@@ -487,6 +501,9 @@ impl Pet {
                 }
                 if self.x < left || self.x > right {
                     self.x = self.x.clamp(left, right);
+                    if self.vx.abs() > BOUNCE_MIN_SPEED {
+                        self.sound = Some(Sound::Bounce);
+                    }
                     self.vx = -self.vx * BOUNCE;
                 }
                 if self.state != State::Jump && self.y < world.screen.y + 48.0 {
@@ -506,6 +523,7 @@ impl Pet {
                         } else {
                             LAND_BOUNCE
                         };
+                        self.sound = Some(Sound::Bounce);
                         self.vy = -impact * k;
                         self.vx *= BOUNCE_VX_DAMP;
                         return None;
@@ -691,6 +709,35 @@ mod tests {
         let events = run(&mut p, &world(&[]), 3.0);
         assert!(events.contains(&Event::Landed));
         assert!((p.y - 1032.0).abs() < 0.5);
+    }
+
+    #[test]
+    fn bouncing_off_a_wall_asks_for_the_bounce_sound() {
+        let mut p = Pet::new(960.0, 1032.0);
+        p.grab();
+        p.drag_to(960.0, 400.0);
+        p.throw(4000.0, -800.0);
+        let mut heard = Vec::new();
+        let mut rng = StdRng::seed_from_u64(1);
+        for _ in 0..600 {
+            p.step(1.0 / 60.0, &world(&[]), &mut rng);
+            heard.extend(p.take_sound());
+        }
+        assert!(heard.contains(&Sound::Bounce), "heard {heard:?}");
+        assert_eq!(p.take_sound(), None, "taking a sound clears it");
+    }
+
+    #[test]
+    fn cat_noises_come_with_headpats_and_some_emotes() {
+        let mut p = Pet::new(500.0, 1032.0);
+        p.headpatted();
+        assert_eq!(p.take_sound(), Some(Sound::Purr));
+        p.show_emote(Emote::Heart);
+        assert_eq!(p.take_sound(), Some(Sound::Purr));
+        p.show_emote(Emote::Question);
+        assert_eq!(p.take_sound(), Some(Sound::Meow));
+        p.show_emote(Emote::Dots);
+        assert_eq!(p.take_sound(), None);
     }
 
     #[test]

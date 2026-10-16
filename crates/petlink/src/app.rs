@@ -165,7 +165,11 @@ fn plan_peek(
     if !(can_interact && friend_peek && trip_none) {
         PeekPlan::No
     } else if away {
-        if pending { PeekPlan::No } else { PeekPlan::AskInPlace }
+        if pending {
+            PeekPlan::No
+        } else {
+            PeekPlan::AskInPlace
+        }
     } else if back_soon {
         PeekPlan::No
     } else {
@@ -2106,6 +2110,13 @@ impl eframe::App for PetApp {
         }
         self.pump_jobs();
         self.pump_auto_visit(dt);
+        let heard = [
+            self.mine.take_sound(),
+            self.visitor.as_mut().and_then(|v| v.pet.take_sound()),
+        ];
+        for s in heard.into_iter().flatten() {
+            self.play(s);
+        }
         self.pump_outgoing();
         let cur = (!self.hidden).then(|| {
             let c = self.cursor_pt();
@@ -2178,13 +2189,36 @@ mod tests {
     fn peek_plan_walks_from_home_asks_in_place_or_refuses() {
         use PeekPlan::*;
         // (can_interact, friend_peek, trip_none, away, pending, back_soon)
-        assert_eq!(plan_peek(true, true, true, false, false, false), WalkFromHome);
+        assert_eq!(
+            plan_peek(true, true, true, false, false, false),
+            WalkFromHome
+        );
         assert_eq!(plan_peek(true, true, true, true, false, false), AskInPlace);
-        assert_eq!(plan_peek(true, true, true, true, true, false), No, "one at a time");
-        assert_eq!(plan_peek(true, false, true, true, false, false), No, "friend says no");
-        assert_eq!(plan_peek(false, true, true, true, false, false), No, "friend offline");
-        assert_eq!(plan_peek(true, true, false, false, false, false), No, "already on a trip");
-        assert_eq!(plan_peek(true, true, true, false, false, true), No, "delivering mail");
+        assert_eq!(
+            plan_peek(true, true, true, true, true, false),
+            No,
+            "one at a time"
+        );
+        assert_eq!(
+            plan_peek(true, false, true, true, false, false),
+            No,
+            "friend says no"
+        );
+        assert_eq!(
+            plan_peek(false, true, true, true, false, false),
+            No,
+            "friend offline"
+        );
+        assert_eq!(
+            plan_peek(true, true, false, false, false, false),
+            No,
+            "already on a trip"
+        );
+        assert_eq!(
+            plan_peek(true, true, true, false, false, true),
+            No,
+            "delivering mail"
+        );
     }
 
     fn mail(id: &str) -> Envelope {
