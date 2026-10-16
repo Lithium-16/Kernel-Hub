@@ -26,8 +26,6 @@ const IDLE_AWAY_SECS: u64 = 300;
 const DOOR_W: f32 = 32.0;
 const DOOR_H: f32 = 32.0;
 const BUBBLE_S: u64 = 4;
-/// Sounds are quiet on purpose: they play next to whatever the owner is doing.
-const SOUND_VOLUME: f32 = 0.3;
 /// A visiting pet on an errand (mail, peek) that hasn't finished by now is sent home.
 const ERRAND_MAX: Duration = Duration::from_secs(30);
 
@@ -144,6 +142,15 @@ fn add_parcel(parcels: &mut Vec<Parcel>, mail: Envelope, door_x: f32) -> bool {
         open: false,
     });
     true
+}
+
+/// A pat gets a mew or a quick chirp, so it isn't the same noise every time.
+fn pat_sound() -> Sound {
+    if rand::random::<bool>() {
+        Sound::Mew
+    } else {
+        Sound::Mrrp
+    }
 }
 
 /// How a peek request starts, given the state of my pet and the friend.
@@ -547,15 +554,16 @@ impl PetApp {
         if !self.config.sounds || self.hidden || self.away {
             return;
         }
+        let volume = f32::from(self.config.volume) / 100.0;
         let wav = *self
             .sound_cache
             .entry(s)
-            .or_insert_with(|| Box::leak(sounds::wav(s, SOUND_VOLUME).into_boxed_slice()));
+            .or_insert_with(|| Box::leak(sounds::wav(s, volume).into_boxed_slice()));
         win::play_wav(wav);
     }
 
     fn pat_hearts(&mut self, x: f32, y: f32) {
-        self.play(Sound::Mew);
+        self.play(pat_sound());
         let y = y - 50.0 * self.px();
         self.hearts.burst(x, y, 3, &mut rand::rng());
     }
@@ -843,7 +851,7 @@ impl PetApp {
             }
             // The pet reacts on screen; no door notification for every touch.
             Msg::Touch { what } => self.play(match what {
-                TouchKind::Pat => Sound::Mew,
+                TouchKind::Pat => pat_sound(),
                 TouchKind::Poke => Sound::Boing,
                 TouchKind::Yeet => Sound::Whoosh,
             }),
@@ -1229,6 +1237,12 @@ impl PetApp {
                 }
             }
             TrayAction::Visit => self.start_visit(),
+            TrayAction::Volume(pct) => {
+                self.config.volume = pct;
+                self.save_config();
+                self.sound_cache.clear();
+                self.play(Sound::Chime); // so the new level can be heard
+            }
             TrayAction::ToggleSounds => {
                 self.config.sounds = !self.config.sounds;
                 self.save_config();
