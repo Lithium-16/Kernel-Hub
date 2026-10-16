@@ -574,9 +574,6 @@ impl PetApp {
                 self.settle_parcels();
                 self.visitor = None;
                 self.jobs.clear();
-                if self.my_pet_away {
-                    self.bubble("Lost the connection; your pet is home");
-                }
                 self.bring_my_pet_home();
             }
             NetEvent::Message(env) => self.on_message(env),
@@ -627,10 +624,6 @@ impl PetApp {
         self.settle_parcels();
         self.visitor = None;
         self.jobs.clear();
-        if self.my_pet_away {
-            let msg = format!("{} is offline", self.friend_name());
-            self.bubble(msg);
-        }
         self.bring_my_pet_home();
     }
 
@@ -733,15 +726,8 @@ impl PetApp {
                 // not recall mine (they would never hear of it and keep a ghost of her). A dropped
                 // link already brings her home via Presence/Disconnected.
             }
-            Msg::Touch { what } => {
-                let verb = match what {
-                    TouchKind::Pat => "patted",
-                    TouchKind::Poke => "poked",
-                    TouchKind::Yeet => "yeeted",
-                };
-                let msg = format!("{} {verb} your pet", self.friend_name());
-                self.bubble(msg);
-            }
+            // The pet reacts on screen; no door notification for every touch.
+            Msg::Touch { .. } => {}
             Msg::Error { code, message, .. } => {
                 self.bubble(message);
                 if code == "offline" && self.my_pet_away {
