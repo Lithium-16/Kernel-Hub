@@ -126,6 +126,13 @@ clippy on CI's Ubuntu runner (the pure logic is tested there).
 | carry | `carry.png` while walking | taking mail to the door |
 | peek | idle + magnifier prop drawn over the hand | on the other screen, for ~2 s while the snapshot is taken |
 
+- **Idle extras** (all occasional): emote bubbles (♪ … ? ! heart, every 1-3 min, never while
+  sleeping/carrying/held/falling); sometimes walking to the cursor and facing it; jumping onto
+  a window top 40-300 px above, with a small landing bounce; carrying a parcel on her head
+  (`carry.png`). With a visitor on screen: bumping into each other makes both blush (pat
+  sprite, facing away), and rarely one headpats the other. Both spawn pixel heart particles
+  (capped at 40), as do click-pats. Click-through overlay windows and screen-sized windows
+  never count as covers when finding floors.
 - **My pet** lives on my screen. **The friend's pet** appears on my screen only while it's
   visiting, delivering mail, or peeking, entering and leaving through my door.
 - Pats, pokes and yeets work on whatever pet is on my screen. If it's the friend's visiting pet,
@@ -163,8 +170,11 @@ clippy on CI's Ubuntu runner (the pure logic is tested there).
 ### 5.7 Tray and settings
 - Tray: Write letter, Let <friend> peek, Send to visit / Call home, Bow colour, Pet size,
   Start with Windows, Check for updates, Quit.
+- Tray also has **Uninstall PetLink…** (confirm; removes the Run key, shortcut, config and
+  install dir, deleting the exe via a detached `cmd`).
 - Settings in `%APPDATA%\PetLink\config.toml`: `relay_url`, `token`, `scale`. The first run
-  without a config asks for a pasted invite (the snippet from `user.add`).
+  without a config reads the invite trailer from its own exe (see 6.1) and only asks for a
+  pasted invite (the snippet from `user.add`) if there is none.
 
 ## 6. Updates and releases
 
@@ -181,6 +191,18 @@ clippy on CI's Ubuntu runner (the pure logic is tested there).
   "More info → Run anyway".
 - Protocol `v` stays at 1 within compatible changes. A client with an unsupported `v` gets
   `error {code: "upgrade"}` and its pet shows a "please update" bubble.
+
+### 6.1 Installer
+
+- `user.add` and `user.relink` return a one-time download link (`<share link>/install/<code>`,
+  code stored hashed, 7-day expiry, single use). `user.relink` also rotates the user's token.
+  The token is minted at download: the relay serves the cached latest `petlink-windows-x64.exe`
+  (SHA-256 verified) with an invite trailer appended (`invite bytes`, `u32 LE length`,
+  `PLINVITE`). Unknown, expired or used codes get 404; `/install` is rate-limited.
+- On first run, outside `PETLINK_DIR` and without `--no-install`, the exe copies itself
+  (trailer stripped) to `%LOCALAPPDATA%\Programs\PetLink\petlink.exe`, writes the Start-menu
+  shortcut `PetLink.lnk`, sets `HKCU\...\Run\PetLink`, starts the installed copy and exits.
+  Self-update then replaces the installed exe in place.
 
 ## 7. Errors and edge cases
 
