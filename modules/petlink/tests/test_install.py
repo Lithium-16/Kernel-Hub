@@ -66,7 +66,7 @@ async def _client(tmp_path, exe, clock=None, **kw):
     store = Store(tmp_path / "db", **({"clock": clock} if clock else {}))
     async def provider():
         return exe
-    relay = Relay(store, tmp_path / "files", exe_source=provider, **kw)
+    relay = Relay(store, tmp_path / "files", exe_source=provider, invite_builder=lambda t: "petlink:" + t, **kw)
     c = TestClient(TestServer(relay.app()))
     await c.start_server()
     return store, relay, c
@@ -76,12 +76,16 @@ async def test_install_link_serves_exe_with_trailer_once(tmp_path):
     exe = tmp_path / "p.exe"
     exe.write_bytes(EXE)
     store, relay, c = await _client(tmp_path, exe)
-    user, token = store.add_user("Ann", 0)
-    code = store.add_install_code(user.id, "petlink:INVITE")
+    user, old = store.add_user("Ann", 0)
+    code = store.add_install_code(user.id)
     r = await c.get(f"/petlink/install/{code}")
     body = await r.read()
     assert r.status == 200 and 'filename="PetLink.exe"' in r.headers["Content-Disposition"]
-    assert body == EXE + b"petlink:INVITE" + struct.pack("<I", 14) + b"PLINVITE"
+    assert body.startswith(EXE) and body.endswith(b"PLINVITE")
+    n = struct.unpack("<I", body[-12:-8])[0]
+    invite = body[-12 - n:-12].decode()
+    assert body[len(EXE):-12 - n] == b"" and invite.startswith("petlink:")
+    assert store.auth(old) is None and store.auth(invite[8:]).id == user.id  # the download rotated the token
     assert (await c.get(f"/install/{code}")).status == 404
     assert (await c.get("/install/nope")).status == 404
     await c.close()
@@ -90,10 +94,11 @@ async def test_install_link_serves_exe_with_trailer_once(tmp_path):
 async def test_expired_code_404_and_unpublished_503_keeps_code(tmp_path):
     t = [0.0]
     store, relay, c = await _client(tmp_path, None, clock=lambda: t[0])
-    u, _ = store.add_user("Ann", 0)
-    code = store.add_install_code(u.id, "i")
+    u, tok = store.add_user("Ann", 0)
+    code = store.add_install_code(u.id)
     assert (await c.get(f"/install/{code}")).status == 503
     assert (await c.get(f"/install/{code}")).status == 503  # not burned
+    assert store.auth(tok).id == u.id and store.pending_codes() == {u.id: 1}  # token untouched
     t[0] = 8 * 86400
     assert (await c.get(f"/install/{code}")).status == 404
     await c.close()

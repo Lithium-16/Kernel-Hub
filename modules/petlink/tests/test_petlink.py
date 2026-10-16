@@ -38,6 +38,10 @@ async def test_add_user_returns_download_link_and_relink_rotates(tmp_path):
     assert out["download"].startswith("https://pluto.example.ts.net:10000/petlink/install/")
     assert out["message"].index(out["download"]) < out["message"].index(out["invite"])
     assert p.snapshot()["users"][0]["install_codes"] == 1
+    tok = json.loads(base64.urlsafe_b64decode(out["invite"][8:] + "=="))["token"]
+    raw = b"".join(f.read_bytes() for f in tmp_path.glob("petlink.db*"))
+    assert tok.encode() not in raw and out["download"].rsplit("/", 1)[1].encode() not in raw
+    assert "stops working" in out["message"]
     assert "install/" not in str(p.snapshot()).replace(p.link + "/install", "") and out["download"].rsplit("/", 1)[1] not in str(p.snapshot())
     old = json.loads(base64.urlsafe_b64decode(out["invite"][8:] + "=="))["token"]
     again = await p.relink("friend")
