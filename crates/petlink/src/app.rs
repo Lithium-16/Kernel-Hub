@@ -707,10 +707,11 @@ impl PetApp {
                 }
             }
             Msg::VisitStart => {
+                // A visitor already on the way out doesn't count: a quick re-visit must queue behind it.
                 let has_visit = self
                     .visitor
                     .as_ref()
-                    .is_some_and(|v| matches!(v.job, Job::Visit))
+                    .is_some_and(|v| matches!(v.job, Job::Visit) && v.stage != Stage::Leaving)
                     || self.jobs.iter().any(|j| matches!(j, Job::Visit));
                 if !has_visit {
                     self.jobs.push_back(Job::Visit);
@@ -724,9 +725,9 @@ impl PetApp {
                     v.stage = Stage::Leaving;
                     v.pet.exit_to_door();
                 }
-                if self.my_pet_away {
-                    self.bring_my_pet_home();
-                }
+                // Not my pet's trip: when we visit each other, the friend sending theirs home must
+                // not recall mine (they would never hear of it and keep a ghost of her). A dropped
+                // link already brings her home via Presence/Disconnected.
             }
             Msg::Touch { what } => {
                 let verb = match what {
