@@ -66,8 +66,16 @@ impl Who {
 /// Something to draw besides the pets.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Prop {
-    Ball { x: f32, y: f32 },
-    Hand { who: Who, hand: Hand, x: f32, y: f32 },
+    Ball {
+        x: f32,
+        y: f32,
+    },
+    Hand {
+        who: Who,
+        hand: Hand,
+        x: f32,
+        y: f32,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -167,9 +175,7 @@ impl Games {
     pub fn hidden(&self) -> Option<Who> {
         match &self.run {
             Some(Run::Hide {
-                stage: 1,
-                hider,
-                ..
+                stage: 1, hider, ..
             }) => Some(*hider),
             _ => None,
         }
@@ -299,7 +305,9 @@ impl Games {
                 let room_right = span.1 - t_x;
                 let room_left = t_x - span.0;
                 let dir = if room_right >= room_left { 1.0 } else { -1.0 };
-                let dist = rng.random_range(150.0..400.0_f32).min(room_right.max(room_left) - 40.0);
+                let dist = rng
+                    .random_range(150.0..400.0_f32)
+                    .min(room_right.max(room_left) - 40.0);
                 let land_x = (t_x + dir * dist.max(60.0)).clamp(span.0 + 20.0, span.1 - 20.0);
                 let ground = pet(thrower, a, b).y;
                 pet(thrower, a, b).linger(FETCH_FLIGHT_S + 0.5, land_x);
@@ -389,7 +397,11 @@ fn step(
                     }
                     None => {}
                     Some(a_wins) => {
-                        let (w, l) = if a_wins { (&mut *a, &mut *b) } else { (&mut *b, &mut *a) };
+                        let (w, l) = if a_wins {
+                            (&mut *a, &mut *b)
+                        } else {
+                            (&mut *b, &mut *a)
+                        };
                         w.headpatted();
                         l.show_emote(Emote::Dots);
                         hearts.burst(w.x, w.y - 50.0 * px, 3, rng);
@@ -469,7 +481,11 @@ fn step(
                         let sx = *spot_x;
                         let seeker = pet(hider.other(), a, b);
                         let from_left = seeker.x < sx;
-                        seeker.walk_then_linger(sx + if from_left { -40.0 } else { 40.0 } * px, 0.8, sx);
+                        seeker.walk_then_linger(
+                            sx + if from_left { -40.0 } else { 40.0 } * px,
+                            0.8,
+                            sx,
+                        );
                         *stage = 2;
                         *t = 0.0;
                     }

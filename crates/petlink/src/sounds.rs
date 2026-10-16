@@ -55,7 +55,11 @@ fn noise(secs: f32, swell: bool) -> Vec<f32> {
             x ^= x >> 17;
             x ^= x << 5;
             let s = i as f32 / n as f32;
-            let env = if swell { (s * std::f32::consts::PI).sin() } else { (1.0 - s).powi(3) };
+            let env = if swell {
+                (s * std::f32::consts::PI).sin()
+            } else {
+                (1.0 - s).powi(3)
+            };
             ((x as f32 / u32::MAX as f32) * 2.0 - 1.0) * env
         })
         .collect()
@@ -78,9 +82,15 @@ fn purr(secs: f32) -> Vec<f32> {
 fn samples(s: Sound) -> Vec<f32> {
     let cat = |parts: Vec<Vec<f32>>| parts.into_iter().flatten().collect::<Vec<f32>>();
     match s {
-        Sound::Chime => cat(vec![glide(880.0, 880.0, 0.12, 0.0), glide(1320.0, 1320.0, 0.25, 0.0)]),
+        Sound::Chime => cat(vec![
+            glide(880.0, 880.0, 0.12, 0.0),
+            glide(1320.0, 1320.0, 0.25, 0.0),
+        ]),
         Sound::Door => glide(420.0, 760.0, 0.09, 0.0),
-        Sound::Mew => cat(vec![glide(620.0, 980.0, 0.12, 12.0), glide(980.0, 700.0, 0.16, 12.0)]),
+        Sound::Mew => cat(vec![
+            glide(620.0, 980.0, 0.12, 12.0),
+            glide(980.0, 700.0, 0.16, 12.0),
+        ]),
         Sound::Boing => glide(260.0, 520.0, 0.22, 25.0),
         Sound::Click => noise(0.04, false),
         Sound::TaDa => cat(vec![
@@ -89,7 +99,10 @@ fn samples(s: Sound) -> Vec<f32> {
             glide(1320.0, 1320.0, 0.3, 0.0),
         ]),
         Sound::Whoosh => noise(0.22, true),
-        Sound::Bounce => cat(vec![glide(340.0, 110.0, 0.14, 0.0), glide(180.0, 300.0, 0.08, 20.0)]),
+        Sound::Bounce => cat(vec![
+            glide(340.0, 110.0, 0.14, 0.0),
+            glide(180.0, 300.0, 0.08, 20.0),
+        ]),
         Sound::Meow => cat(vec![
             glide(520.0, 860.0, 0.14, 10.0),
             glide(860.0, 700.0, 0.16, 10.0),
@@ -167,7 +180,10 @@ mod tests {
             assert_eq!(w.len(), 44 + data_len, "{s:?}");
             let riff_len = u32::from_le_bytes(w[4..8].try_into().unwrap()) as usize;
             assert_eq!(riff_len, w.len() - 8, "{s:?}");
-            assert!(data_len / 2 < RATE as usize, "{s:?} is longer than a second");
+            assert!(
+                data_len / 2 < RATE as usize,
+                "{s:?} is longer than a second"
+            );
             assert!(peak(&w) > 1000, "{s:?} is silent");
         }
     }
