@@ -145,12 +145,31 @@ mod tests {
         let old: Msg = serde_json::from_str(r#"{"kind":"mail","mail_id":"m"}"#).unwrap();
         assert!(matches!(old, Msg::Mail { hue: None, .. }));
         let old: Msg = serde_json::from_str(r#"{"kind":"peek.request","peek_id":"p"}"#).unwrap();
-        assert_eq!(old, Msg::PeekRequest { peek_id: "p".into(), hue: None });
-        let json = serde_json::to_value(Msg::PeekRequest { peek_id: "p".into(), hue: Some(120) }).unwrap();
+        assert_eq!(
+            old,
+            Msg::PeekRequest {
+                peek_id: "p".into(),
+                hue: None
+            }
+        );
+        let json = serde_json::to_value(Msg::PeekRequest {
+            peek_id: "p".into(),
+            hue: Some(120),
+        })
+        .unwrap();
         assert_eq!(json["hue"], 120);
-        let plain = serde_json::to_value(Msg::PeekRequest { peek_id: "p".into(), hue: None }).unwrap();
+        let plain = serde_json::to_value(Msg::PeekRequest {
+            peek_id: "p".into(),
+            hue: None,
+        })
+        .unwrap();
         assert!(plain.get("hue").is_none());
-        let mail = Msg::Mail { mail_id: "m".into(), text: String::new(), files: vec![], hue: Some(30) };
+        let mail = Msg::Mail {
+            mail_id: "m".into(),
+            text: String::new(),
+            files: vec![],
+            hue: Some(30),
+        };
         let back: Msg = serde_json::from_value(serde_json::to_value(&mail).unwrap()).unwrap();
         assert_eq!(back, mail);
     }
@@ -158,12 +177,25 @@ mod tests {
     #[test]
     fn visit_messages_carry_optional_flags_and_old_ones_still_parse() {
         let old: Msg = serde_json::from_str(r#"{"kind":"visit.start"}"#).unwrap();
-        assert_eq!(old, Msg::VisitStart { hue: None, auto: false });
-        let auto = Msg::VisitStart { hue: Some(30), auto: true };
+        assert_eq!(
+            old,
+            Msg::VisitStart {
+                hue: None,
+                auto: false
+            }
+        );
+        let auto = Msg::VisitStart {
+            hue: Some(30),
+            auto: true,
+        };
         let json = serde_json::to_value(&auto).unwrap();
         assert_eq!(json["auto"], true);
         assert_eq!(serde_json::from_value::<Msg>(json).unwrap(), auto);
-        let plain = serde_json::to_value(Msg::VisitStart { hue: None, auto: false }).unwrap();
+        let plain = serde_json::to_value(Msg::VisitStart {
+            hue: None,
+            auto: false,
+        })
+        .unwrap();
         assert!(plain.get("auto").is_none());
         let end: Msg = serde_json::from_str(r#"{"kind":"visit.end"}"#).unwrap();
         assert_eq!(end, Msg::VisitEnd { declined: false });
