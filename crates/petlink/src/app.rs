@@ -113,7 +113,8 @@ fn read_mail(path: &Path) -> Vec<Envelope> {
 
 fn write_mail(path: &Path, parcels: &[Parcel]) {
     let mail: Vec<&Envelope> = parcels.iter().map(|p| &p.mail).collect();
-    if let Err(e) = std::fs::write(path, serde_json::to_vec(&mail).unwrap_or_default()) {
+    if let Err(e) = crate::files::atomic_write(path, &serde_json::to_vec(&mail).unwrap_or_default())
+    {
         tracing::warn!("couldn't save parcels: {e}");
     }
 }
@@ -301,7 +302,7 @@ fn to_egui(r: Rect) -> egui::Rect {
     egui::Rect::from_min_size(Pos2::new(r.x, r.y), Vec2::new(r.w, r.h))
 }
 
-pub fn run(config: Config, data_dir: PathBuf) -> eframe::Result<()> {
+pub fn run(config: Config, data_dir: PathBuf, welcome: bool) -> eframe::Result<()> {
     let screen = win::screen();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -322,7 +323,7 @@ pub fn run(config: Config, data_dir: PathBuf) -> eframe::Result<()> {
     eframe::run_native(
         "PetLink",
         options,
-        Box::new(move |cc| Ok(Box::new(PetApp::new(cc, config, data_dir)?))),
+        Box::new(move |cc| Ok(Box::new(PetApp::new(cc, config, data_dir, welcome)?))),
     )
 }
 
@@ -331,6 +332,7 @@ impl PetApp {
         cc: &eframe::CreationContext<'_>,
         config: Config,
         data_dir: PathBuf,
+        welcome: bool,
     ) -> anyhow::Result<Self> {
         let ctx = cc.egui_ctx.clone();
         let net = Net::start(config.clone(), data_dir.clone(), move || {
@@ -395,7 +397,14 @@ impl PetApp {
             passthrough: false,
             drag: None,
             door_menu: None,
-            bubbles: Vec::new(),
+            bubbles: if welcome {
+                vec![(
+                    "PetLink is installed. Your pet lives on the taskbar now.".into(),
+                    Instant::now(),
+                )]
+            } else {
+                Vec::new()
+            },
             away: false,
             hidden: false,
             peek_pending: None,
@@ -1022,6 +1031,25 @@ impl PetApp {
             }
             TrayAction::Autostart => {}
             TrayAction::CheckUpdates => self.check_updates(),
+            TrayAction::Uninstall => {
+                let yes = rfd::MessageDialog::new()
+                    .set_title("Uninstall PetLink")
+                    .set_description(
+                        "Remove PetLink and its settings from this computer? Your pet will go away.",
+                    )
+                    .set_buttons(rfd::MessageButtons::YesNo)
+                    .show()
+                    == rfd::MessageDialogResult::Yes;
+                if yes {
+                    match crate::install::uninstall(&self.data_dir) {
+                        Ok(()) => {
+                            let _ = self.net.cmds.send(NetCmd::Shutdown);
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        Err(e) => self.bubble(format!("Couldn't uninstall: {e:#}")),
+                    }
+                }
+            }
             TrayAction::Quit => {
                 let _ = self.net.cmds.send(NetCmd::Shutdown);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);

@@ -79,9 +79,9 @@ impl Outbox {
     }
 
     fn write(&self) {
-        if let Err(e) = std::fs::write(
+        if let Err(e) = crate::files::atomic_write(
             &self.path,
-            serde_json::to_vec(&self.items).unwrap_or_default(),
+            &serde_json::to_vec(&self.items).unwrap_or_default(),
         ) {
             tracing::error!("couldn't save the outbox: {e}");
         }

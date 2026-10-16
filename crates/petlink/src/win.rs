@@ -268,10 +268,20 @@ pub fn autostart_enabled() -> bool {
 }
 
 pub fn set_autostart(on: bool) -> anyhow::Result<()> {
+    if on {
+        return set_autostart_for(&std::env::current_exe().context("exe path")?);
+    }
+    // SAFETY: plain registry delete with static names.
+    unsafe {
+        let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, w!("PetLink"));
+    }
+    Ok(())
+}
+
+pub fn set_autostart_for(exe: &std::path::Path) -> anyhow::Result<()> {
     // SAFETY: the data pointer and byte length describe `wide`, alive for the call.
     unsafe {
-        if on {
-            let exe = std::env::current_exe().context("exe path")?;
+        {
             let wide: Vec<u16> = format!("\"{}\"\0", exe.display()).encode_utf16().collect();
             let e = RegSetKeyValueW(
                 HKEY_CURRENT_USER,
@@ -284,8 +294,6 @@ pub fn set_autostart(on: bool) -> anyhow::Result<()> {
             if e.0 != 0 {
                 bail!("registry write failed ({})", e.0);
             }
-        } else {
-            let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, RUN_KEY, w!("PetLink"));
         }
     }
     Ok(())

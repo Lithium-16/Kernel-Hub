@@ -39,6 +39,21 @@ pub fn safe_name(name: &str) -> String {
     }
 }
 
+/// Write to a temp file in the same folder, then rename, so a crash never leaves a short file.
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".part");
+    let tmp = PathBuf::from(tmp);
+    let r = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
+    if r.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    r
+}
+
 pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let first = dir.join(name);
     if !first.exists() {
@@ -60,7 +75,7 @@ pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
 pub fn save(dir: &Path, name: &str, bytes: &[u8], source_url: &str) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
     let path = unique_path(dir, &safe_name(name));
-    std::fs::write(&path, bytes)?;
+    atomic_write(&path, bytes)?;
     #[cfg(windows)]
     {
         let mut ads = path.clone().into_os_string();
@@ -122,6 +137,21 @@ mod tests {
         assert_eq!(safe_name("CON.txt"), "_CON.txt");
         assert_eq!(safe_name(""), "file");
         assert_eq!(safe_name("bad\u{0}name.txt"), "badname.txt");
+    }
+
+    #[test]
+    fn atomic_write_replaces_and_leaves_no_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("sub").join("f.bin");
+        atomic_write(&p, b"one").unwrap();
+        atomic_write(&p, b"two").unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"two");
+        assert_eq!(std::fs::read_dir(p.parent().unwrap()).unwrap().count(), 1);
+        // a failed write (target is a directory) cleans up its temp file
+        let d = dir.path().join("d");
+        std::fs::create_dir(&d).unwrap();
+        assert!(atomic_write(&d, b"x").is_err());
+        assert!(!dir.path().join("d.part").exists());
     }
 
     #[test]
