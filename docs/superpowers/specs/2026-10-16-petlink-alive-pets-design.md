@@ -28,7 +28,8 @@ Three games, played only while both pets are on the same screen. The owners neve
 
 Rules:
 
-- Both screens must show the same game with the same outcome. How the two clients stay in step (one side decides and tells the other, or both exchange their choices) is left to the builder, but a cheating or out-of-sync client must never be able to do more than make a game look odd.
+- A game is played only on the screen of the person being visited, because that is the only place both pets are. That machine runs the whole game and decides every outcome; nothing has to be kept in step between the two machines. The visiting pet's owner sees nothing of it while their pet is out (decided by the owner: no mirroring on the visitor's screen). Automatic visits go both ways, so each owner watches games on their own screen whenever the friend's pet is the visitor.
+- The visited machine tells the other only what it needs to (for example, that the visiting pet is playing), and a machine that never sees a message must still behave sensibly.
 - Games start and end by themselves, last well under a minute, and are separated by the plain wandering, bumping and headpats that already exist. They never block a manual call-home, a peek, mail delivery or the visit ending.
 - Games play on the desktop ground line the pets already use, with the same drawing approach as the existing pet poses and emotes. New poses need art; where art does not exist yet the builder uses simple code-drawn props (a ball, three hand shapes) the way the peek magnifier is drawn today, and the owner can swap in real art later.
 
@@ -62,7 +63,7 @@ Rules:
 
 ## Constraints
 
-- Rust app in `crates/petlink`; the relay is the Python module in `modules/petlink`. New friend-to-friend message kinds must be added to the relay's allowed (`ROUTED`) set, so the relay has to be redeployed for the games and automatic visits to work.
+- Rust app in `crates/petlink`; the relay is the Python module in `modules/petlink`. Any new friend-to-friend message kind (for example to start an automatic visit) must be added to the relay's allowed (`ROUTED`) set, which means a relay redeploy; prefer reusing `visit.start`/`visit.end` with optional fields so none is needed.
 - Older PetLink versions ignore message kinds they do not know (they log and skip them), so the new version must keep working next to an older one: no games, no automatic visits, and nothing breaks. The existing `visit.start`/`visit.end` and peek messages keep their meaning.
 - New fields on existing messages must be optional, as the bow colour on `visit.start` already is.
 - Releases reach friends through the repository's `node-build-N` self-update.
@@ -70,7 +71,7 @@ Rules:
 
 ## Left to the builder
 
-- Message names and shapes for starting/ending a game, and which side decides outcomes.
+- Whether any new message kinds are needed at all (the visited machine runs the games alone), and if so their names and shapes.
 - How an automatic visit is negotiated so both sides agree.
 - Poses, timings and the exact tuning of how often things happen.
 - Whether the three games land together or one after the other.
