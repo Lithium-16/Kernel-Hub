@@ -1012,7 +1012,7 @@ impl PetApp {
         }
     }
 
-    fn on_tray(&mut self, ctx: &egui::Context, a: TrayAction) {
+    fn on_tray(&mut self, a: TrayAction) {
         match a {
             TrayAction::WriteLetter => self.open_compose(),
             TrayAction::TogglePeek => {
@@ -1055,19 +1055,23 @@ impl PetApp {
                     == rfd::MessageDialogResult::Yes;
                 if yes {
                     match crate::install::uninstall(&self.data_dir) {
-                        Ok(()) => {
-                            let _ = self.net.cmds.send(NetCmd::Shutdown);
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
+                        Ok(()) => self.quit(),
                         Err(e) => self.bubble(format!("Couldn't uninstall: {e:#}")),
                     }
                 }
             }
-            TrayAction::Quit => {
-                let _ = self.net.cmds.send(NetCmd::Shutdown);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
+            TrayAction::Quit => self.quit(),
         }
+    }
+
+    /// Exits the process. Closing the overlay viewport alone stops it painting but leaves the
+    /// process (and its frozen window) running, so leave explicitly.
+    fn quit(&self) -> ! {
+        tracing::info!("quitting");
+        let _ = self.net.cmds.send(NetCmd::Shutdown);
+        // Give the net thread a moment to send its close frame.
+        std::thread::sleep(Duration::from_millis(200));
+        std::process::exit(0);
     }
 
     fn save_config(&self) {
@@ -1785,7 +1789,7 @@ impl eframe::App for PetApp {
             self.on_net_event(ev);
         }
         while let Some(a) = self.tray.poll() {
-            self.on_tray(ctx, a);
+            self.on_tray(a);
         }
         if self.world_refreshed.elapsed() >= Duration::from_millis(250) {
             self.world_refreshed = Instant::now();
