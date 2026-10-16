@@ -1891,45 +1891,39 @@ impl PetApp {
         let head = Pos2::new(pet.x, pet.y - 40.0 * px);
         match pet.state {
             State::Angry => {
-                // The anime anger mark: two thick red arcs over a curved arch, beating above her
-                // head. Whole pixels only (no fractional scaling) so it stays crisp and even.
-                const MARK: [&str; 20] = [
-                    ".......................",
-                    ".....X...........X.....",
-                    "....XXX.........XXX....",
-                    "...XXXX.........XXXX...",
-                    "...XXX...........XXX...",
-                    "..XXXX...........XXXX..",
-                    "..XXX.............XXX..",
-                    "..XXX.............XXX..",
-                    "..XXX.............XXX..",
-                    "..XXX.............XXX..",
-                    "..XXXX...........XXXX..",
-                    "...XXX...........XXX...",
-                    "...XXXX.........XXXX...",
-                    "....XXX.........XXX....",
-                    ".....X...........X.....",
-                    ".......................",
-                    ".........XXXXX.........",
-                    ".......XXXXXXXXX.......",
-                    "......XXX.....XXX......",
-                    ".....XXX.......XXX.....",
+                // The anime anger mark: two tapered arcs bowing inward over a frown arch, in
+                // three reds (D shadow, R base, L light). Drawn and reviewed with the pixel-art
+                // skill; exactly mirrored, whole pixels only, beating one pixel up and down.
+                const MARK: [&str; 13] = [
+                    "..LL...........LL..",
+                    "..LRR.........RRL..",
+                    "...RRD.......DRR...",
+                    "...LRR.......RRL...",
+                    "...LRRD.....DRRL...",
+                    "...LRRD.....DRRL...",
+                    "...LRDD.....DDRL...",
+                    "...LRD.......DRL...",
+                    "...LDD.......DDL...",
+                    "..LLD...LLL...DLL..",
+                    "..DDD.LLLRLLL.DDD..",
+                    "..D...DDDDDDD...D..",
+                    "......D.....D......",
                 ];
                 let beat = if (t * 9.0).sin() > 0.0 { 0.0 } else { px };
                 let origin = Pos2::new(
-                    (pet.x + 14.0 * px - 11.5 * px).round(),
-                    (pet.y - 60.0 * px + beat).round(),
+                    (pet.x - 2.0 * px).round(),
+                    (pet.y - 59.0 * px + beat).round(),
                 );
                 for (ry, row) in MARK.iter().enumerate() {
                     for (rx, ch) in row.chars().enumerate() {
-                        if ch == 'X' {
-                            let at = origin + Vec2::new(rx as f32, ry as f32) * px;
-                            p.rect_filled(
-                                egui::Rect::from_min_size(at, Vec2::splat(px)),
-                                0.0,
-                                Color32::from_rgb(205, 10, 10),
-                            );
-                        }
+                        let c = match ch {
+                            'L' => Color32::from_rgb(255, 106, 82),
+                            'R' => Color32::from_rgb(212, 20, 28),
+                            'D' => Color32::from_rgb(143, 10, 20),
+                            _ => continue,
+                        };
+                        let at = origin + Vec2::new(rx as f32, ry as f32) * px;
+                        p.rect_filled(egui::Rect::from_min_size(at, Vec2::splat(px)), 0.0, c);
                     }
                 }
             }
