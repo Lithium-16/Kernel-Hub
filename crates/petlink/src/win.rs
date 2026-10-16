@@ -25,7 +25,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowExW, FindWindowW, GWL_EXSTYLE, GetClassNameW, GetCursorPos,
     GetForegroundWindow, GetShellWindow, GetSystemMetrics, GetWindowLongW, GetWindowRect,
     GetWindowTextLengthW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SM_CXSCREEN,
-    SM_CYSCREEN, WS_EX_TOOLWINDOW,
+    SM_CYSCREEN, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 use windows::core::{BOOL, PCWSTR, w};
 
@@ -113,7 +113,14 @@ pub fn top_windows() -> Vec<Rect> {
             if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
                 continue;
             }
-            if GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOOLWINDOW.0 != 0 {
+            let ex = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+            if ex & WS_EX_TOOLWINDOW.0 != 0 {
+                continue;
+            }
+            // Click-through overlays (PetLink, Discord, Overwolf...) are not real windows.
+            let see_through = WS_EX_TRANSPARENT.0 | WS_EX_NOACTIVATE.0;
+            if ex & WS_EX_TRANSPARENT.0 != 0 || (ex & WS_EX_LAYERED.0 != 0 && ex & see_through != 0)
+            {
                 continue;
             }
             if GetWindowTextLengthW(hwnd) == 0 {
@@ -142,7 +149,9 @@ pub fn top_windows() -> Vec<Rect> {
             {
                 continue;
             }
-            out.push(rect(r));
+            if r.right > r.left && r.bottom > r.top {
+                out.push(rect(r));
+            }
         }
     }
     out
