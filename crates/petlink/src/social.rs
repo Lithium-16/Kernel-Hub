@@ -124,7 +124,6 @@ impl Social {
     }
 
     /// A headpat is in progress.
-    #[cfg(test)]
     pub fn busy(&self) -> bool {
         self.act != Act::Free
     }

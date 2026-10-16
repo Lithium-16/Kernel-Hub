@@ -104,12 +104,19 @@ pub enum Msg {
     },
     #[serde(rename = "visit.start")]
     VisitStart {
+        /// Sent by a pet that wandered over by itself.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        auto: bool,
         /// My bow colour, which the relay doesn't know when I've picked one locally.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hue: Option<u16>,
     },
     #[serde(rename = "visit.end")]
-    VisitEnd,
+    VisitEnd {
+        /// The host turned an automatic visit away (busy, away or wandering is off).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        declined: bool,
+    },
     #[serde(rename = "touch")]
     Touch { what: TouchKind },
     #[serde(rename = "error")]
@@ -125,6 +132,22 @@ pub enum Msg {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn visit_messages_carry_optional_flags_and_old_ones_still_parse() {
+        let old: Msg = serde_json::from_str(r#"{"kind":"visit.start"}"#).unwrap();
+        assert_eq!(old, Msg::VisitStart { hue: None, auto: false });
+        let auto = Msg::VisitStart { hue: Some(30), auto: true };
+        let json = serde_json::to_value(&auto).unwrap();
+        assert_eq!(json["auto"], true);
+        assert_eq!(serde_json::from_value::<Msg>(json).unwrap(), auto);
+        let plain = serde_json::to_value(Msg::VisitStart { hue: None, auto: false }).unwrap();
+        assert!(plain.get("auto").is_none());
+        let end: Msg = serde_json::from_str(r#"{"kind":"visit.end"}"#).unwrap();
+        assert_eq!(end, Msg::VisitEnd { declined: false });
+        let no = serde_json::to_value(Msg::VisitEnd { declined: true }).unwrap();
+        assert_eq!(no["declined"], true);
+    }
 
     #[test]
     fn every_relay_fixture_round_trips() {
