@@ -33,7 +33,6 @@ pub struct World {
 
 const MIN_WINDOW_W: f32 = 120.0;
 const TOP_MARGIN: f32 = 40.0;
-const FULL_SLACK: f32 = 8.0;
 const DOOR_GAP: f32 = 40.0;
 
 /// Subtracts [a, b) from every span.
@@ -68,10 +67,8 @@ impl World {
             }
             let mut spans = vec![(w.x.max(screen.x), w.right().min(screen.right()))];
             for front in &windows[..i] {
-                // A screen-sized window is fullscreen (overlay hides anyway) or maximised.
-                let big =
-                    front.w >= screen.w - FULL_SLACK && front.h >= ground - screen.y - FULL_SLACK;
-                if !big && w.y >= front.y && w.y < front.y + front.h {
+                // Whatever is in front hides what is behind it, a maximised window included.
+                if w.y >= front.y && w.y < front.y + front.h {
                     spans = cut(spans, front.x, front.right());
                 }
             }
@@ -164,12 +161,12 @@ mod tests {
     }
 
     #[test]
-    fn fullscreen_window_in_front_does_not_cover() {
+    fn a_maximised_window_in_front_hides_every_window_behind_it() {
         let full = Rect {
             x: 0.0,
             y: 0.0,
             w: 1920.0,
-            h: 1080.0,
+            h: 1032.0,
         };
         let small = Rect {
             x: 100.0,
@@ -178,7 +175,12 @@ mod tests {
             h: 500.0,
         };
         let w = World::build(SCREEN, Some(TASKBAR), &[full, small], 1700.0);
-        assert_eq!(w.floor_below(500.0, 0.0), Some(300.0));
+        assert_eq!(
+            w.floor_below(500.0, 0.0),
+            Some(1032.0),
+            "the window behind is hidden"
+        );
+        assert_eq!(w.floors.len(), 1, "only the taskbar is left to walk on");
     }
 
     #[test]
