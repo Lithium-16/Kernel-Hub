@@ -1,0 +1,53 @@
+{
+  "character": {
+    "id": "09d82cb4-80ae-487b-9c5e-65a469f00aae",
+    "name": "Idle",
+    "prompt": "A cute and simple anime catgirl in a maid outfit",
+    "size": {
+      "width": 32,
+      "height": 48
+    },
+    "directions": 8,
+    "view": "side"
+  },
+  "spritesheet": {
+    "path": "A_cute_and_simple_anime-Idle.png",
+    "cell_size": {
+      "width": 64,
+      "height": 64
+    },
+    "sheet_size": {
+      "width": 512,
+      "height": 128
+    },
+    "columns": 8,
+    "pivot": "cell-center",
+    "rows": [
+      {
+        "row": 0,
+        "type": "rotations",
+        "frame_count": 8,
+        "directions": [
+          "south",
+          "south-east",
+          "east",
+          "north-east",
+          "north",
+          "north-west",
+          "west",
+          "south-west"
+        ]
+      },
+      {
+        "row": 1,
+        "type": "animation",
+        "frame_count": 8,
+        "animation": "Walking",
+        "animation_group_id": "0092ce38-1dbd-4484-b36c-9397dd7f3bad",
+        "direction": "east"
+      }
+    ]
+  },
+  "export_version": "1.0",
+  "export_date": "2026-10-16T01:22:42.392346+00:00"
+}
