@@ -2,10 +2,10 @@
 //! the door and the parcels drawn on it.
 
 use crate::config::Config;
-use crate::mailui;
+use crate::mailui::{self, Compose, MailAction};
 use crate::net::{Net, NetCmd, NetEvent};
 use crate::pet::{Event, Pet, State};
-use crate::protocol::{Envelope, Msg, Person, PresenceState, TouchKind};
+use crate::protocol::{Envelope, FileRef, Msg, Person, PresenceState, TouchKind, new_id};
 use crate::sprites::Sprites;
 use crate::tray::{Tray, TrayAction};
 use crate::win;
@@ -13,7 +13,7 @@ use crate::world::{Rect, World};
 use egui::{
     Align2, Color32, ColorImage, FontId, Pos2, Stroke, TextureHandle, TextureOptions, Vec2,
 };
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -91,6 +91,8 @@ enum Target {
     Visitor,
     Door,
     Parcel(usize),
+    /// A letter of mine that failed to go out.
+    Outgoing(usize),
 }
 
 struct DragState {
@@ -108,6 +110,17 @@ enum Trip {
     Visit,
     #[allow(dead_code)]
     Peek,
+    Mail,
+}
+
+/// A letter of mine on its way out: files are uploaded first, then the mail is sent.
+struct Outgoing {
+    mail: Envelope,
+    pending: HashSet<String>,
+    failed: HashSet<String>,
+    sources: HashMap<String, (String, PathBuf)>,
+    handed_in: bool,
+    sent: bool,
 }
 
 pub struct PetApp {
@@ -133,6 +146,8 @@ pub struct PetApp {
     mine_back_at: Option<Instant>,
     trip: Trip,
     parcels: Vec<Parcel>,
+    outgoing: Vec<Outgoing>,
+    carrying: Option<String>,
     world: World,
     world_refreshed: Instant,
     passthrough: bool,
@@ -141,10 +156,12 @@ pub struct PetApp {
     bubbles: Vec<(String, Instant)>,
     away: bool,
     hidden: bool,
+    #[cfg(debug_assertions)]
+    autotest_done: HashSet<String>,
     last_screen: Rect,
     ppp: f32,
-    #[allow(dead_code)]
     windows: mailui::Windows,
+    ctx: egui::Context,
 }
 
 fn world_now(ppp: f32) -> World {
@@ -234,6 +251,8 @@ impl PetApp {
             mine_back_at: None,
             trip: Trip::None,
             parcels: Vec::new(),
+            outgoing: Vec::new(),
+            carrying: None,
             last_screen: Rect {
                 x: 0.0,
                 y: 0.0,
@@ -248,8 +267,11 @@ impl PetApp {
             bubbles: Vec::new(),
             away: false,
             hidden: false,
+            #[cfg(debug_assertions)]
+            autotest_done: HashSet::new(),
             ppp,
             windows: mailui::Windows::default(),
+            ctx: cc.egui_ctx.clone(),
         };
         app.load_parcels();
         Ok(app)
@@ -381,9 +403,19 @@ impl PetApp {
             }
             NetEvent::Message(env) => self.on_message(env),
             NetEvent::Upgrade => self.bubble("Please update PetLink"),
-            NetEvent::Uploaded { file_id } => tracing::info!("uploaded {file_id}"),
+            NetEvent::Uploaded { file_id } => {
+                tracing::info!("uploaded {file_id}");
+                for o in &mut self.outgoing {
+                    o.pending.remove(&file_id);
+                }
+            }
             NetEvent::UploadFailed { file_id, error } => {
                 tracing::warn!("upload {file_id} failed: {error}");
+                for o in &mut self.outgoing {
+                    if o.pending.remove(&file_id) {
+                        o.failed.insert(file_id.clone());
+                    }
+                }
             }
         }
     }
@@ -436,6 +468,11 @@ impl PetApp {
             Msg::PeekAllow { on } => self.friend_peek = on,
             Msg::Mail { .. } => self.jobs.push_back(Job::Deliver(env)),
             Msg::MailRead { .. } => self.mine.pat(),
+            Msg::Delivered { mail_id } => {
+                self.outgoing.retain(
+                    |o| !matches!(&o.mail.msg, Msg::Mail { mail_id: m, .. } if *m == mail_id),
+                );
+            }
             Msg::PeekRequest { peek_id } => {
                 if self.my_peek {
                     self.jobs.push_back(Job::Peek(peek_id));
@@ -604,10 +641,15 @@ impl PetApp {
         if self.trip != Trip::None
             && !matches!(
                 self.mine.state,
-                State::Exit | State::Fall | State::Thrown | State::Held
+                State::Exit | State::Carry | State::Fall | State::Thrown | State::Held
             )
         {
-            self.mine.exit_to_door(); // knocked off course: keep going
+            // knocked off course (patted, dizzy): keep going
+            if self.trip == Trip::Mail {
+                self.mine.carry_to_door();
+            } else {
+                self.mine.exit_to_door();
+            }
         }
         if self.mine.step(dt, &self.world, rng) == Some(Event::ReachedDoor) {
             self.on_my_pet_at_door();
@@ -622,6 +664,13 @@ impl PetApp {
                 self.tray.set_visiting(true);
             }
             Trip::Peek => self.on_my_pet_at_door_for_peek(),
+            Trip::Mail => {
+                // Goes in through the door; the mail leaves once its files are up.
+                if let Some(id) = self.carrying.take() {
+                    self.hand_in(&id);
+                }
+                self.mine_back_at = Some(Instant::now() + Duration::from_millis(1500));
+            }
             Trip::None => {}
         }
     }
@@ -672,7 +721,173 @@ impl PetApp {
         }
     }
 
-    fn open_compose(&mut self) {}
+    /// Debug builds only: PETLINK_AUTOTEST=a,b,c fires each step once when it can, so two
+    /// clients can be exercised from logs without clicking.
+    #[cfg(debug_assertions)]
+    fn autotest(&mut self) {
+        let Some(list) = std::env::var_os("PETLINK_AUTOTEST") else {
+            return;
+        };
+        for step in list.to_string_lossy().split(',') {
+            if self.autotest_done.contains(step) {
+                continue;
+            }
+            let ready = match step {
+                "peek-on" => self.me.is_some(),
+                "send-mail" => {
+                    self.can_interact() && self.trip == Trip::None && !self.my_pet_hidden()
+                }
+                "open-mail" => !self.parcels.is_empty(),
+                _ => false,
+            };
+            if !ready {
+                continue;
+            }
+            tracing::info!("autotest: {step}");
+            self.autotest_done.insert(step.to_owned());
+            match step {
+                "peek-on" if !self.my_peek => {
+                    self.my_peek = true;
+                    self.tray.set_peek(true);
+                    self.send_to_relay(Msg::PeekAllow { on: true });
+                }
+                "send-mail" => {
+                    let dir = self.data_dir.join("autotest");
+                    let _ = std::fs::create_dir_all(&dir);
+                    let png = dir.join("autotest.png");
+                    let img = image::RgbaImage::from_fn(96, 64, |x, y| {
+                        image::Rgba([(x * 2) as u8, (y * 4) as u8, 160, 255])
+                    });
+                    let _ = img.save(&png);
+                    let bat = dir.join("autotest.bat");
+                    let _ = std::fs::write(&bat, "@echo hello from autotest\r\n");
+                    self.send_letter("hello from autotest".into(), vec![png, bat]);
+                }
+                "open-mail" => {
+                    self.windows.autosave = true;
+                    let ctx = self.ctx.clone();
+                    self.open_parcel(&ctx, 0);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn open_compose(&mut self) {
+        self.windows.compose.get_or_insert_with(Compose::default);
+    }
+
+    fn hand_in(&mut self, mail_id: &str) {
+        for o in &mut self.outgoing {
+            if matches!(&o.mail.msg, Msg::Mail { mail_id: m, .. } if m == mail_id) {
+                o.handed_in = true;
+            }
+        }
+    }
+
+    /// Reads the files, starts their uploads and sends my pet to the door with the parcel.
+    fn send_letter(&mut self, text: String, paths: Vec<PathBuf>) {
+        let to = self.friend_id();
+        let mail_id = new_id();
+        let mut refs = Vec::new();
+        let mut o = Outgoing {
+            mail: Envelope::new(
+                &to,
+                Msg::Mail {
+                    mail_id: mail_id.clone(),
+                    text: String::new(),
+                    files: vec![],
+                },
+            ),
+            pending: HashSet::new(),
+            failed: HashSet::new(),
+            sources: HashMap::new(),
+            handed_in: false,
+            sent: false,
+        };
+        for p in paths {
+            let name = p
+                .file_name()
+                .map_or_else(|| "file".into(), |n| n.to_string_lossy().into_owned());
+            let bytes = match std::fs::read(&p) {
+                Ok(b) => b,
+                Err(e) => {
+                    self.bubble(format!("Could not read {name}: {e}"));
+                    return;
+                }
+            };
+            let file_id = format!("f_{}", ulid::Ulid::generate());
+            let mime = mime_of(&name).to_owned();
+            refs.push(FileRef {
+                file_id: file_id.clone(),
+                name: name.clone(),
+                size: bytes.len() as u64,
+                mime,
+            });
+            o.pending.insert(file_id.clone());
+            o.sources.insert(file_id.clone(), (name.clone(), p));
+            let _ = self.net.cmds.send(NetCmd::Upload {
+                file_id,
+                to: to.clone(),
+                name,
+                bytes,
+            });
+        }
+        o.mail.msg = Msg::Mail {
+            mail_id: mail_id.clone(),
+            text,
+            files: refs,
+        };
+        tracing::info!("sending letter {mail_id}");
+        let can_carry = self.trip == Trip::None && !self.my_pet_hidden();
+        o.handed_in = !can_carry;
+        self.outgoing.push(o);
+        if can_carry {
+            self.carrying = Some(mail_id);
+            self.trip = Trip::Mail;
+            self.mine.carry_to_door();
+        }
+    }
+
+    /// Sends every letter whose files are all up and that has been handed in at the door.
+    fn pump_outgoing(&mut self) {
+        let mut sends = Vec::new();
+        for o in &mut self.outgoing {
+            if o.handed_in && !o.sent && o.pending.is_empty() && o.failed.is_empty() {
+                o.sent = true;
+                sends.push(o.mail.clone());
+            }
+        }
+        for m in sends {
+            let _ = self.net.cmds.send(NetCmd::Send(m));
+        }
+    }
+
+    fn retry_outgoing(&mut self, i: usize) {
+        let to = self.friend_id();
+        let Some(o) = self.outgoing.get_mut(i) else {
+            return;
+        };
+        for id in std::mem::take(&mut o.failed) {
+            let Some((name, path)) = o.sources.get(&id).cloned() else {
+                continue;
+            };
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    o.pending.insert(id.clone());
+                    let _ = self.net.cmds.send(NetCmd::Upload {
+                        file_id: id,
+                        to: to.clone(),
+                        name,
+                        bytes,
+                    });
+                }
+                Err(_) => {
+                    o.failed.insert(id);
+                }
+            }
+        }
+    }
 
     fn check_updates(&mut self) {}
 
@@ -715,7 +930,22 @@ impl PetApp {
         {
             return Some(Target::Parcel(i));
         }
+        if let Some(i) = self.outgoing.iter().position(|o| {
+            !o.failed.is_empty() && inside(self.parcel_rect(self.failed_x(&o.mail)), p)
+        }) {
+            return Some(Target::Outgoing(i));
+        }
         inside(self.door_rect(), p).then_some(Target::Door)
+    }
+
+    /// Where a failed letter of mine sits: left of the door.
+    fn failed_x(&self, mail: &Envelope) -> f32 {
+        let i = self
+            .outgoing
+            .iter()
+            .position(|o| o.mail.id == mail.id)
+            .unwrap_or(0);
+        self.world.door_x - 30.0 - 22.0 * i as f32
     }
 
     fn cursor_pt(&self) -> Pos2 {
@@ -812,11 +1042,27 @@ impl PetApp {
                     door.y - 112.0,
                 ));
             }
-            Target::Parcel(i) => self.open_parcel(i),
+            Target::Parcel(i) => self.open_parcel(ctx, i),
+            Target::Outgoing(i) => self.retry_outgoing(i),
         }
     }
 
-    fn open_parcel(&mut self, _i: usize) {}
+    fn open_parcel(&mut self, ctx: &egui::Context, i: usize) {
+        if i >= self.parcels.len() {
+            return;
+        }
+        let p = self.parcels.remove(i);
+        self.save_parcels();
+        tracing::info!("opening a letter");
+        self.send_to_friend(Msg::MailRead {
+            mail_id: match &p.mail.msg {
+                Msg::Mail { mail_id, .. } => mail_id.clone(),
+                _ => String::new(),
+            },
+        });
+        let from = self.friend_name();
+        self.windows.open_reading(ctx, &self.config, p.mail, from);
+    }
 
     fn door_menu_ui(&mut self, ctx: &egui::Context) {
         let Some(pos) = self.door_menu else { return };
@@ -1014,7 +1260,34 @@ impl PetApp {
         if let (Some(v), Some(tex)) = (&self.visitor, &self.friend_tex) {
             self.draw_pet(ui, &v.pet, tex, matches!(v.job, Job::Deliver(_)));
         }
+        for o in self.outgoing.iter().filter(|o| !o.failed.is_empty()) {
+            let r = to_egui(self.parcel_rect(self.failed_x(&o.mail)));
+            let t = &self.my_tex.parcel;
+            egui::Image::new((t.id(), t.size_vec2())).paint_at(ui, r);
+            ui.painter().text(
+                r.center_top() + Vec2::new(0.0, -6.0),
+                Align2::CENTER_CENTER,
+                "!",
+                FontId::proportional(18.0),
+                Color32::from_rgb(235, 50, 50),
+            );
+        }
         self.draw_bubbles(ui);
+    }
+}
+
+fn mime_of(name: &str) -> &'static str {
+    match name
+        .rsplit('.')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => "application/octet-stream",
     }
 }
 
@@ -1044,7 +1317,11 @@ impl eframe::App for PetApp {
                     self.world.screen.h - 1.0 / self.ppp,
                 )));
             }
-            self.hidden = win::foreground_is_fullscreen();
+            let hidden = win::foreground_is_fullscreen();
+            if hidden != self.hidden {
+                tracing::info!("fullscreen app in front: {hidden}");
+            }
+            self.hidden = hidden;
         }
         let away = win::idle_seconds() >= IDLE_AWAY_SECS;
         if away != self.away {
@@ -1054,7 +1331,10 @@ impl eframe::App for PetApp {
         }
         let dt = ctx.input(|i| i.stable_dt).min(0.05);
         let mut rng = rand::rng();
+        #[cfg(debug_assertions)]
+        self.autotest();
         self.pump_jobs();
+        self.pump_outgoing();
         self.step_mine(dt, &mut rng);
         self.step_visitor(dt, &mut rng);
         self.bubbles
@@ -1073,13 +1353,31 @@ impl eframe::App for PetApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        if self.hidden {
-            return;
+        if !self.hidden {
+            self.handle_pointer(&ctx);
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ui, |ui| self.draw(ui));
+            self.door_menu_ui(&ctx);
         }
-        self.handle_pointer(&ctx);
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ui, |ui| self.draw(ui));
-        self.door_menu_ui(&ctx);
+        if let Some(MailAction::Send { text, files }) =
+            self.windows.show(&ctx, &self.net, &self.config)
+        {
+            self.send_letter(text, files);
+        }
+        // Files dropped on my pet become a letter.
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .filter_map(|f| f.path.clone())
+                .collect()
+        });
+        if !dropped.is_empty() && self.target_at(self.cursor_pt()) == Some(Target::Mine) {
+            self.windows
+                .compose
+                .get_or_insert_with(Compose::default)
+                .add_files(dropped);
+        }
     }
 }

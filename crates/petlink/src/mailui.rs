@@ -1,8 +1,17 @@
-//! Windows for writing and reading letters, and the first-run invite prompt.
+//! Windows for writing and reading letters, the peek lens, and the first-run invite prompt.
 
 use crate::config::Config;
+use crate::files;
+use crate::net::{self, Net};
+use crate::protocol::{Envelope, FileRef, Msg};
+use egui::{TextureHandle, TextureOptions, ViewportBuilder, ViewportId};
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::mpsc::{Receiver, Sender, channel};
+
+pub const MAX_FILE: u64 = 100 * 1024 * 1024;
 
 /// A tiny window asking for the invite; `None` if it was closed without one.
 pub fn ask_for_invite() -> anyhow::Result<Option<Config>> {
@@ -41,4 +50,405 @@ pub fn ask_for_invite() -> anyhow::Result<Option<Config>> {
 }
 
 #[derive(Default)]
-pub struct Windows {}
+pub struct Compose {
+    pub text: String,
+    pub files: Vec<PathBuf>,
+    pub error: String,
+}
+
+impl Compose {
+    pub fn add_files(&mut self, paths: impl IntoIterator<Item = PathBuf>) {
+        for p in paths {
+            match std::fs::metadata(&p) {
+                Ok(m) if m.is_file() && m.len() > MAX_FILE => {
+                    self.error = format!("{}: too big: max 100 MB", file_name(&p));
+                }
+                Ok(m) if m.is_file() => {
+                    self.error.clear();
+                    if !self.files.contains(&p) {
+                        self.files.push(p);
+                    }
+                }
+                _ => self.error = format!("{}: can't be attached", file_name(&p)),
+            }
+        }
+    }
+}
+
+fn file_name(p: &std::path::Path) -> String {
+    p.file_name()
+        .map_or_else(|| "file".into(), |n| n.to_string_lossy().into_owned())
+}
+
+pub struct Reading {
+    pub mail: Envelope,
+    pub from: String,
+    pub images: HashMap<String, TextureHandle>,
+    pub bytes: HashMap<String, Vec<u8>>,
+    /// Per file: the last thing to tell the reader (errors).
+    pub status: HashMap<String, String>,
+    pub saved_dir: HashMap<String, PathBuf>,
+    pub confirm: Option<String>,
+    pub loading: Vec<String>,
+}
+
+pub enum MailAction {
+    Send { text: String, files: Vec<PathBuf> },
+}
+
+pub struct Done {
+    pub file_id: String,
+    pub result: Result<Vec<u8>, String>,
+}
+
+pub struct Windows {
+    pub compose: Option<Compose>,
+    pub reading: Vec<Reading>,
+    pub lens: Option<Lens>,
+    tx: Sender<Done>,
+    rx: Receiver<Done>,
+    /// A peek picture on its way: (file id, who from).
+    pub peek_wait: Option<(String, String)>,
+    /// Debug test hook: save every file as soon as it is down.
+    pub autosave: bool,
+}
+
+#[allow(dead_code)]
+pub struct Lens {
+    pub texture: TextureHandle,
+    pub bytes: Vec<u8>,
+    pub zoom: f32,
+    pub offset: egui::Vec2,
+    pub title: String,
+    pub status: String,
+}
+
+impl Default for Windows {
+    fn default() -> Self {
+        let (tx, rx) = channel();
+        Windows {
+            compose: None,
+            reading: Vec::new(),
+            lens: None,
+            tx,
+            rx,
+            peek_wait: None,
+            autosave: false,
+        }
+    }
+}
+
+/// Fetches a file on a background thread and reports on the channel.
+fn spawn_download(config: &Config, ctx: &egui::Context, file_id: String, tx: Sender<Done>) {
+    let (config, ctx) = (config.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())
+            .and_then(|rt| {
+                rt.block_on(net::download(&config, &file_id))
+                    .map_err(|e| format!("{e:#}"))
+            });
+        let _ = tx.send(Done { file_id, result });
+        ctx.request_repaint();
+    });
+}
+
+fn load_image(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<TextureHandle> {
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    Some(ctx.load_texture(
+        name,
+        egui::ColorImage::from_rgba_unmultiplied(
+            [img.width() as usize, img.height() as usize],
+            img.as_raw(),
+        ),
+        TextureOptions::LINEAR,
+    ))
+}
+
+pub fn open_folder(dir: &std::path::Path) {
+    let _ = std::process::Command::new("explorer").arg(dir).spawn();
+}
+
+impl Windows {
+    pub fn open_reading(
+        &mut self,
+        ctx: &egui::Context,
+        config: &Config,
+        mail: Envelope,
+        from: String,
+    ) {
+        let files: Vec<FileRef> = match &mail.msg {
+            Msg::Mail { files, .. } => files.clone(),
+            _ => return,
+        };
+        let loading = files.iter().map(|f| f.file_id.clone()).collect();
+        for f in &files {
+            spawn_download(config, ctx, f.file_id.clone(), self.tx.clone());
+        }
+        self.reading.push(Reading {
+            mail,
+            from,
+            images: HashMap::new(),
+            bytes: HashMap::new(),
+            status: HashMap::new(),
+            saved_dir: HashMap::new(),
+            confirm: None,
+            loading,
+        });
+    }
+
+    #[allow(dead_code)]
+    pub fn download_peek(
+        &mut self,
+        ctx: &egui::Context,
+        config: &Config,
+        file_id: String,
+        from: String,
+    ) {
+        spawn_download(config, ctx, file_id.clone(), self.tx.clone());
+        self.peek_wait = Some((file_id, from));
+    }
+
+    fn on_done(&mut self, ctx: &egui::Context, d: Done) {
+        if self
+            .peek_wait
+            .as_ref()
+            .is_some_and(|(id, _)| *id == d.file_id)
+        {
+            let (_, from) = self.peek_wait.take().unwrap_or_default();
+            match d.result {
+                Ok(bytes) => match load_image(ctx, "peek", &bytes) {
+                    Some(texture) => {
+                        tracing::info!("peek picture received ({} bytes)", bytes.len());
+                        self.lens = Some(Lens {
+                            texture,
+                            bytes,
+                            zoom: 1.0,
+                            offset: egui::Vec2::ZERO,
+                            title: format!("Peek at {from}"),
+                            status: String::new(),
+                        });
+                    }
+                    None => tracing::warn!("the peek picture couldn't be decoded"),
+                },
+                Err(e) => tracing::warn!("peek download failed: {e}"),
+            }
+            return;
+        }
+        for r in &mut self.reading {
+            let Some(pos) = r.loading.iter().position(|id| *id == d.file_id) else {
+                continue;
+            };
+            r.loading.remove(pos);
+            match &d.result {
+                Ok(bytes) => {
+                    tracing::info!("downloaded {} ({} bytes)", d.file_id, bytes.len());
+                    if let Some(tex) = load_image(ctx, &d.file_id, bytes) {
+                        r.images.insert(d.file_id.clone(), tex);
+                    }
+                    r.bytes.insert(d.file_id.clone(), bytes.clone());
+                    r.status.remove(&d.file_id);
+                }
+                Err(e) => {
+                    tracing::warn!("download {} failed: {e}", d.file_id);
+                    r.status
+                        .insert(d.file_id.clone(), format!("Download failed: {e}"));
+                }
+            }
+        }
+    }
+
+    pub fn show(&mut self, ctx: &egui::Context, _net: &Net, config: &Config) -> Option<MailAction> {
+        while let Ok(d) = self.rx.try_recv() {
+            self.on_done(ctx, d);
+        }
+        let mut action = None;
+        if self.autosave {
+            for r in &mut self.reading {
+                let files = match &r.mail.msg {
+                    Msg::Mail { files, .. } => files.clone(),
+                    _ => continue,
+                };
+                for f in files {
+                    if r.bytes.contains_key(&f.file_id) && !r.saved_dir.contains_key(&f.file_id) {
+                        save_file(r, &f, config);
+                    }
+                }
+            }
+        }
+        if let Some(c) = &mut self.compose {
+            let mut close = false;
+            ctx.show_viewport_immediate(
+                ViewportId::from_hash_of("compose"),
+                ViewportBuilder::default()
+                    .with_title("Write a letter")
+                    .with_inner_size([380.0, 320.0])
+                    .with_always_on_top(),
+                |ui, _| {
+                    if ui.ctx().input(|i| i.viewport().close_requested()) {
+                        close = true;
+                        return;
+                    }
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut c.text)
+                                .desired_rows(8)
+                                .desired_width(f32::INFINITY)
+                                .char_limit(4000)
+                                .hint_text("Write something…"),
+                        );
+                        let mut remove = None;
+                        for (i, f) in c.files.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                if ui.small_button("✕").clicked() {
+                                    remove = Some(i);
+                                }
+                                ui.label(file_name(f));
+                            });
+                        }
+                        if let Some(i) = remove {
+                            c.files.remove(i);
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button("Attach…").clicked()
+                                && let Some(p) = rfd::FileDialog::new().pick_files()
+                            {
+                                c.add_files(p);
+                            }
+                            let empty = c.text.trim().is_empty() && c.files.is_empty();
+                            if ui.add_enabled(!empty, egui::Button::new("Send")).clicked() {
+                                action = Some(MailAction::Send {
+                                    text: c.text.trim().to_owned(),
+                                    files: std::mem::take(&mut c.files),
+                                });
+                                close = true;
+                            }
+                        });
+                        if !c.error.is_empty() {
+                            ui.colored_label(egui::Color32::LIGHT_RED, &c.error);
+                        }
+                    });
+                },
+            );
+            if close {
+                self.compose = None;
+            }
+        }
+        let tx = self.tx.clone();
+        self.reading.retain_mut(|r| {
+            let Msg::Mail {
+                mail_id,
+                text,
+                files,
+            } = r.mail.msg.clone()
+            else {
+                return false;
+            };
+            let mut keep = true;
+            ctx.show_viewport_immediate(
+                ViewportId::from_hash_of(("reading", &mail_id)),
+                ViewportBuilder::default()
+                    .with_title(format!("Letter from {}", r.from))
+                    .with_inner_size([400.0, 420.0]),
+                |ui, _| {
+                    if ui.ctx().input(|i| i.viewport().close_requested()) {
+                        keep = false;
+                        return;
+                    }
+                    egui::CentralPanel::default().show(ui, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            if !text.is_empty() {
+                                ui.label(&text);
+                                ui.separator();
+                            }
+                            for f in &files {
+                                show_file(ui, r, f, config, &tx);
+                            }
+                        });
+                    });
+                },
+            );
+            keep
+        });
+        self.show_lens(ctx, config);
+        action
+    }
+}
+
+fn show_file(ui: &mut egui::Ui, r: &mut Reading, f: &FileRef, config: &Config, tx: &Sender<Done>) {
+    ui.group(|ui| {
+        ui.label(format!("{} ({} KB)", f.name, f.size.div_ceil(1024)));
+        if let Some(tex) = r.images.get(&f.file_id) {
+            let size = tex.size_vec2();
+            let scale = (360.0 / size.x).min(1.0);
+            ui.add(egui::Image::new((tex.id(), size * scale)));
+        }
+        if r.loading.contains(&f.file_id) {
+            ui.label("Downloading…");
+        } else if r.bytes.contains_key(&f.file_id) {
+            if let Some(dir) = r.saved_dir.get(&f.file_id).cloned() {
+                ui.horizontal(|ui| {
+                    ui.label("Saved to Downloads\\PetLink");
+                    if ui.button("Open folder").clicked() {
+                        open_folder(&dir);
+                    }
+                });
+            } else if r.confirm.as_deref() == Some(&f.file_id) {
+                ui.colored_label(
+                    egui::Color32::from_rgb(240, 180, 60),
+                    "This is a program or script. Only save it if you trust it.",
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("Save anyway").clicked() {
+                        save_file(r, f, config);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        r.confirm = None;
+                    }
+                });
+            } else if ui.button("Save").clicked() {
+                if files::is_dangerous(&f.name) {
+                    r.confirm = Some(f.file_id.clone());
+                } else {
+                    save_file(r, f, config);
+                }
+            }
+            if let Some(s) = r.status.get(&f.file_id) {
+                ui.colored_label(egui::Color32::LIGHT_RED, s);
+            }
+        } else if let Some(err) = r.status.get(&f.file_id).cloned() {
+            ui.colored_label(egui::Color32::LIGHT_RED, err);
+            if ui.button("Retry").clicked() {
+                r.status.remove(&f.file_id);
+                r.loading.push(f.file_id.clone());
+                spawn_download(config, ui.ctx(), f.file_id.clone(), tx.clone());
+            }
+        }
+    });
+}
+
+/// Saves into Downloads\PetLink (never opens the file).
+pub fn save_file(r: &mut Reading, f: &FileRef, config: &Config) {
+    let Some(bytes) = r.bytes.get(&f.file_id) else {
+        return;
+    };
+    let dir = files::downloads_dir();
+    match files::save(&dir, &f.name, bytes, &config.files_url()) {
+        Ok(p) => {
+            tracing::info!("saved {}", p.display());
+            r.saved_dir.insert(f.file_id.clone(), dir);
+        }
+        Err(e) => {
+            tracing::warn!("saving {} failed: {e}", f.name);
+            r.status
+                .insert(f.file_id.clone(), format!("Couldn't save: {e}"));
+        }
+    }
+    r.confirm = None;
+}
+
+impl Windows {
+    fn show_lens(&mut self, _ctx: &egui::Context, _config: &Config) {}
+}

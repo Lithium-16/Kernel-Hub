@@ -19,7 +19,6 @@ pub enum NetEvent {
 
 pub enum NetCmd {
     Send(Envelope),
-    #[allow(dead_code)]
     Upload {
         file_id: String,
         to: String,
