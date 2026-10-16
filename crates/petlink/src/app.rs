@@ -2184,18 +2184,40 @@ impl PetApp {
             ".KBBBBBBBBBBBBK.",
             "..KKKKKKKKKKKK..",
         ];
+        // The yarn ball: a shaded ball that stays put, and its winding strands, which turn in
+        // quarter turns as it spins (k ink, d/m/l shadow/base/light).
         const YARN: [&str; 11] = [
             "...kkkkk...",
             "..klllllk..",
-            ".klllwmmdk.",
-            "kllmmlwmddk",
-            "klwwlwmwwdk",
-            "klmlmmwmdwk",
-            "klwwwmmwddw",
-            "klmmmwwdwdk",
-            ".kdddddwdww",
-            "..kdddddwkk",
-            "...kkkkkk..",
+            ".kllmmmmdk.",
+            "kllmmmmmddk",
+            "klmmmmmmddk",
+            "klmmmmmmddk",
+            "klmmmmmdddk",
+            "klmmmmddddk",
+            ".kdddddddk.",
+            "..kdddddk..",
+            "...kkkkk...",
+        ];
+        const YARN_WIND: [(usize, usize); 18] = [
+            (4, 2),
+            (5, 2),
+            (6, 3),
+            (2, 4),
+            (3, 4),
+            (4, 4),
+            (5, 4),
+            (7, 4),
+            (8, 4),
+            (6, 5),
+            (2, 6),
+            (3, 6),
+            (4, 6),
+            (7, 6),
+            (5, 7),
+            (6, 7),
+            (8, 7),
+            (7, 8),
         ];
         let px = self.px();
         let p = ui.painter();
@@ -2249,6 +2271,23 @@ impl PetApp {
                     };
                     let at = origin + Vec2::new(rx as f32, ry as f32) * px;
                     p.rect_filled(egui::Rect::from_min_size(at, Vec2::splat(px)), 0.0, c);
+                }
+            }
+            if o.kind == Kind::Yarn {
+                let n = YARN.len();
+                for (x, y) in YARN_WIND {
+                    let (sx, sy) = match o.quarter() {
+                        0 => (x, y),
+                        1 => (n - 1 - y, x),
+                        2 => (n - 1 - x, n - 1 - y),
+                        _ => (y, n - 1 - x),
+                    };
+                    let at = origin + Vec2::new(sx as f32, sy as f32) * px;
+                    p.rect_filled(
+                        egui::Rect::from_min_size(at, Vec2::splat(px)),
+                        0.0,
+                        Color32::from_rgb(125, 37, 71),
+                    );
                 }
             }
         }
