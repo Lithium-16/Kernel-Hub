@@ -213,6 +213,12 @@ pub fn foreground_is_fullscreen() -> bool {
 
 /// False if another copy with the same `name` runs. The handle is leaked on purpose.
 pub fn single_instance(name: &str) -> bool {
+    // A failed install falls back to running in the same process, which already holds the lock.
+    static HELD: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
+    if held.iter().any(|n| n == name) {
+        return true;
+    }
     let wide: Vec<u16> = format!("Local\\{name}\0").encode_utf16().collect();
     // SAFETY: `wide` is NUL-terminated and outlives the call.
     unsafe {
@@ -224,6 +230,7 @@ pub fn single_instance(name: &str) -> bool {
             }
             return false;
         }
+        held.push(name.to_owned());
         true
     }
 }
