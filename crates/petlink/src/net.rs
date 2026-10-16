@@ -96,7 +96,6 @@ impl Outbox {
     }
 }
 
-#[allow(dead_code)]
 pub async fn download(config: &Config, file_id: &str) -> anyhow::Result<Vec<u8>> {
     let r = reqwest::Client::new()
         .get(format!("{}/{file_id}", config.files_url()))
