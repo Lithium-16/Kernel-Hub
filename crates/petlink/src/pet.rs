@@ -151,6 +151,25 @@ impl Pet {
         self.t += dt;
         let left = world.screen.x + HALF_W;
         let right = world.screen.right() - HALF_W;
+        // Safety net: never stay lost (NaN, off screen, below the ground with nothing to land on).
+        if self.state != State::Held
+            && !(self.x.is_finite()
+                && self.y.is_finite()
+                && self.x >= world.screen.x
+                && self.x <= world.screen.right()
+                && self.y <= world.ground() + 1.0)
+        {
+            self.x = if self.x.is_finite() {
+                self.x.clamp(left, right)
+            } else {
+                world.screen.x + world.screen.w * 0.5
+            };
+            self.y = world.ground();
+            self.vx = 0.0;
+            self.vy = 0.0;
+            self.angle = 0.0;
+            self.set(State::Idle);
+        }
         match self.state {
             State::Held => None,
             State::Thrown | State::Fall => {
@@ -339,5 +358,25 @@ mod tests {
         assert_eq!(p.state, State::Patted);
         run(&mut p, &world(&[]), 1.0);
         assert_ne!(p.state, State::Patted);
+    }
+
+    #[test]
+    fn a_lost_pet_is_put_back_on_the_ground() {
+        let w = world(&[]);
+        for (x, y) in [
+            (500.0, 5000.0),
+            (f32::NAN, 100.0),
+            (-900.0, 1032.0),
+            (500.0, f32::NAN),
+        ] {
+            let mut p = Pet::new(x, y);
+            p.state = State::Fall;
+            run(&mut p, &w, 0.1);
+            assert!(
+                p.x.is_finite() && p.x >= 0.0 && p.x <= 1920.0,
+                "x for {x},{y}"
+            );
+            assert!((p.y - 1032.0).abs() < 0.5, "y for {x},{y}");
+        }
     }
 }

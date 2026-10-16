@@ -19,8 +19,8 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
 const IDLE_AWAY_SECS: u64 = 300;
-const DOOR_W: f32 = 20.0;
-const DOOR_H: f32 = 28.0;
+const DOOR_W: f32 = 32.0;
+const DOOR_H: f32 = 32.0;
 const BUBBLE_S: u64 = 4;
 
 /// The pet's pictures as textures (cheap to clone).
@@ -31,6 +31,10 @@ pub struct Tex {
     sit: TextureHandle,
     sleep: TextureHandle,
     carry: TextureHandle,
+    pat: TextureHandle,
+    fallen: TextureHandle,
+    door: TextureHandle,
+    door_lit: TextureHandle,
     parcel: TextureHandle,
 }
 
@@ -52,6 +56,10 @@ impl Tex {
             sit: load("sit", &s.sit),
             sleep: load("sleep", &s.sleep),
             carry: load("carry", &s.carry),
+            pat: load("pat", &s.pat),
+            fallen: load("fallen", &s.fallen),
+            door: load("door", &s.door),
+            door_lit: load("door_lit", &s.door_lit),
             parcel: load("parcel", &s.parcel),
         }
     }
@@ -209,8 +217,9 @@ pub fn run(config: Config, data_dir: PathBuf) -> eframe::Result<()> {
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top()
+            // No with_mouse_passthrough here: a layered window created click-through shows
+            // nothing at all until the flag is toggled. logic() turns it on after the first frame.
             .with_taskbar(false)
-            .with_mouse_passthrough(true)
             .with_resizable(false),
         ..Default::default()
     };
@@ -234,6 +243,11 @@ impl PetApp {
         let tray = Tray::new(false)?;
         let ppp = cc.egui_ctx.pixels_per_point();
         let world = world_now(ppp);
+        tracing::info!(
+            "overlay: screen {:?} ground {} ppp {ppp}",
+            world.screen,
+            world.ground()
+        );
         let my_hue = config.bow_hue.unwrap_or(0);
         let my_tex = Tex::new(&cc.egui_ctx, "me", &Sprites::load(my_hue)?);
         let mine = Pet::new(world.screen.w * 0.5, world.ground());
@@ -272,7 +286,7 @@ impl PetApp {
             },
             world,
             world_refreshed: Instant::now(),
-            passthrough: true,
+            passthrough: false,
             drag: None,
             door_menu: None,
             bubbles: Vec::new(),
@@ -1274,14 +1288,16 @@ impl PetApp {
             State::Wander { .. } | State::Enter | State::Exit => (&tex.walk[pet.frame % 8], true),
             State::Sit => (&tex.sit, false),
             State::Sleep => (&tex.sleep, false),
+            State::Patted => (&tex.pat, false),
+            State::Dizzy => (&tex.fallen, false),
             _ => (&tex.idle, false),
         };
         let _ = walking;
-        let (w, mut h) = (32.0 * px, 48.0 * px);
+        let (w, h) = (32.0 * px, 48.0 * px);
         let mut bob = 0.0;
         match pet.state {
-            State::Patted => h *= 1.0 + 0.15 * (t * 20.0).sin(),
-            State::Idle => bob = if (t * 2.5).sin() > 0.0 { px } else { 0.0 },
+            State::Patted => bob = -(t * 12.0).sin().abs() * 6.0 * px,
+            State::Idle => bob = if (t * 2.5).sin() > 0.0 { -px } else { 0.0 },
             _ => {}
         }
         let rect =
@@ -1310,7 +1326,7 @@ impl PetApp {
                 );
             }
             State::Patted => {
-                let c = Pos2::new(pet.x, pet.y - h - 10.0);
+                let c = Pos2::new(pet.x, pet.y - h - 10.0 + bob);
                 let red = Color32::from_rgb(230, 50, 70);
                 p.circle_filled(c + Vec2::new(-3.5, 0.0), 4.5, red);
                 p.circle_filled(c + Vec2::new(3.5, 0.0), 4.5, red);
@@ -1353,31 +1369,12 @@ impl PetApp {
     }
 
     fn draw_door(&self, ui: &egui::Ui) {
-        let p = ui.painter();
-        let px = self.px();
-        let door = to_egui(self.door_rect());
-        if self.friend_online {
-            p.rect_filled(
-                door.expand(5.0 * px),
-                4.0,
-                Color32::from_rgba_unmultiplied(255, 214, 110, 90),
-            );
-            p.rect_filled(door, 2.0, Color32::from_rgb(150, 100, 50));
-            p.rect_filled(door.shrink(3.0 * px), 1.0, Color32::from_rgb(255, 226, 140));
+        let t = if self.friend_online {
+            &self.my_tex.door_lit
         } else {
-            p.rect_filled(door, 2.0, Color32::from_rgb(70, 45, 25));
-        }
-        p.rect_stroke(
-            door,
-            2.0,
-            Stroke::new(1.0, Color32::from_rgb(40, 25, 12)),
-            egui::StrokeKind::Inside,
-        );
-        p.circle_filled(
-            Pos2::new(door.right() - 4.0 * px, door.center().y + 2.0 * px),
-            1.6 * px,
-            Color32::from_rgb(250, 210, 40),
-        );
+            &self.my_tex.door
+        };
+        egui::Image::new((t.id(), t.size_vec2())).paint_at(ui, to_egui(self.door_rect()));
     }
 
     fn draw_bubbles(&self, ui: &egui::Ui) {
