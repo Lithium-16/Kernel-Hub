@@ -14,7 +14,7 @@ use egui::{
     Align2, Color32, ColorImage, FontId, Pos2, Stroke, TextureHandle, TextureOptions, Vec2,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
@@ -22,6 +22,8 @@ const IDLE_AWAY_SECS: u64 = 300;
 const DOOR_W: f32 = 32.0;
 const DOOR_H: f32 = 32.0;
 const BUBBLE_S: u64 = 4;
+/// A visiting pet on an errand (mail, peek) that hasn't finished by now is sent home.
+const ERRAND_MAX: Duration = Duration::from_secs(30);
 
 /// The pet's pictures as textures (cheap to clone).
 #[derive(Clone)]
@@ -65,16 +67,72 @@ impl Tex {
     }
 }
 
-/// Received mail waiting by the door.
+/// Received mail. It is written to disk the moment it arrives; the delivery walk is only for
+/// show (`arrived` turns true when the pet puts it down), and it stays until its letter is closed.
 pub struct Parcel {
     pub mail: Envelope,
     pub x: f32,
+    pub arrived: bool,
+    /// Being read in a window right now.
+    pub open: bool,
+}
+
+impl Parcel {
+    fn on_the_floor(&self) -> bool {
+        self.arrived && !self.open
+    }
+}
+
+fn mail_id_of(e: &Envelope) -> &str {
+    match &e.msg {
+        Msg::Mail { mail_id, .. } => mail_id,
+        _ => "",
+    }
+}
+
+/// Unopened letters survive a restart (and a lost connection, and a crash).
+fn read_mail(path: &Path) -> Vec<Envelope> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+fn write_mail(path: &Path, parcels: &[Parcel]) {
+    let mail: Vec<&Envelope> = parcels.iter().map(|p| &p.mail).collect();
+    if let Err(e) = std::fs::write(path, serde_json::to_vec(&mail).unwrap_or_default()) {
+        tracing::warn!("couldn't save parcels: {e}");
+    }
+}
+
+/// Where the n-th parcel waits when nobody walked it in.
+fn parcel_spot(door_x: f32, n: usize) -> f32 {
+    door_x - 70.0 - 24.0 * n as f32
+}
+
+/// Adds a received letter (not yet delivered); false if that mail_id is already here.
+fn add_parcel(parcels: &mut Vec<Parcel>, mail: Envelope, door_x: f32) -> bool {
+    if parcels
+        .iter()
+        .any(|p| mail_id_of(&p.mail) == mail_id_of(&mail))
+    {
+        return false;
+    }
+    let x = parcel_spot(door_x, parcels.len());
+    parcels.push(Parcel {
+        mail,
+        x,
+        arrived: false,
+        open: false,
+    });
+    true
 }
 
 /// What a visiting pet is here to do.
 #[derive(Clone)]
 enum Job {
-    Deliver(Envelope),
+    /// The mail_id of a parcel to put down.
+    Deliver(String),
     Peek(String),
     Visit,
 }
@@ -92,6 +150,7 @@ struct Visitor {
     stage: Stage,
     /// Set while the pet poses with the magnifier for this request.
     peek_id: Option<String>,
+    since: Instant,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -181,6 +240,14 @@ pub struct PetApp {
     ctx: egui::Context,
 }
 
+/// The pet has put a parcel down at `x`.
+fn arrive(parcels: &mut [Parcel], mail_id: &str, x: f32) {
+    if let Some(p) = parcels.iter_mut().find(|p| mail_id_of(&p.mail) == mail_id) {
+        p.x = x;
+        p.arrived = true;
+    }
+}
+
 fn world_now(ppp: f32) -> World {
     let r = |r: Rect| Rect {
         x: r.x / ppp,
@@ -240,7 +307,7 @@ impl PetApp {
         let net = Net::start(config.clone(), data_dir.clone(), move || {
             ctx.request_repaint()
         });
-        let tray = Tray::new(false)?;
+        let tray = Tray::new(config.peek)?;
         let ppp = cc.egui_ctx.pixels_per_point();
         let world = world_now(ppp);
         tracing::info!(
@@ -251,6 +318,9 @@ impl PetApp {
         let my_hue = config.bow_hue.unwrap_or(0);
         let my_tex = Tex::new(&cc.egui_ctx, "me", &Sprites::load(my_hue)?);
         let mine = Pet::new(world.screen.w * 0.5, world.ground());
+        let my_peek = config.peek;
+        let mut windows = mailui::Windows::default();
+        windows.inbox = data_dir.join("inbox");
         let (capture_tx, capture_rx) = channel();
         let (note_tx, note_rx) = channel();
         let mut app = PetApp {
@@ -263,7 +333,7 @@ impl PetApp {
             friend_online: false,
             friend_away: false,
             friend_peek: false,
-            my_peek: false,
+            my_peek,
             mine,
             my_tex,
             my_hue,
@@ -301,7 +371,7 @@ impl PetApp {
             #[cfg(debug_assertions)]
             autotest_done: HashMap::new(),
             ppp,
-            windows: mailui::Windows::default(),
+            windows,
             ctx: cc.egui_ctx.clone(),
         };
         app.load_parcels();
@@ -312,30 +382,22 @@ impl PetApp {
         self.data_dir.join("parcels.json")
     }
 
-    /// Unopened letters survive a restart.
     fn load_parcels(&mut self) {
-        let mail: Vec<Envelope> = std::fs::read_to_string(self.parcels_path())
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_default();
         let door = self.world.door_x;
-        self.parcels = mail
-            .into_iter()
-            .enumerate()
-            .map(|(i, mail)| Parcel {
-                mail,
-                x: door - 70.0 - 24.0 * i as f32,
-            })
-            .collect();
+        for mail in read_mail(&self.parcels_path()) {
+            add_parcel(&mut self.parcels, mail, door);
+        }
+        self.settle_parcels();
     }
 
     fn save_parcels(&self) {
-        let mail: Vec<&Envelope> = self.parcels.iter().map(|p| &p.mail).collect();
-        if let Err(e) = std::fs::write(
-            self.parcels_path(),
-            serde_json::to_vec(&mail).unwrap_or_default(),
-        ) {
-            tracing::warn!("couldn't save parcels: {e}");
+        write_mail(&self.parcels_path(), &self.parcels);
+    }
+
+    /// Whatever hasn't been walked in yet is simply there (the visitor or the link is gone).
+    fn settle_parcels(&mut self) {
+        for p in &mut self.parcels {
+            p.arrived = true;
         }
     }
 
@@ -401,8 +463,9 @@ impl PetApp {
         match ev {
             NetEvent::Connected { me, friends } => {
                 tracing::info!("connected as {} with {} friend(s)", me.name, friends.len());
-                self.my_peek = me.peek;
-                self.tray.set_peek(me.peek);
+                // My own toggle is the truth, not what the relay remembers: tell it again.
+                self.tray.set_peek(self.my_peek);
+                self.send_to_relay(Msg::PeekAllow { on: self.my_peek });
                 let hue = self.config.bow_hue.unwrap_or(me.bow_hue);
                 if hue != self.my_hue {
                     self.my_hue = hue;
@@ -426,6 +489,7 @@ impl PetApp {
             NetEvent::Disconnected => {
                 tracing::info!("disconnected from the relay");
                 self.friend_online = false;
+                self.settle_parcels();
                 self.visitor = None;
                 self.jobs.clear();
                 if self.my_pet_away {
@@ -435,6 +499,10 @@ impl PetApp {
             }
             NetEvent::Message(env) => self.on_message(env),
             NetEvent::Upgrade => self.bubble("Please update PetLink"),
+            NetEvent::Replaced => {
+                self.on_net_event(NetEvent::Disconnected);
+                self.bubble("PetLink is open somewhere else");
+            }
             NetEvent::Uploaded { file_id } => {
                 tracing::info!("uploaded {file_id}");
                 if let Some(peek_id) = self.peek_uploads.remove(&file_id) {
@@ -474,6 +542,7 @@ impl PetApp {
     /// The friend dropped off: their pet vanishes and mine comes home.
     fn friend_gone(&mut self) {
         self.friend_online = false;
+        self.settle_parcels();
         self.visitor = None;
         self.jobs.clear();
         if self.my_pet_away {
@@ -491,9 +560,13 @@ impl PetApp {
             tracing::debug!("ignoring {} from a stranger", env.id);
             return;
         }
+        // Only the kind: letters and their text don't belong in the log.
         tracing::info!(
             "message: {}",
-            serde_json::to_string(&env.msg).unwrap_or_default()
+            serde_json::to_value(&env.msg)
+                .ok()
+                .and_then(|v| v["kind"].as_str().map(str::to_owned))
+                .unwrap_or_default()
         );
         match env.msg.clone() {
             Msg::Presence { state } => {
@@ -527,7 +600,13 @@ impl PetApp {
                         .download_peek(&ctx, &self.config, file_id, from);
                 }
             }
-            Msg::Mail { .. } => self.jobs.push_back(Job::Deliver(env)),
+            Msg::Mail { mail_id, .. } => {
+                let door = self.world.door_x;
+                if add_parcel(&mut self.parcels, env, door) {
+                    self.save_parcels();
+                    self.jobs.push_back(Job::Deliver(mail_id));
+                }
+            }
             Msg::MailRead { .. } => self.mine.pat(),
             Msg::Delivered { mail_id } => {
                 self.outgoing.retain(
@@ -535,7 +614,7 @@ impl PetApp {
                 );
             }
             Msg::PeekRequest { peek_id } => {
-                if self.my_peek {
+                if self.peek_possible() {
                     self.jobs.push_back(Job::Peek(peek_id));
                 } else {
                     self.send_to_friend(Msg::PeekResult {
@@ -611,6 +690,7 @@ impl PetApp {
             job,
             stage: Stage::Entering,
             peek_id: None,
+            since: Instant::now(),
         });
     }
 
@@ -625,7 +705,7 @@ impl PetApp {
                 }
                 Some(v) if matches!(v.job, Job::Visit) && v.stage == Stage::Working => {
                     match job {
-                        Job::Deliver(mail) => self.parcels.push(Parcel { mail, x: v.pet.x }),
+                        Job::Deliver(id) => arrive(&mut self.parcels, &id, v.pet.x),
                         Job::Peek(id) => {
                             v.pet.peek();
                             v.peek_id = Some(id);
@@ -640,18 +720,38 @@ impl PetApp {
         }
     }
 
+    /// A peek may only go ahead while the toggle is on and the pose can be seen.
+    fn peek_possible(&self) -> bool {
+        self.my_peek && !self.hidden && self.friend_tex.is_some()
+    }
+
     fn step_visitor(&mut self, dt: f32, rng: &mut impl rand::Rng) {
+        let ok = self.peek_possible();
         let Some(v) = &mut self.visitor else { return };
+        let errand = !matches!(v.job, Job::Visit);
+        if errand && v.since.elapsed() > ERRAND_MAX * 2 {
+            self.visitor = None; // never let a stuck visitor block later mail and peeks
+            return;
+        }
         let ev = v.pet.step(dt, &self.world, rng);
+        let mut deny = None;
+        let mut capture = None;
+        if errand && v.since.elapsed() > ERRAND_MAX && v.stage != Stage::Leaving {
+            deny = v.peek_id.take().or_else(|| match &v.job {
+                Job::Peek(id) if v.stage == Stage::Entering => Some(id.clone()),
+                _ => None,
+            });
+            v.stage = Stage::Leaving;
+            v.pet.exit_to_door();
+        }
         match v.stage {
             Stage::Entering if v.pet.state != State::Enter => {
                 v.stage = Stage::Working;
                 match v.job.clone() {
-                    Job::Deliver(mail) => {
-                        self.parcels.push(Parcel { mail, x: v.pet.x });
+                    Job::Deliver(id) => {
+                        arrive(&mut self.parcels, &id, v.pet.x);
                         v.stage = Stage::Leaving;
                         v.pet.exit_to_door();
-                        self.save_parcels();
                     }
                     Job::Peek(id) => {
                         v.pet.peek();
@@ -660,16 +760,20 @@ impl PetApp {
                     Job::Visit => {}
                 }
             }
-            Stage::Working => {
-                if ev == Some(Event::PeekDone)
-                    && let Some(id) = v.peek_id.take()
-                {
-                    let leave = matches!(v.job, Job::Peek(_));
-                    if leave {
+            Stage::Working if v.peek_id.is_some() => {
+                // The pose is on; it only counts if it stayed allowed and visible all along.
+                let done = ev == Some(Event::PeekDone);
+                if !ok || done || v.pet.state != State::Peek {
+                    let id = v.peek_id.take();
+                    if matches!(v.job, Job::Peek(_)) {
                         v.stage = Stage::Leaving;
                         v.pet.exit_to_door();
                     }
-                    self.on_peek_done(id);
+                    if ok && done {
+                        capture = id;
+                    } else {
+                        deny = id;
+                    }
                 }
             }
             Stage::Leaving => {
@@ -682,7 +786,13 @@ impl PetApp {
                     v.pet.exit_to_door(); // knocked off course (patted, dizzy): keep going
                 }
             }
-            Stage::Entering => {}
+            Stage::Entering | Stage::Working => {}
+        }
+        if let Some(id) = deny {
+            self.deny_peek(id);
+        }
+        if let Some(id) = capture {
+            self.on_peek_done(id);
         }
     }
 
@@ -805,8 +915,19 @@ impl PetApp {
             TrayAction::WriteLetter => self.open_compose(),
             TrayAction::TogglePeek => {
                 self.my_peek = !self.my_peek;
+                self.config.peek = self.my_peek;
+                self.save_config();
                 self.tray.set_peek(self.my_peek);
                 self.send_to_relay(Msg::PeekAllow { on: self.my_peek });
+                if !self.my_peek {
+                    // Anything already waiting for its turn is refused.
+                    for job in std::mem::take(&mut self.jobs) {
+                        match job {
+                            Job::Peek(id) => self.deny_peek(id),
+                            job => self.jobs.push_back(job),
+                        }
+                    }
+                }
             }
             TrayAction::Visit => self.start_visit(),
             TrayAction::BowColour(h) => {
@@ -850,7 +971,7 @@ impl PetApp {
                 "send-mail" => {
                     self.can_interact() && self.trip == Trip::None && !self.my_pet_hidden()
                 }
-                "open-mail" => !self.parcels.is_empty(),
+                "open-mail" => self.parcels.iter().any(Parcel::on_the_floor),
                 "peek" => {
                     self.can_interact()
                         && self.friend_peek
@@ -879,6 +1000,8 @@ impl PetApp {
             match step {
                 "peek-on" if !self.my_peek => {
                     self.my_peek = true;
+                    self.config.peek = true;
+                    self.save_config();
                     self.tray.set_peek(true);
                     self.send_to_relay(Msg::PeekAllow { on: true });
                 }
@@ -908,7 +1031,9 @@ impl PetApp {
                 "open-mail" => {
                     self.windows.autosave = true;
                     let ctx = self.ctx.clone();
-                    self.open_parcel(&ctx, 0);
+                    if let Some(i) = self.parcels.iter().position(Parcel::on_the_floor) {
+                        self.open_parcel(&ctx, i);
+                    }
                 }
                 _ => {}
             }
@@ -1078,14 +1203,14 @@ impl PetApp {
         if self
             .visitor
             .as_ref()
-            .is_some_and(|v| inside(v.pet.hitbox(px), p))
+            .is_some_and(|v| v.pet.state != State::Peek && inside(v.pet.hitbox(px), p))
         {
             return Some(Target::Visitor);
         }
         if let Some(i) = self
             .parcels
             .iter()
-            .rposition(|pc| inside(self.parcel_rect(pc.x), p))
+            .rposition(|pc| pc.on_the_floor() && inside(self.parcel_rect(pc.x), p))
         {
             return Some(Target::Parcel(i));
         }
@@ -1207,20 +1332,18 @@ impl PetApp {
     }
 
     fn open_parcel(&mut self, ctx: &egui::Context, i: usize) {
-        if i >= self.parcels.len() {
+        let Some(p) = self.parcels.get_mut(i) else {
             return;
-        }
-        let p = self.parcels.remove(i);
-        self.save_parcels();
+        };
+        // The parcel stays on disk until the letter is closed.
+        p.open = true;
+        let mail = p.mail.clone();
         tracing::info!("opening a letter");
         self.send_to_friend(Msg::MailRead {
-            mail_id: match &p.mail.msg {
-                Msg::Mail { mail_id, .. } => mail_id.clone(),
-                _ => String::new(),
-            },
+            mail_id: mail_id_of(&mail).to_owned(),
         });
         let from = self.friend_name();
-        self.windows.open_reading(ctx, &self.config, p.mail, from);
+        self.windows.open_reading(ctx, &self.config, mail, from);
     }
 
     fn door_menu_ui(&mut self, ctx: &egui::Context) {
@@ -1399,7 +1522,7 @@ impl PetApp {
     fn draw(&self, ui: &egui::Ui) {
         self.draw_door(ui);
         let px = self.px();
-        for pc in &self.parcels {
+        for pc in self.parcels.iter().filter(|p| p.on_the_floor()) {
             let r = to_egui(self.parcel_rect(pc.x));
             let t = &self.my_tex.parcel;
             egui::Image::new((t.id(), t.size_vec2())).paint_at(ui, r);
@@ -1520,6 +1643,12 @@ impl eframe::App for PetApp {
         {
             self.send_letter(text, files);
         }
+        if !self.windows.closed.is_empty() {
+            let closed = std::mem::take(&mut self.windows.closed);
+            self.parcels
+                .retain(|p| !closed.iter().any(|id| id == mail_id_of(&p.mail)));
+            self.save_parcels();
+        }
         // Files dropped on my pet become a letter.
         let dropped: Vec<PathBuf> = ctx.input(|i| {
             i.raw
@@ -1534,5 +1663,44 @@ impl eframe::App for PetApp {
                 .get_or_insert_with(Compose::default)
                 .add_files(dropped);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mail(id: &str) -> Envelope {
+        Envelope::new(
+            "u_me",
+            Msg::Mail {
+                mail_id: id.into(),
+                text: "hi".into(),
+                files: vec![],
+            },
+        )
+    }
+
+    #[test]
+    fn a_received_letter_is_on_disk_before_it_is_delivered_and_survives_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("parcels.json");
+        let mut parcels = Vec::new();
+        assert!(add_parcel(&mut parcels, mail("m1"), 1000.0));
+        assert!(add_parcel(&mut parcels, mail("m2"), 1000.0));
+        assert!(
+            !add_parcel(&mut parcels, mail("m1"), 1000.0),
+            "same mail twice"
+        );
+        assert!(parcels.iter().all(|p| !p.arrived && !p.on_the_floor()));
+        write_mail(&path, &parcels); // what happens on arrival, before any walk
+        let back = read_mail(&path);
+        assert_eq!(back.len(), 2);
+        assert_eq!(mail_id_of(&back[1]), "m2");
+        arrive(&mut parcels, "m1", 500.0);
+        assert!(parcels[0].on_the_floor() && parcels[0].x == 500.0);
+        parcels[0].open = true;
+        assert!(!parcels[0].on_the_floor());
+        assert!(read_mail(&dir.path().join("none.json")).is_empty());
     }
 }

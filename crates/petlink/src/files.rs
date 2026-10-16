@@ -2,13 +2,18 @@
 
 use std::path::{Path, PathBuf};
 
-const DANGEROUS: &[&str] = &["exe", "bat", "cmd", "ps1", "vbs", "js", "msi", "scr", "lnk"];
+const DANGEROUS: &[&str] = &[
+    "exe", "bat", "cmd", "ps1", "vbs", "js", "msi", "scr", "lnk", "com", "pif", "hta", "wsf",
+    "wsh", "vbe", "jse", "cpl", "msc", "jar", "reg", "url", "psm1",
+];
 const RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "LPT1", "LPT2", "LPT3",
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
+/// Judged on the name it will be saved under, so "a.exe." and "a.exe " don't slip through.
 pub fn is_dangerous(name: &str) -> bool {
-    Path::new(name)
+    Path::new(&safe_name(name))
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| DANGEROUS.contains(&e.to_ascii_lowercase().as_str()))
@@ -20,7 +25,9 @@ pub fn safe_name(name: &str) -> String {
         .chars()
         .filter(|c| !c.is_control() && !"<>:\"|?*".contains(*c))
         .collect();
-    let cleaned = cleaned.trim().trim_matches('.').to_owned();
+    let cleaned = cleaned
+        .trim_matches(|c: char| c == '.' || c.is_whitespace())
+        .to_owned();
     if cleaned.is_empty() {
         return "file".into();
     }
@@ -96,6 +103,10 @@ mod tests {
             "s.scr",
             "l.lnk",
             "cat.png.exe",
+            "a.exe.",
+            "a.exe ",
+            "a.exe. .",
+            "x.hta",
         ] {
             assert!(is_dangerous(n), "{n}");
         }
