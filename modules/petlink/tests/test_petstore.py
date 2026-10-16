@@ -58,3 +58,25 @@ def test_files_and_expiry(store, clock, tmp_path):
     clock["now"] += 30 * DAY
     store.expire(clock["now"])
     assert store.pending_mail(b.id) == []
+
+
+def test_install_codes_single_use_expire_and_hashed(tmp_path):
+    t = [0.0]
+    s = Store(tmp_path / "d.db", clock=lambda: t[0])
+    u, _ = s.add_user("Ann", 0)
+    code = s.add_install_code(u.id, "inv")
+    assert code not in str(s.db.execute("SELECT * FROM install_codes").fetchall())
+    assert s.pending_codes() == {u.id: 1}
+    assert s.take_install_code(code, consume=False) == (u.id, "inv") and s.pending_codes() == {u.id: 1}
+    assert s.take_install_code(code) == (u.id, "inv") and s.take_install_code(code) is None
+    c2 = s.add_install_code(u.id, "inv")
+    t[0] = 8 * 86400
+    assert s.take_install_code(c2) is None and s.pending_codes() == {}
+
+
+def test_rotate_token_kills_old_and_codes(tmp_path):
+    s = Store(tmp_path / "d.db")
+    u, old = s.add_user("Ann", 0)
+    s.add_install_code(u.id, "inv")
+    new = s.rotate_token(u.id)
+    assert s.auth(old) is None and s.auth(new).id == u.id and s.pending_codes() == {}

@@ -10,6 +10,7 @@ from typing import Any
 from aiohttp import web
 from kernel_sdk import ActionError
 from kernel_sdk.webgame import TailscaleShare, run_command
+from petinstall import ExeSource
 from petrelay import Relay
 from petstore import Store
 
@@ -21,7 +22,8 @@ class PetLink(TailscaleShare):
         super().__init__("PetLink", settings, int(settings.get("port", 8098)), emit=emit, log=log, run=run,
                          path=str(settings.get("share_path", "/petlink")))
         self.store = Store(data_dir / "petlink.db")
-        self.relay = Relay(self.store, data_dir / "files", log=self.log)
+        self.exe_source = ExeSource(data_dir, override=str(settings.get("exe_override", "")))
+        self.relay = Relay(self.store, data_dir / "files", log=self.log, exe_source=self.exe_source.get)
         self.state = "stopped"
 
     async def run_forever(self) -> None:
@@ -45,15 +47,39 @@ class PetLink(TailscaleShare):
             raise ActionError("disabled", "Share PetLink first, so the invite has an address that works from outside.")
         return "wss://" + self.link.removeprefix("https://").rstrip("/") + "/ws"
 
+    def _issue(self, user_id: str, token: str) -> dict[str, Any]:
+        blob = base64.urlsafe_b64encode(json.dumps({"relay_url": self._relay_url(), "token": token}).encode()).decode().rstrip("=")
+        invite = f"petlink:{blob}"
+        download = f"{self.link.rstrip('/')}/install/{self.store.add_install_code(user_id, invite)}"
+        message = (
+            f"Send them this one-time download link (valid 7 days, works once):\n{download}\n\n"
+            f"Fallback if the link doesn't work, they paste this invite into PetLink:\n{invite}"
+        )
+        return {"user": user_id, "download": download, "invite": invite, "message": message}
+
+    def _find(self, name: str):
+        user = next((u for u in self.store.users() if u.name.lower() == name.strip().lower()), None)
+        if user is None:
+            raise ActionError("invalid_params", f"no friend called {name!r}")
+        return user
+
     async def add_user(self, name: str, bow_hue: int = 0) -> dict[str, Any]:
         name = name.strip()
         if not name or any(u.name.lower() == name.lower() for u in self.store.users()):
             raise ActionError("invalid_params", "pick a name that isn't empty or taken")
-        relay_url = self._relay_url()
+        self._relay_url()  # not shared yet? fail before creating the user
         user, token = self.store.add_user(name, bow_hue)
-        blob = base64.urlsafe_b64encode(json.dumps({"relay_url": relay_url, "token": token}).encode()).decode().rstrip("=")
         self.emit("user.added", f"{name} was added to PetLink")
-        return {"user": user.id, "invite": f"petlink:{blob}"}
+        return self._issue(user.id, token)
+
+    async def relink(self, name: str) -> dict[str, Any]:
+        user = self._find(name)
+        self._relay_url()
+        out = self._issue(user.id, self.store.rotate_token(user.id))
+        ws = self.relay.sockets.get(user.id)
+        if ws is not None:
+            await ws.close(code=4401)  # the old token is dead; drop the old connection
+        return out
 
     async def remove_user(self, name: str) -> dict[str, Any]:
         user = next((u for u in self.store.users() if u.name.lower() == name.strip().lower()), None)
@@ -67,10 +93,11 @@ class PetLink(TailscaleShare):
 
     def snapshot(self) -> dict[str, Any]:
         online = set(self.relay.online())
+        pending = self.store.pending_codes()
         return {
             "state": self.state,
             "sharing": self.sharing,
             "link": self.link,
-            "users": [{"id": u.id, "name": u.name, "online": u.id in online, "peek": u.peek} for u in self.store.users()],
+            "users": [{"id": u.id, "name": u.name, "online": u.id in online, "peek": u.peek, "install_codes": pending.get(u.id, 0)} for u in self.store.users()],
             "files_mb": round(self.store.files_size() / 2**20, 1),
         }
