@@ -16,6 +16,10 @@ const CHASE_SPEED: f32 = 110.0;
 /// A little hop in place (how high, and the pause before the next one).
 const HOP_H: f32 = 36.0;
 const HOP_GAP_S: f32 = 0.45;
+/// Failing to get a treat for this long makes her angry; she then stays calm for a while.
+const ANGER_AFTER_S: f32 = 6.0;
+const ANGER_COOLDOWN_S: f32 = 15.0;
+const ANGRY_S: f32 = 2.8;
 const FRAME_S: f32 = 0.1;
 /// Bouncing on landing: an impact faster than the minimum bounces back up by the factor.
 const BOUNCE_MIN_SPEED: f32 = 150.0;
@@ -79,6 +83,8 @@ pub enum State {
     HeadPatted,
     /// Putting the parcel down.
     Place,
+    /// Furious that she can't get the treat.
+    Angry,
     /// Running after a treat.
     Chase {
         to_x: f32,
@@ -110,6 +116,8 @@ pub enum Emote {
     Question,
     Bang,
     Heart,
+    /// Swearing: !%@#
+    Curse,
 }
 
 const EMOTES: [Emote; 5] = [
@@ -202,6 +210,8 @@ pub struct Pet {
     pub emote: Option<(Emote, f32)>,
     emote_cd: f32,
     hop_cd: f32,
+    /// Seconds of failing to get a treat (negative while she is cooling off).
+    frustration: f32,
     /// The sound this pet wants played (bounce, purr, meow); the app takes it.
     sound: Option<Sound>,
     hover_t: f32,
@@ -231,6 +241,7 @@ impl Pet {
             emote: None,
             emote_cd: rand::rng().random_range(EMOTE_MIN_S..EMOTE_MAX_S),
             hop_cd: 0.0,
+            frustration: 0.0,
             sound: None,
             hover_t: 0.0,
             hold: 0.0,
@@ -384,8 +395,32 @@ impl Pet {
         self.state == State::Hop
     }
 
+    /// A moment more of failing to get a treat; true when she has had enough.
+    pub fn stew(&mut self, dt: f32) -> bool {
+        self.frustration += dt;
+        if self.frustration >= ANGER_AFTER_S {
+            self.frustration = -ANGER_COOLDOWN_S;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Things are going well again (she is getting somewhere, or has eaten).
+    pub fn cool_off(&mut self) {
+        self.frustration = self.frustration.min(0.0);
+    }
+
+    /// Stamping mad: flushed, with a cloud of swearing.
+    pub fn get_angry(&mut self) {
+        self.set(State::Angry);
+        self.hold = ANGRY_S;
+        self.show_emote(Emote::Curse);
+    }
+
     /// Happy about the treat she just got.
     pub fn eat(&mut self) {
+        self.cool_off();
         self.headpatted();
         self.show_emote(Emote::Heart);
     }
@@ -460,6 +495,7 @@ impl Pet {
                 | State::Wander { .. }
                 | State::Sit
                 | State::Linger
+                | State::Angry
                 | State::Approach { .. }
         );
         if !free {
@@ -487,6 +523,7 @@ impl Pet {
         self.sound = match e {
             Emote::Heart => Some(Sound::Purr),
             Emote::Question | Emote::Bang => Some(Sound::Meow),
+            Emote::Curse => Some(Sound::Angry),
             Emote::Note | Emote::Dots => self.sound,
         };
         self.emote = Some((e, EMOTE_SHOW_S));
@@ -556,6 +593,10 @@ impl Pet {
             self.set(State::Idle);
         }
         self.hop_cd = (self.hop_cd - dt).max(0.0);
+        if self.state == State::Hop {
+            // Hopping for something she can't reach is what wears her patience down.
+            self.frustration += dt;
+        }
         self.update_emote(dt, rng);
         self.update_hover(dt);
         match self.state {
@@ -618,7 +659,9 @@ impl Pet {
                 self.set(State::Idle);
                 None
             }
-            State::Blush | State::HeadPatted | State::Linger if self.t >= self.hold => {
+            State::Blush | State::HeadPatted | State::Linger | State::Angry
+                if self.t >= self.hold =>
+            {
                 self.set(State::Idle);
                 None
             }
@@ -800,6 +843,28 @@ mod tests {
         }
         assert!(heard.contains(&Sound::Bounce), "heard {heard:?}");
         assert_eq!(p.take_sound(), None, "taking a sound clears it");
+    }
+
+    #[test]
+    fn stewing_long_enough_makes_her_angry_then_she_cools_off_for_a_while() {
+        let mut p = Pet::new(500.0, 1032.0);
+        assert!(!p.stew(5.0));
+        assert!(p.stew(1.5), "6 s of being teased is enough");
+        assert!(!p.stew(10.0), "no second outburst straight away");
+        p.get_angry();
+        assert_eq!(p.state, State::Angry);
+        assert_eq!(p.emote.map(|(e, _)| e), Some(Emote::Curse));
+        assert_eq!(p.take_sound(), Some(Sound::Angry));
+        let w = world(&[]);
+        let mut rng = StdRng::seed_from_u64(1);
+        for _ in 0..(4.0 * 60.0) as usize {
+            p.step(1.0 / 60.0, &w, &mut rng);
+        }
+        assert!(
+            p.calm(),
+            "she should be over it after a few seconds: {:?}",
+            p.state
+        );
     }
 
     #[test]

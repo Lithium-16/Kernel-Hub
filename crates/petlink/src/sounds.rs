@@ -30,6 +30,8 @@ pub enum Sound {
     Purr,
     /// Nom: a treat was eaten.
     Munch,
+    /// A cross grumble.
+    Angry,
     /// A quick trilled chirp.
     Mrrp,
 }
@@ -143,6 +145,11 @@ fn samples(s: Sound) -> Vec<f32> {
             pluck(1175.0, 0.14),
         ]),
         Sound::Purr => purr(0.9),
+        Sound::Angry => cat(vec![
+            pluck(220.0, 0.1),
+            pluck(196.0, 0.1),
+            pluck(165.0, 0.3),
+        ]),
         Sound::Munch => cat(vec![
             pluck(330.0, 0.06),
             pluck(262.0, 0.06),
@@ -187,7 +194,8 @@ pub fn wav(s: Sound, volume: f32) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    const ALL: [Sound; 13] = [
+    const ALL: [Sound; 14] = [
+        Sound::Angry,
         Sound::Munch,
         Sound::Mrrp,
         Sound::Bounce,
