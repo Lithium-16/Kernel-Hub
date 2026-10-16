@@ -15,7 +15,9 @@ const FRAME_S: f32 = 0.1;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum State {
     Idle,
-    Wander { to_x: f32 },
+    Wander {
+        to_x: f32,
+    },
     Sit,
     Fall,
     Held,
@@ -23,6 +25,7 @@ pub enum State {
     Dizzy,
     Patted,
     Sleep,
+    #[allow(dead_code)]
     Carry,
     Exit,
     Enter,
@@ -101,6 +104,7 @@ impl Pet {
     pub fn set_owner_away(&mut self, away: bool) {
         self.owner_away = away;
     }
+    #[allow(dead_code)]
     pub fn carry_to_door(&mut self) {
         self.set(State::Carry);
     }

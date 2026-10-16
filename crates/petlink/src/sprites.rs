@@ -18,6 +18,7 @@ const POSE_W: u32 = 32;
 const POSE_H: u32 = 48;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Pose {
     Idle,
     Sit,
@@ -96,6 +97,7 @@ pub fn recolor_bows(img: &mut Rgba, hue: u16) -> usize {
     n
 }
 
+#[allow(dead_code)]
 pub fn mirror(img: &Rgba) -> Rgba {
     image::imageops::flip_horizontal(img)
 }
@@ -148,6 +150,7 @@ impl Sprites {
         Ok(s)
     }
 
+    #[allow(dead_code)]
     pub fn pose(&self, p: Pose) -> &Rgba {
         match p {
             Pose::Idle => &self.idle,
