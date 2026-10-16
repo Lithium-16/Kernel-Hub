@@ -26,22 +26,49 @@ fn main() {
     println!("PetLink runs on Windows");
 }
 
+/// Logs to `dir`; if the log file can't be created (e.g. an antivirus blocking writes), runs
+/// without a log file instead of failing to start.
 #[cfg(windows)]
-fn init_logging(dir: &std::path::Path) -> tracing_appender::non_blocking::WorkerGuard {
-    let (w, guard) =
-        tracing_appender::non_blocking(tracing_appender::rolling::daily(dir, "petlink.log"));
-    tracing_subscriber::fmt()
-        .with_writer(w)
-        .with_ansi(false)
-        .init();
+fn init_logging(dir: &std::path::Path) -> Option<tracing_appender::non_blocking::WorkerGuard> {
+    let appender = std::fs::create_dir_all(dir).ok().and_then(|()| {
+        tracing_appender::rolling::Builder::new()
+            .rotation(tracing_appender::rolling::Rotation::DAILY)
+            .filename_prefix("petlink.log")
+            .build(dir)
+            .ok()
+    });
+    let guard = appender.map(|a| {
+        let (w, guard) = tracing_appender::non_blocking(a);
+        tracing_subscriber::fmt()
+            .with_writer(w)
+            .with_ansi(false)
+            .init();
+        guard
+    });
     std::panic::set_hook(Box::new(|info| tracing::error!("panic: {info}")));
     guard
 }
 
+/// The release build has no console, so a startup error would vanish silently: show it.
 #[cfg(windows)]
-fn main() -> anyhow::Result<()> {
+fn main() {
+    if let Err(e) = run() {
+        tracing::error!("startup failed: {e:#}");
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("PetLink couldn't start")
+            .set_description(format!(
+                "{e:#}\n\nIf this says access is denied, your antivirus is probably blocking \
+                 PetLink. Add PetLink as an exception in your antivirus and start it again."
+            ))
+            .show();
+        std::process::exit(1);
+    }
+}
+
+#[cfg(windows)]
+fn run() -> anyhow::Result<()> {
     let dir = config::Config::dir();
-    std::fs::create_dir_all(dir.join("logs"))?;
     let _guard = init_logging(&dir.join("logs"));
     let args: Vec<String> = std::env::args().collect();
     let welcome = args.iter().any(|a| a == "--installed");
