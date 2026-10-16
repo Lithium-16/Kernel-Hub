@@ -393,6 +393,7 @@ impl Windows {
                 mail_id,
                 text,
                 files,
+                ..
             } = r.mail.msg.clone()
             else {
                 return false;
