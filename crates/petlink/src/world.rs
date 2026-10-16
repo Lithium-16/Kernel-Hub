@@ -33,6 +33,7 @@ pub struct World {
 
 const MIN_WINDOW_W: f32 = 120.0;
 const TOP_MARGIN: f32 = 40.0;
+const FULL_SLACK: f32 = 8.0;
 const DOOR_GAP: f32 = 40.0;
 
 /// Subtracts [a, b) from every span.
@@ -67,7 +68,10 @@ impl World {
             }
             let mut spans = vec![(w.x.max(screen.x), w.right().min(screen.right()))];
             for front in &windows[..i] {
-                if w.y >= front.y && w.y < front.y + front.h {
+                // A screen-sized window is fullscreen (overlay hides anyway) or maximised.
+                let big =
+                    front.w >= screen.w - FULL_SLACK && front.h >= ground - screen.y - FULL_SLACK;
+                if !big && w.y >= front.y && w.y < front.y + front.h {
                     spans = cut(spans, front.x, front.right());
                 }
             }
@@ -157,6 +161,24 @@ mod tests {
         assert_eq!(w.floor_below(450.0, 0.0), Some(200.0)); // behind's top is covered here
         assert_eq!(w.floor_below(800.0, 0.0), Some(400.0)); // ...but not here
         assert_eq!(w.floor_below(1240.0, 0.0), Some(1032.0));
+    }
+
+    #[test]
+    fn fullscreen_window_in_front_does_not_cover() {
+        let full = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 1920.0,
+            h: 1080.0,
+        };
+        let small = Rect {
+            x: 100.0,
+            y: 300.0,
+            w: 800.0,
+            h: 500.0,
+        };
+        let w = World::build(SCREEN, Some(TASKBAR), &[full, small], 1700.0);
+        assert_eq!(w.floor_below(500.0, 0.0), Some(300.0));
     }
 
     #[test]
