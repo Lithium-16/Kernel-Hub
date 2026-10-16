@@ -215,3 +215,16 @@ clippy on CI's Ubuntu runner (the pure logic is tested there).
 Point here (click a spot on a snapshot and the pet points at it on their screen), peek back,
 clipboard throw hotkey, voice notes, scheduled mail, accessories earned by mail count, a mail
 scrapbook, more friends (one door per friend), multi-monitor, a doodle pad.
+
+Two pets together (when visiting):
+
+- bump into each other and both blush
+- holding hands while walking (needs sprites)
+- headpats for each other, with hearts
+- napping together when both owners are away
+- sitting together on a window top
+- waiting at the door when the friend comes online
+- a "chu" goodbye with a heart when a visit ends
+- heart-sealed letters
+- matching accessories (half-heart charms)
+- a shared umbrella when it rains for either of them
