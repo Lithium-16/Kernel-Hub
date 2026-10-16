@@ -158,6 +158,8 @@ pub struct PetApp {
     hidden: bool,
     /// My peek request waiting for an answer: (peek id, deadline).
     peek_pending: Option<(String, Instant)>,
+    note_tx: Sender<String>,
+    note_rx: Receiver<String>,
     /// Snapshots being taken for the friend: results come back here.
     capture_tx: Sender<(String, Result<Vec<u8>, String>)>,
     capture_rx: Receiver<(String, Result<Vec<u8>, String>)>,
@@ -236,6 +238,7 @@ impl PetApp {
         let my_tex = Tex::new(&cc.egui_ctx, "me", &Sprites::load(my_hue)?);
         let mine = Pet::new(world.screen.w * 0.5, world.ground());
         let (capture_tx, capture_rx) = channel();
+        let (note_tx, note_rx) = channel();
         let mut app = PetApp {
             config,
             data_dir,
@@ -276,6 +279,8 @@ impl PetApp {
             away: false,
             hidden: false,
             peek_pending: None,
+            note_tx,
+            note_rx,
             capture_tx,
             capture_rx,
             peek_uploads: HashMap::new(),
@@ -1012,7 +1017,24 @@ impl PetApp {
         }
     }
 
-    fn check_updates(&mut self) {}
+    fn check_updates(&mut self) {
+        self.bubble("Checking for updates...");
+        let (tx, ctx) = (self.note_tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            let note = match crate::update::check_now() {
+                Ok(true) => {
+                    std::process::exit(0); // the new version is already starting
+                }
+                Ok(false) if crate::update::current_build().is_none() => {
+                    "Dev build: no updates".to_owned()
+                }
+                Ok(false) => "Up to date".to_owned(),
+                Err(e) => format!("Update failed: {e:#}"),
+            };
+            let _ = tx.send(note);
+            ctx.request_repaint();
+        });
+    }
 
     fn door_rect(&self) -> Rect {
         let px = self.px();
@@ -1466,6 +1488,9 @@ impl eframe::App for PetApp {
         #[cfg(debug_assertions)]
         self.autotest();
         self.pump_captures();
+        while let Ok(note) = self.note_rx.try_recv() {
+            self.bubble(note);
+        }
         self.pump_jobs();
         self.pump_outgoing();
         self.step_mine(dt, &mut rng);
