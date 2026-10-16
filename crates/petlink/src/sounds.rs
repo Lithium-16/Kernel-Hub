@@ -28,6 +28,8 @@ pub enum Sound {
     Meow,
     /// A purr.
     Purr,
+    /// Nom: a treat was eaten.
+    Munch,
 }
 
 /// A sine glide from `f0` to `f1` Hz over `secs`, with a quick attack and a fading tail.
@@ -109,6 +111,11 @@ fn samples(s: Sound) -> Vec<f32> {
             glide(700.0, 380.0, 0.22, 8.0),
         ]),
         Sound::Purr => purr(0.9),
+        Sound::Munch => cat(vec![
+            glide(330.0, 300.0, 0.06, 0.0),
+            glide(262.0, 240.0, 0.06, 0.0),
+            glide(392.0, 392.0, 0.12, 0.0),
+        ]),
         Sound::Giggle => cat(vec![
             glide(900.0, 1100.0, 0.06, 0.0),
             glide(1100.0, 900.0, 0.06, 0.0),
@@ -148,7 +155,8 @@ pub fn wav(s: Sound, volume: f32) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    const ALL: [Sound; 11] = [
+    const ALL: [Sound; 12] = [
+        Sound::Munch,
         Sound::Bounce,
         Sound::Meow,
         Sound::Purr,
