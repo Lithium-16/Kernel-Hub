@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS files (
   id TEXT PRIMARY KEY, owner TEXT NOT NULL, recipient TEXT NOT NULL, name TEXT NOT NULL,
   size INTEGER NOT NULL, path TEXT NOT NULL, created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS install_codes (
-  code_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, invite TEXT NOT NULL, expires REAL NOT NULL);
+  code_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires REAL NOT NULL);
 """
 
 
@@ -99,24 +99,30 @@ class Store:
 
     # -- install codes ---------------------------------------------------------------------
 
-    def add_install_code(self, user_id: str, invite: str) -> str:
-        # ponytail: the invite (holds the token) sits in the row until the code is used or expires,
-        # because the download needs it later and `users` keeps only the token's hash.
+    def add_install_code(self, user_id: str) -> str:
         code = secrets.token_urlsafe(24)
-        self.db.execute(
-            "INSERT INTO install_codes VALUES (?, ?, ?, ?)", (_hash(code), user_id, invite, self.clock() + CODE_TTL_S)
-        )
+        self.db.execute("INSERT INTO install_codes VALUES (?, ?, ?)", (_hash(code), user_id, self.clock() + CODE_TTL_S))
         return code
 
-    def take_install_code(self, code: str, consume: bool = True) -> tuple[str, str] | None:
-        """(user_id, invite) for a live code; `consume` makes it single-use."""
-        h = _hash(code)
-        row = self.db.execute("SELECT user_id, invite, expires FROM install_codes WHERE code_hash = ?", (h,)).fetchone()
-        if row is None or row[2] <= self.clock():
-            return None
-        if consume and self.db.execute("DELETE FROM install_codes WHERE code_hash = ?", (h,)).rowcount == 0:
-            return None
-        return row[0], row[1]
+    def take_install_code(self, code: str) -> str | None:
+        """The user id behind a live code, without using it up."""
+        row = self.db.execute("SELECT user_id, expires FROM install_codes WHERE code_hash = ?", (_hash(code),)).fetchone()
+        return row[0] if row and row[1] > self.clock() else None
+
+    def redeem_install_code(self, code: str) -> tuple[str, str] | None:
+        """Use the code up and mint the user's new token in one transaction: (user_id, token)."""
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            user_id = self.take_install_code(code)
+            if user_id is None or self.db.execute("DELETE FROM install_codes WHERE code_hash = ?", (_hash(code),)).rowcount == 0:
+                self.db.execute("ROLLBACK")
+                return None
+            token = self.rotate_token(user_id)  # also drops the user's other codes
+            self.db.execute("COMMIT")
+            return user_id, token
+        except BaseException:
+            self.db.execute("ROLLBACK")
+            raise
 
     def pending_codes(self) -> dict[str, int]:
         rows = self.db.execute(

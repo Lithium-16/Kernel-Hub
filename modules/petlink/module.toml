@@ -21,7 +21,7 @@ exe_override = ""
 id = "user.add"
 label = "Add friend"
 icon = "user-plus"
-description = "Adds a person and returns a one-time download link for their personal PetLink installer (the one-line invite is the fallback; it holds their secret token)."
+description = "Adds a person and returns a one-time download link for their personal PetLink installer (the one-line invite is a fallback, and stops working once the link is used: the download carries a fresh token)."
 ai = "never"
 timeout_s = 30
 params.name = { type = "string", description = "Their name" }

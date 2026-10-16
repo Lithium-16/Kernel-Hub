@@ -41,12 +41,13 @@ class Relay:
         per_minute: int = 30,
         install_per_minute: int = 20,
         exe_source: Callable[[], Awaitable[Path | None]] | None = None,
+        invite_builder: Callable[[str], str] | None = None,
     ) -> None:
         self.store, self.files_dir, self.clock = store, files_dir, clock
         self.log = log or logging.getLogger("petlink")
         self.max_file, self.hourly_upload, self.store_limit, self.per_minute = max_file, hourly_upload, store_limit, per_minute
         files_dir.mkdir(parents=True, exist_ok=True)
-        self.install_per_minute, self.exe_source = install_per_minute, exe_source
+        self.install_per_minute, self.exe_source, self.invite_builder = install_per_minute, exe_source, invite_builder
         self.installs: deque[float] = deque()
         self.sockets: dict[str, web.WebSocketResponse] = {}
         self.presence: dict[str, str] = {}
@@ -309,16 +310,17 @@ class Relay:
             return web.Response(status=429, text="Too many tries, wait a minute.")
         gone = web.Response(status=404, text="This download link is used up or expired. Ask for a new one.")
         code = request.match_info["code"]
-        if self.store.take_install_code(code, consume=False) is None:
+        if self.store.take_install_code(code) is None:
             return gone
         exe = await self.exe_source() if self.exe_source else None
-        if exe is None:
-            return web.Response(status=503, text="PetLink isn't published yet")  # the code stays valid
-        taken = self.store.take_install_code(code)
-        if taken is None:  # lost a race with another request
+        if exe is None or self.invite_builder is None:
+            return web.Response(status=503, text="PetLink isn't published yet")  # code and token untouched
+        data = await asyncio.to_thread(exe.read_bytes)  # read before rotating, so a failure costs nothing
+        redeemed = self.store.redeem_install_code(code)
+        if redeemed is None:  # lost a race with another request
             return gone
-        invite = taken[1].encode()
-        body = await asyncio.to_thread(exe.read_bytes) + invite + struct.pack("<I", len(invite)) + b"PLINVITE"
+        invite = self.invite_builder(redeemed[1]).encode()
+        body = data + invite + struct.pack("<I", len(invite)) + b"PLINVITE"
         return web.Response(
             body=body,
             content_type="application/octet-stream",

@@ -23,7 +23,8 @@ class PetLink(TailscaleShare):
                          path=str(settings.get("share_path", "/petlink")))
         self.store = Store(data_dir / "petlink.db")
         self.exe_source = ExeSource(data_dir, override=str(settings.get("exe_override", "")))
-        self.relay = Relay(self.store, data_dir / "files", log=self.log, exe_source=self.exe_source.get)
+        self.relay = Relay(self.store, data_dir / "files", log=self.log, exe_source=self.exe_source.get,
+                           invite_builder=self._invite)
         self.state = "stopped"
 
     async def run_forever(self) -> None:
@@ -47,13 +48,17 @@ class PetLink(TailscaleShare):
             raise ActionError("disabled", "Share PetLink first, so the invite has an address that works from outside.")
         return "wss://" + self.link.removeprefix("https://").rstrip("/") + "/ws"
 
-    def _issue(self, user_id: str, token: str) -> dict[str, Any]:
+    def _invite(self, token: str) -> str:
         blob = base64.urlsafe_b64encode(json.dumps({"relay_url": self._relay_url(), "token": token}).encode()).decode().rstrip("=")
-        invite = f"petlink:{blob}"
-        download = f"{self.link.rstrip('/')}/install/{self.store.add_install_code(user_id, invite)}"
+        return f"petlink:{blob}"
+
+    def _issue(self, user_id: str, token: str) -> dict[str, Any]:
+        invite = self._invite(token)
+        download = f"{self.link.rstrip('/')}/install/{self.store.add_install_code(user_id)}"
         message = (
             f"Send them this one-time download link (valid 7 days, works once):\n{download}\n\n"
-            f"Fallback if the link doesn't work, they paste this invite into PetLink:\n{invite}"
+            f"Fallback if the link doesn't work, they paste this invite into PetLink:\n{invite}\n\n"
+            "Note: once the download link is used, that invite stops working (the downloaded file carries a fresh one)."
         )
         return {"user": user_id, "download": download, "invite": invite, "message": message}
 
