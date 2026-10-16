@@ -556,6 +556,14 @@ impl PetApp {
         self.hearts.burst(x, y, 3, &mut rand::rng());
     }
 
+    /// The friend's pet is drawn in the colour they picked, which the relay doesn't know about.
+    fn adopt_friend_hue(&mut self, hue: Option<u16>) {
+        if let Some(h) = hue.filter(|h| *h != self.friend_hue) {
+            self.friend_hue = h;
+            self.friend_tex = None;
+        }
+    }
+
     fn friend_name(&self) -> String {
         self.friend
             .as_ref()
@@ -756,7 +764,8 @@ impl PetApp {
                         .download_peek(&ctx, &self.config, file_id, from);
                 }
             }
-            Msg::Mail { mail_id, .. } => {
+            Msg::Mail { mail_id, hue, .. } => {
+                self.adopt_friend_hue(hue);
                 let door = self.world.door_x;
                 if add_parcel(&mut self.parcels, env, door) {
                     self.play(Sound::Chime);
@@ -770,7 +779,8 @@ impl PetApp {
                     |o| !matches!(&o.mail.msg, Msg::Mail { mail_id: m, .. } if *m == mail_id),
                 );
             }
-            Msg::PeekRequest { peek_id } => {
+            Msg::PeekRequest { peek_id, hue } => {
+                self.adopt_friend_hue(hue);
                 tracing::info!(
                     "peek requested (allowed: {}, hidden: {}, pose ready: {})",
                     self.my_peek,
@@ -788,10 +798,7 @@ impl PetApp {
                 }
             }
             Msg::VisitStart { hue, auto } => {
-                if let Some(h) = hue.filter(|h| *h != self.friend_hue) {
-                    self.friend_hue = h;
-                    self.friend_tex = None;
-                }
+                self.adopt_friend_hue(hue);
                 if auto && (self.hidden || self.away || !self.config.wander) {
                     // Busy, away or not wanting visitors: send her straight back.
                     self.send_to_friend(Msg::VisitEnd { declined: true });
@@ -1148,7 +1155,10 @@ impl PetApp {
         tracing::info!("asking {} for a peek", self.friend_name());
         self.peek_from_visit = from_visit;
         self.peek_pending = Some((peek_id.clone(), Instant::now() + Duration::from_secs(30)));
-        self.send_to_friend(Msg::PeekRequest { peek_id });
+        self.send_to_friend(Msg::PeekRequest {
+            peek_id,
+            hue: Some(self.my_hue),
+        });
     }
 
     fn start_visit(&mut self) {
@@ -1230,6 +1240,11 @@ impl PetApp {
                 self.save_config();
                 self.my_hue = h;
                 self.my_tex_dirty = true;
+                if self.my_pet_away && self.peek_pending.is_none() {
+                    // Already at the friend's: tell them the new colour (re-sending is harmless).
+                    let auto = false;
+                    self.send_to_friend(Msg::VisitStart { hue: Some(h), auto });
+                }
             }
             TrayAction::Scale(n) => {
                 self.config.scale = n;
@@ -1394,6 +1409,7 @@ impl PetApp {
                     mail_id: mail_id.clone(),
                     text: String::new(),
                     files: vec![],
+                    hue: Some(self.my_hue),
                 },
             ),
             pending: HashSet::new(),
@@ -1434,6 +1450,7 @@ impl PetApp {
             mail_id: mail_id.clone(),
             text,
             files: refs,
+            hue: Some(self.my_hue),
         };
         tracing::info!("sending letter {mail_id}");
         let can_carry = self.trip == Trip::None && !self.my_pet_hidden();
@@ -2177,6 +2194,7 @@ mod tests {
                 mail_id: id.into(),
                 text: "hi".into(),
                 files: vec![],
+                hue: None,
             },
         )
     }
