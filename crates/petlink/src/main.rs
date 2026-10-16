@@ -5,11 +5,13 @@
 mod app;
 mod config;
 mod files;
+mod fx;
 #[cfg(windows)]
 mod mailui;
 mod net;
 mod pet;
 mod protocol;
+mod social;
 mod sprites;
 #[cfg(windows)]
 mod tray;

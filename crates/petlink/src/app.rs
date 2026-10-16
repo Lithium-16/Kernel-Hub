@@ -2,10 +2,12 @@
 //! the door and the parcels drawn on it.
 
 use crate::config::Config;
+use crate::fx::Hearts;
 use crate::mailui::{self, Compose, MailAction};
 use crate::net::{Net, NetCmd, NetEvent};
-use crate::pet::{Event, Pet, State};
+use crate::pet::{Emote, Event, Pet, State};
 use crate::protocol::{Envelope, FileRef, Msg, Person, PresenceState, TouchKind, new_id};
+use crate::social::Social;
 use crate::sprites::Sprites;
 use crate::tray::{Tray, TrayAction};
 use crate::win;
@@ -29,6 +31,8 @@ const ERRAND_MAX: Duration = Duration::from_secs(30);
 #[derive(Clone)]
 pub struct Tex {
     walk: Vec<TextureHandle>,
+    /// Topmost opaque sprite row of each walk frame (where a parcel on her head sits).
+    walk_top: Vec<u32>,
     idle: TextureHandle,
     sit: TextureHandle,
     sleep: TextureHandle,
@@ -54,6 +58,15 @@ impl Tex {
         };
         Tex {
             walk: s.walk.iter().map(|f| load("walk", f)).collect(),
+            walk_top: s
+                .walk
+                .iter()
+                .map(|f| {
+                    (0..f.height())
+                        .find(|&y| (0..f.width()).any(|x| f.get_pixel(x, y)[3] > 0))
+                        .unwrap_or(0)
+                })
+                .collect(),
             idle: load("idle", &s.idle),
             sit: load("sit", &s.sit),
             sleep: load("sleep", &s.sleep),
@@ -208,6 +221,10 @@ pub struct PetApp {
     friend_tex: Option<Tex>,
     friend_hue: u16,
     visitor: Option<Visitor>,
+    hearts: Hearts,
+    social: Social,
+    /// Debug testing: divides the random waits (PETLINK_FAST).
+    fast: f32,
     jobs: VecDeque<Job>,
     my_pet_away: bool,
     mine_back_at: Option<Instant>,
@@ -246,6 +263,18 @@ fn arrive(parcels: &mut [Parcel], mail_id: &str, x: f32) {
         p.x = x;
         p.arrived = true;
     }
+}
+
+/// Debug builds only: PETLINK_FAST=n shortens the random waits n-fold, for watching.
+fn fast_factor() -> f32 {
+    #[cfg(debug_assertions)]
+    if let Some(k) = std::env::var("PETLINK_FAST")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+    {
+        return k.max(1.0);
+    }
+    1.0
 }
 
 fn world_now(ppp: f32) -> World {
@@ -317,7 +346,11 @@ impl PetApp {
         );
         let my_hue = config.bow_hue.unwrap_or(0);
         let my_tex = Tex::new(&cc.egui_ctx, "me", &Sprites::load(my_hue)?);
-        let mine = Pet::new(world.screen.w * 0.5, world.ground());
+        #[cfg_attr(not(debug_assertions), allow(unused_mut))]
+        let mut mine = Pet::new(world.screen.w * 0.5, world.ground());
+        let fast = fast_factor();
+        #[cfg(debug_assertions)]
+        mine.set_timescale(fast);
         let my_peek = config.peek;
         let mut windows = mailui::Windows::default();
         windows.inbox = data_dir.join("inbox");
@@ -341,6 +374,9 @@ impl PetApp {
             friend_tex: None,
             friend_hue: 0,
             visitor: None,
+            hearts: Hearts::default(),
+            social: Social::new(fast, &mut rand::rng()),
+            fast,
             jobs: VecDeque::new(),
             my_pet_away: false,
             mine_back_at: None,
@@ -413,6 +449,17 @@ impl PetApp {
         if self.bubbles.len() > 3 {
             self.bubbles.remove(0);
         }
+    }
+
+    fn pat_mine(&mut self) {
+        if self.mine.pat() {
+            self.pat_hearts(self.mine.x, self.mine.y);
+        }
+    }
+
+    fn pat_hearts(&mut self, x: f32, y: f32) {
+        let y = y - 50.0 * self.px();
+        self.hearts.burst(x, y, 3, &mut rand::rng());
     }
 
     fn friend_name(&self) -> String {
@@ -607,7 +654,7 @@ impl PetApp {
                     self.jobs.push_back(Job::Deliver(mail_id));
                 }
             }
-            Msg::MailRead { .. } => self.mine.pat(),
+            Msg::MailRead { .. } => self.pat_mine(),
             Msg::Delivered { mail_id } => {
                 self.outgoing.retain(
                     |o| !matches!(&o.mail.msg, Msg::Mail { mail_id: m, .. } if *m == mail_id),
@@ -685,6 +732,10 @@ impl PetApp {
         let mut pet = Pet::new(self.world.door_x, self.world.ground());
         pet.enter_from_door(&self.world);
         pet.set_owner_away(self.friend_away);
+        pet.carry = matches!(job, Job::Deliver(_));
+        #[cfg(debug_assertions)]
+        pet.set_timescale(self.fast);
+        self.social = Social::new(self.fast, &mut rand::rng());
         self.visitor = Some(Visitor {
             pet,
             job,
@@ -744,12 +795,20 @@ impl PetApp {
             v.stage = Stage::Leaving;
             v.pet.exit_to_door();
         }
+        let deliver = matches!(v.job, Job::Deliver(_));
+        // A delivery is done when the parcel is down (or she was knocked about and recovered).
+        let entered = if deliver {
+            ev == Some(Event::Placed) || v.pet.calm()
+        } else {
+            v.pet.state != State::Enter
+        };
         match v.stage {
-            Stage::Entering if v.pet.state != State::Enter => {
+            Stage::Entering if entered => {
                 v.stage = Stage::Working;
                 match v.job.clone() {
                     Job::Deliver(id) => {
                         arrive(&mut self.parcels, &id, v.pet.x);
+                        v.pet.carry = false;
                         v.stage = Stage::Leaving;
                         v.pet.exit_to_door();
                     }
@@ -793,6 +852,27 @@ impl PetApp {
         }
         if let Some(id) = capture {
             self.on_peek_done(id);
+        }
+    }
+
+    /// Both pets on screen during a plain visit: bumps and headpats.
+    fn step_social(&mut self, dt: f32, rng: &mut impl rand::Rng) {
+        let px = self.px();
+        let home = !self.my_pet_hidden();
+        if let Some(v) = &mut self.visitor
+            && home
+            && matches!(v.job, Job::Visit)
+            && v.stage == Stage::Working
+        {
+            self.social.update(
+                dt,
+                &self.world,
+                &mut self.mine,
+                &mut v.pet,
+                px,
+                rng,
+                &mut self.hearts,
+            );
         }
     }
 
@@ -1310,10 +1390,15 @@ impl PetApp {
             return;
         }
         match d.target {
-            Target::Mine => self.mine.pat(),
+            Target::Mine => self.pat_mine(),
             Target::Visitor => {
-                if let Some(v) = &mut self.visitor {
-                    v.pet.pat();
+                let patted = self
+                    .visitor
+                    .as_mut()
+                    .and_then(|v| v.pet.pat().then_some(v))
+                    .map(|v| (v.pet.x, v.pet.y));
+                if let Some((x, y)) = patted {
+                    self.pat_hearts(x, y);
                 }
                 self.send_to_friend(Msg::Touch {
                     what: TouchKind::Pat,
@@ -1402,24 +1487,24 @@ impl PetApp {
 
     // ------------------------------------------------------------------ drawing
 
-    fn draw_pet(&self, ui: &egui::Ui, pet: &Pet, tex: &Tex, carrying: bool) {
+    fn draw_pet(&self, ui: &egui::Ui, pet: &Pet, tex: &Tex) {
         let px = self.px();
         let t = ui.input(|i| i.time) as f32;
-        let (img, walking) = match pet.state {
-            State::Carry => (&tex.carry, false),
-            State::Enter | State::Exit if carrying => (&tex.carry, false),
-            State::Wander { .. } | State::Enter | State::Exit => (&tex.walk[pet.frame % 8], true),
-            State::Sit => (&tex.sit, false),
-            State::Sleep => (&tex.sleep, false),
-            State::Patted => (&tex.pat, false),
-            State::Dizzy => (&tex.fallen, false),
-            _ => (&tex.idle, false),
+        let walk = &tex.walk[pet.frame % 8];
+        let img = match pet.state {
+            _ if pet.carry_posing() => &tex.carry,
+            State::Carry | State::Wander { .. } | State::Approach { .. } => walk,
+            State::Enter | State::Exit => walk,
+            State::Sit => &tex.sit,
+            State::Sleep => &tex.sleep,
+            State::Patted | State::Blush | State::HeadPatted => &tex.pat,
+            State::Dizzy => &tex.fallen,
+            _ => &tex.idle,
         };
-        let _ = walking;
         let (w, h) = (32.0 * px, 48.0 * px);
         let mut bob = 0.0;
         match pet.state {
-            State::Patted => bob = -(t * 12.0).sin().abs() * 6.0 * px,
+            State::Patted | State::HeadPatted => bob = -(t * 12.0).sin().abs() * 6.0 * px,
             State::Idle => bob = if (t * 2.5).sin() > 0.0 { -px } else { 0.0 },
             _ => {}
         }
@@ -1435,6 +1520,15 @@ impl PetApp {
             image = image.rotate(pet.angle, Vec2::splat(0.5));
         }
         image.paint_at(ui, rect);
+        // A parcel carried on her head while she walks.
+        if pet.carry && !pet.carry_posing() && matches!(pet.state, State::Carry | State::Enter) {
+            let top = pet.y - h + bob + tex.walk_top[pet.frame % 8] as f32 * px;
+            let (pw, ph) = (15.0 * px, 12.0 * px);
+            let r =
+                egui::Rect::from_min_size(Pos2::new(pet.x - pw / 2.0, top - ph), Vec2::new(pw, ph));
+            let pt = &tex.parcel;
+            egui::Image::new((pt.id(), pt.size_vec2())).paint_at(ui, r);
+        }
         let p = ui.painter();
         let head = Pos2::new(pet.x, pet.y - 40.0 * px);
         match pet.state {
@@ -1447,21 +1541,6 @@ impl PetApp {
                     FontId::proportional(14.0),
                     Color32::from_white_alpha(((1.0 - rise / 30.0) * 255.0) as u8),
                 );
-            }
-            State::Patted => {
-                let c = Pos2::new(pet.x, pet.y - h - 10.0 + bob);
-                let red = Color32::from_rgb(230, 50, 70);
-                p.circle_filled(c + Vec2::new(-3.5, 0.0), 4.5, red);
-                p.circle_filled(c + Vec2::new(3.5, 0.0), 4.5, red);
-                p.add(egui::Shape::convex_polygon(
-                    vec![
-                        c + Vec2::new(-7.5, 1.5),
-                        c + Vec2::new(7.5, 1.5),
-                        c + Vec2::new(0.0, 10.0),
-                    ],
-                    red,
-                    Stroke::NONE,
-                ));
             }
             State::Dizzy => {
                 for k in 0..3 {
@@ -1488,6 +1567,85 @@ impl PetApp {
                 );
             }
             _ => {}
+        }
+    }
+
+    /// A speech bubble above her head with a small pixel glyph in it.
+    fn draw_emote(&self, ui: &egui::Ui, pet: &Pet) {
+        let Some((emote, left)) = pet.emote else {
+            return;
+        };
+        let px = self.px();
+        let glyph: &[&str] = match emote {
+            Emote::Note => &["..XX.", "..X.X", "..X..", "..X..", "XXX..", "XXX.."],
+            Emote::Dots => &[".....", ".....", ".....", ".....", ".....", "X.X.X"],
+            Emote::Question => &[".XXX.", "X...X", "...X.", "..X..", ".....", "..X.."],
+            Emote::Bang => &["..X..", "..X..", "..X..", "..X..", ".....", "..X.."],
+            Emote::Heart => &[".....", ".X.X.", "XXXXX", ".XXX.", "..X..", "....."],
+        };
+        let alpha = (left / 0.3).min(1.0); // fade out at the end
+        let a = |c: Color32| c.gamma_multiply(alpha);
+        let (cols, rows) = (5.0, glyph.len() as f32);
+        let (bw, bh) = ((cols + 4.0) * px, (rows + 4.0) * px);
+        let tail = 3.0 * px;
+        let bottom = pet.y - 48.0 * px - tail - 2.0 * px;
+        let r =
+            egui::Rect::from_min_size(Pos2::new(pet.x - bw / 2.0, bottom - bh), Vec2::new(bw, bh));
+        let p = ui.painter();
+        let dark = a(Color32::from_rgb(30, 30, 40));
+        let white = a(Color32::WHITE);
+        let stroke = Stroke::new((px * 0.5).max(1.0), dark);
+        p.add(egui::Shape::convex_polygon(
+            vec![
+                Pos2::new(pet.x - 2.0 * px, r.bottom() - 1.0),
+                Pos2::new(pet.x + 2.0 * px, r.bottom() - 1.0),
+                Pos2::new(pet.x, r.bottom() + tail),
+            ],
+            white,
+            stroke,
+        ));
+        p.rect_filled(r, 2.0 * px, white);
+        p.rect_stroke(r, 2.0 * px, stroke, egui::StrokeKind::Inside);
+        // cover the outline where the tail joins the bubble
+        p.line_segment(
+            [
+                Pos2::new(pet.x - 2.0 * px + 1.0, r.bottom()),
+                Pos2::new(pet.x + 2.0 * px - 1.0, r.bottom()),
+            ],
+            Stroke::new(stroke.width + 1.0, white),
+        );
+        let ink = if emote == Emote::Heart {
+            a(Color32::from_rgb(230, 50, 70))
+        } else {
+            dark
+        };
+        for (y, row) in glyph.iter().enumerate() {
+            for (x, c) in row.chars().enumerate() {
+                if c == 'X' {
+                    let o = Pos2::new(
+                        r.left() + (2.0 + x as f32) * px,
+                        r.top() + (2.0 + y as f32) * px,
+                    );
+                    p.rect_filled(egui::Rect::from_min_size(o, Vec2::splat(px)), 0.0, ink);
+                }
+            }
+        }
+    }
+
+    fn draw_hearts(&self, ui: &egui::Ui) {
+        const HEART: [&str; 4] = [".X.X.", "XXXXX", ".XXX.", "..X.."];
+        let px = self.px();
+        let p = ui.painter();
+        for (x, y, alpha) in self.hearts.visible() {
+            let c = Color32::from_rgb(230, 50, 70).gamma_multiply(alpha);
+            for (ry, row) in HEART.iter().enumerate() {
+                for (rx, ch) in row.chars().enumerate() {
+                    if ch == 'X' {
+                        let o = Pos2::new(x + (rx as f32 - 2.5) * px, y + ry as f32 * px);
+                        p.rect_filled(egui::Rect::from_min_size(o, Vec2::splat(px)), 0.0, c);
+                    }
+                }
+            }
         }
     }
 
@@ -1529,11 +1687,14 @@ impl PetApp {
             let _ = px;
         }
         if !self.my_pet_hidden() {
-            self.draw_pet(ui, &self.mine, &self.my_tex, false);
+            self.draw_pet(ui, &self.mine, &self.my_tex);
+            self.draw_emote(ui, &self.mine);
         }
         if let (Some(v), Some(tex)) = (&self.visitor, &self.friend_tex) {
-            self.draw_pet(ui, &v.pet, tex, matches!(v.job, Job::Deliver(_)));
+            self.draw_pet(ui, &v.pet, tex);
+            self.draw_emote(ui, &v.pet);
         }
+        self.draw_hearts(ui);
         for o in self.outgoing.iter().filter(|o| !o.failed.is_empty()) {
             let r = to_egui(self.parcel_rect(self.failed_x(&o.mail)));
             let t = &self.my_tex.parcel;
@@ -1613,8 +1774,18 @@ impl eframe::App for PetApp {
         }
         self.pump_jobs();
         self.pump_outgoing();
+        let cur = (!self.hidden).then(|| {
+            let c = self.cursor_pt();
+            (c.x, c.y)
+        });
+        self.mine.cursor = cur;
+        if let Some(v) = &mut self.visitor {
+            v.pet.cursor = cur;
+        }
         self.step_mine(dt, &mut rng);
         self.step_visitor(dt, &mut rng);
+        self.step_social(dt, &mut rng);
+        self.hearts.update(dt);
         self.bubbles
             .retain(|(_, t)| t.elapsed() < Duration::from_secs(BUBBLE_S));
 
