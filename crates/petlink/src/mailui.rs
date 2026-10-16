@@ -183,13 +183,9 @@ fn spawn_download(
         };
         if let (Ok(bytes), Some(p)) = (&result, &cache)
             && !p.exists()
+            && let Err(e) = crate::files::atomic_write(p, bytes)
         {
-            if let Some(dir) = p.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            if let Err(e) = std::fs::write(p, bytes) {
-                tracing::warn!("couldn't keep {}: {e}", p.display());
-            }
+            tracing::warn!("couldn't keep {}: {e}", p.display());
         }
         let image = result.as_ref().ok().and_then(|b| decode_image(b));
         let _ = tx.send(Done {

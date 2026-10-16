@@ -55,7 +55,7 @@ impl Config {
 
     pub fn save(&self, dir: &Path) -> anyhow::Result<()> {
         std::fs::create_dir_all(dir)?;
-        std::fs::write(dir.join("config.toml"), toml::to_string(self)?)?;
+        crate::files::atomic_write(&dir.join("config.toml"), toml::to_string(self)?.as_bytes())?;
         Ok(())
     }
 

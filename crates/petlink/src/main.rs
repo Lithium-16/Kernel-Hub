@@ -6,6 +6,7 @@ mod app;
 mod config;
 mod files;
 mod fx;
+mod install;
 #[cfg(windows)]
 mod mailui;
 mod net;
@@ -42,6 +43,21 @@ fn main() -> anyhow::Result<()> {
     let dir = config::Config::dir();
     std::fs::create_dir_all(dir.join("logs"))?;
     let _guard = init_logging(&dir.join("logs"));
+    let args: Vec<String> = std::env::args().collect();
+    let welcome = args.iter().any(|a| a == "--installed");
+    if let Some(dest) = install::install_exe()
+        && install::should_install(
+            &std::env::current_exe()?,
+            &dest,
+            std::env::var_os("PETLINK_DIR").is_some(),
+            args.iter().any(|a| a == "--no-install"),
+        )
+    {
+        match install::run(&dir, &instance_name(&dir)) {
+            Ok(()) => return Ok(()),
+            Err(e) => tracing::error!("install failed, running from here: {e:#}"),
+        }
+    }
     update::cleanup_old();
     win::set_dpi_aware();
     // After an update the old copy may still be exiting: give it up to 5 s.
@@ -57,19 +73,25 @@ fn main() -> anyhow::Result<()> {
     }
     let config = match config::Config::load(&dir)? {
         Some(c) => c,
-        None => match mailui::ask_for_invite()? {
+        None => match install::own_invite() {
             Some(c) => {
                 c.save(&dir)?;
-                // winit allows one event loop per process: start over as a fresh process.
-                std::process::Command::new(std::env::current_exe()?).spawn()?;
-                return Ok(());
+                c
             }
-            None => return Ok(()),
+            None => match mailui::ask_for_invite()? {
+                Some(c) => {
+                    c.save(&dir)?;
+                    // winit allows one event loop per process: start over as a fresh process.
+                    std::process::Command::new(std::env::current_exe()?).spawn()?;
+                    return Ok(());
+                }
+                None => return Ok(()),
+            },
         },
     };
     update::spawn_checker();
     tracing::info!("PetLink {} starting", env!("CARGO_PKG_VERSION"));
-    app::run(config, dir).map_err(|e| anyhow::anyhow!("{e}"))
+    app::run(config, dir, welcome).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 /// One copy per config folder (so two test clients can run side by side).

@@ -19,6 +19,7 @@ pub enum TrayAction {
     Scale(u8),
     Autostart,
     CheckUpdates,
+    Uninstall,
     Quit,
 }
 
@@ -88,12 +89,14 @@ impl Tray {
         let autostart =
             CheckMenuItem::new("Start with Windows", true, win::autostart_enabled(), None);
         let update = MenuItem::new("Check for updates", true, None);
+        let uninstall = MenuItem::new("Uninstall PetLink…", true, None);
         let quit = MenuItem::new("Quit", true, None);
         add(letter.id(), TrayAction::WriteLetter);
         add(peek.id(), TrayAction::TogglePeek);
         add(visit.id(), TrayAction::Visit);
         add(autostart.id(), TrayAction::Autostart);
         add(update.id(), TrayAction::CheckUpdates);
+        add(uninstall.id(), TrayAction::Uninstall);
         add(quit.id(), TrayAction::Quit);
         let menu = Menu::new();
         menu.append_items(&[
@@ -105,6 +108,7 @@ impl Tray {
             &sizes,
             &autostart,
             &update,
+            &uninstall,
             &PredefinedMenuItem::separator(),
             &quit,
         ])?;
