@@ -328,6 +328,7 @@ mod tests {
                 "openfork",
                 "party",
                 "pc-monitor",
+                "petlink",
                 "roblox",
                 "vram"
             ]

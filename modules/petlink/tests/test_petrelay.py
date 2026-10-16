@@ -180,3 +180,13 @@ async def test_interrupted_download_keeps_the_file(env, monkeypatch):
     monkeypatch.setattr(env["relay"], "_stream_file", original)
     r = await c.get("/files/f_keepme001", headers={"Authorization": f"Bearer {env['tb']}"})
     assert r.status == 200 and len(await r.read()) == 200_000
+
+
+async def test_odd_payloads_are_refused_not_crashed(env):
+    ws = await env["client"].ws_connect("/ws")
+    await ws.send_json([])  # valid JSON, not an object
+    await ws.receive()
+    assert ws.close_code == 4401
+    wa, _ = await login(env["client"], env["ta"])
+    await wa.send_json(msg("mail", to=env["b"].id, files=["not-a-dict"]))
+    assert (await recv(wa, "error"))["code"] == "bad_mail"

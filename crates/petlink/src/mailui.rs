@@ -12,6 +12,8 @@ use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 pub const MAX_FILE: u64 = 100 * 1024 * 1024;
+/// Longest side of a picture we turn into a texture (GPUs refuse much more than this).
+const MAX_SIDE: u32 = 4096;
 
 /// A tiny window asking for the invite; `None` if it was closed without one.
 pub fn ask_for_invite() -> anyhow::Result<Option<Config>> {
@@ -82,6 +84,8 @@ fn file_name(p: &std::path::Path) -> String {
 
 pub struct Reading {
     pub mail: Envelope,
+    /// Where this letter's downloads are kept until the letter is closed.
+    pub dir: PathBuf,
     pub from: String,
     pub images: HashMap<String, TextureHandle>,
     pub bytes: HashMap<String, Vec<u8>>,
@@ -99,6 +103,8 @@ pub enum MailAction {
 pub struct Done {
     pub file_id: String,
     pub result: Result<Vec<u8>, String>,
+    /// The picture, if it is one, already decoded (and shrunk) off the UI thread.
+    pub image: Option<egui::ColorImage>,
 }
 
 pub struct Windows {
@@ -109,6 +115,10 @@ pub struct Windows {
     rx: Receiver<Done>,
     /// A peek picture on its way: (file id, who from).
     pub peek_wait: Option<(String, String)>,
+    /// Received downloads live here (inbox/<mail_id>/<file_id>) until the letter is closed.
+    pub inbox: PathBuf,
+    /// Letters whose window was just closed: the app can forget their parcels.
+    pub closed: Vec<String>,
     /// Debug test hook: save every file as soon as it is down.
     pub autosave: bool,
 }
@@ -132,37 +142,75 @@ impl Default for Windows {
             tx,
             rx,
             peek_wait: None,
+            inbox: PathBuf::new(),
+            closed: Vec::new(),
             autosave: false,
         }
     }
 }
 
-/// Fetches a file on a background thread and reports on the channel.
-fn spawn_download(config: &Config, ctx: &egui::Context, file_id: String, tx: Sender<Done>) {
+/// A name made of letters, digits, `-` and `_` only: ids from the friend become path parts.
+fn path_part(s: &str) -> String {
+    let p: String = s
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    if p.is_empty() { "_".into() } else { p }
+}
+
+/// Fetches a file on a background thread and reports on the channel. With `cache`, a file
+/// already on disk is used instead of downloading, and a fresh download is kept there.
+fn spawn_download(
+    config: &Config,
+    ctx: &egui::Context,
+    file_id: String,
+    tx: Sender<Done>,
+    cache: Option<PathBuf>,
+) {
     let (config, ctx) = (config.clone(), ctx.clone());
     std::thread::spawn(move || {
-        let result = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())
-            .and_then(|rt| {
-                rt.block_on(net::download(&config, &file_id))
-                    .map_err(|e| format!("{e:#}"))
-            });
-        let _ = tx.send(Done { file_id, result });
+        let cached = cache.as_ref().and_then(|p| std::fs::read(p).ok());
+        let result = match cached {
+            Some(bytes) => Ok(bytes),
+            None => tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())
+                .and_then(|rt| {
+                    rt.block_on(net::download(&config, &file_id))
+                        .map_err(|e| format!("{e:#}"))
+                }),
+        };
+        if let (Ok(bytes), Some(p)) = (&result, &cache)
+            && !p.exists()
+        {
+            if let Some(dir) = p.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            if let Err(e) = std::fs::write(p, bytes) {
+                tracing::warn!("couldn't keep {}: {e}", p.display());
+            }
+        }
+        let image = result.as_ref().ok().and_then(|b| decode_image(b));
+        let _ = tx.send(Done {
+            file_id,
+            result,
+            image,
+        });
         ctx.request_repaint();
     });
 }
 
-fn load_image(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<TextureHandle> {
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
-    Some(ctx.load_texture(
-        name,
-        egui::ColorImage::from_rgba_unmultiplied(
-            [img.width() as usize, img.height() as usize],
-            img.as_raw(),
-        ),
-        TextureOptions::LINEAR,
+/// Decodes a picture and shrinks it to at most `MAX_SIDE` on its longest side.
+pub fn decode_image(bytes: &[u8]) -> Option<egui::ColorImage> {
+    let mut img = image::load_from_memory(bytes).ok()?;
+    if img.width().max(img.height()) > MAX_SIDE {
+        img = img.resize(MAX_SIDE, MAX_SIDE, image::imageops::FilterType::Triangle);
+    }
+    let img = img.to_rgba8();
+    Some(egui::ColorImage::from_rgba_unmultiplied(
+        [img.width() as usize, img.height() as usize],
+        img.as_raw(),
     ))
 }
 
@@ -182,11 +230,17 @@ impl Windows {
             Msg::Mail { files, .. } => files.clone(),
             _ => return,
         };
+        let Msg::Mail { mail_id, .. } = &mail.msg else {
+            return;
+        };
+        let dir = self.inbox.join(path_part(mail_id));
         let loading = files.iter().map(|f| f.file_id.clone()).collect();
         for f in &files {
-            spawn_download(config, ctx, f.file_id.clone(), self.tx.clone());
+            let cache = dir.join(path_part(&f.file_id));
+            spawn_download(config, ctx, f.file_id.clone(), self.tx.clone(), Some(cache));
         }
         self.reading.push(Reading {
+            dir,
             mail,
             from,
             images: HashMap::new(),
@@ -205,11 +259,11 @@ impl Windows {
         file_id: String,
         from: String,
     ) {
-        spawn_download(config, ctx, file_id.clone(), self.tx.clone());
+        spawn_download(config, ctx, file_id.clone(), self.tx.clone(), None);
         self.peek_wait = Some((file_id, from));
     }
 
-    fn on_done(&mut self, ctx: &egui::Context, d: Done) {
+    fn on_done(&mut self, ctx: &egui::Context, mut d: Done) {
         if self
             .peek_wait
             .as_ref()
@@ -217,8 +271,9 @@ impl Windows {
         {
             let (_, from) = self.peek_wait.take().unwrap_or_default();
             match d.result {
-                Ok(bytes) => match load_image(ctx, "peek", &bytes) {
-                    Some(texture) => {
+                Ok(bytes) => match d.image {
+                    Some(img) => {
+                        let texture = ctx.load_texture("peek", img, TextureOptions::LINEAR);
                         tracing::info!("peek picture received ({} bytes)", bytes.len());
                         self.lens = Some(Lens {
                             texture,
@@ -243,7 +298,8 @@ impl Windows {
             match &d.result {
                 Ok(bytes) => {
                     tracing::info!("downloaded {} ({} bytes)", d.file_id, bytes.len());
-                    if let Some(tex) = load_image(ctx, &d.file_id, bytes) {
+                    if let Some(img) = d.image.take() {
+                        let tex = ctx.load_texture(&d.file_id, img, TextureOptions::LINEAR);
                         r.images.insert(d.file_id.clone(), tex);
                     }
                     r.bytes.insert(d.file_id.clone(), bytes.clone());
@@ -335,6 +391,7 @@ impl Windows {
             }
         }
         let tx = self.tx.clone();
+        let closed = &mut self.closed;
         self.reading.retain_mut(|r| {
             let Msg::Mail {
                 mail_id,
@@ -368,6 +425,11 @@ impl Windows {
                     });
                 },
             );
+            if !keep {
+                // Closing the letter is the user letting go of it: forget its downloads too.
+                let _ = std::fs::remove_dir_all(&r.dir);
+                closed.push(mail_id);
+            }
             keep
         });
         self.show_lens(ctx, config);
@@ -421,7 +483,8 @@ fn show_file(ui: &mut egui::Ui, r: &mut Reading, f: &FileRef, config: &Config, t
             if ui.button("Retry").clicked() {
                 r.status.remove(&f.file_id);
                 r.loading.push(f.file_id.clone());
-                spawn_download(config, ui.ctx(), f.file_id.clone(), tx.clone());
+                let cache = r.dir.join(path_part(&f.file_id));
+                spawn_download(config, ui.ctx(), f.file_id.clone(), tx.clone(), Some(cache));
             }
         }
     });
@@ -517,5 +580,34 @@ impl Windows {
         if close {
             self.lens = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::new(w, h)
+            .write_to(&mut out, image::ImageFormat::Png)
+            .unwrap();
+        out.into_inner()
+    }
+
+    #[test]
+    fn big_pictures_are_shrunk_and_small_ones_are_not() {
+        let big = decode_image(&png(9000, 300)).unwrap();
+        assert_eq!(big.size[0], MAX_SIDE as usize);
+        assert!(big.size[1] < 300);
+        assert_eq!(decode_image(&png(40, 30)).unwrap().size, [40, 30]);
+        assert!(decode_image(b"not a picture").is_none());
+    }
+
+    #[test]
+    fn ids_from_a_friend_cannot_climb_out_of_the_inbox() {
+        assert_eq!(path_part("..\\..\\x/y"), "xy");
+        assert_eq!(path_part(".."), "_");
+        assert_eq!(path_part("f_01J-9"), "f_01J-9");
     }
 }

@@ -18,6 +18,9 @@ pub struct Config {
     /// Overrides how my own pet's bow looks here (friends see the hue the relay has).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bow_hue: Option<u16>,
+    /// "Let <friend> peek": the source of truth for the toggle (the relay only mirrors it).
+    #[serde(default)]
+    pub peek: bool,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +72,7 @@ impl Config {
             token: i.token,
             scale: default_scale(),
             bow_hue: None,
+            peek: false,
         })
     }
 
@@ -103,7 +107,22 @@ mod tests {
             token: "t".into(),
             scale: 2,
             bow_hue: None,
+            peek: false,
         };
         assert_eq!(local.files_url(), "http://127.0.0.1:8098/files");
+    }
+
+    #[test]
+    fn peek_is_off_by_default_and_the_local_choice_is_kept() {
+        let old = "relay_url = \"ws://x/ws\"
+token = \"t\"
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.toml"), old).unwrap();
+        let mut c = Config::load(dir.path()).unwrap().unwrap();
+        assert!(!c.peek);
+        c.peek = true;
+        c.save(dir.path()).unwrap();
+        assert!(Config::load(dir.path()).unwrap().unwrap().peek);
     }
 }

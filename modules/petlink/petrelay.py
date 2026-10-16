@@ -110,7 +110,8 @@ class Relay:
         except (TimeoutError, ValueError, TypeError):
             await ws.close(code=CLOSE_AUTH)
             return ws
-        user = self.store.auth(str(first.get("token", ""))) if first.get("kind") == "hello" else None
+        hello = isinstance(first, dict) and first.get("kind") == "hello"
+        user = self.store.auth(str(first.get("token", ""))) if hello else None
         if user is None:
             await ws.close(code=CLOSE_AUTH)
             return ws
@@ -189,23 +190,23 @@ class Relay:
         if kind == "peek.request" and not self.store.user(to).peek:
             await self._send(user.id, self._envelope("peek.result", user.id, to, peek_id=data.get("peek_id"), file_id="", denied=True))
             return
-        if kind == "visit.start":
-            self.visits[user.id] = to
-        elif kind == "visit.end":
+        if kind == "visit.end":
             self.visits.pop(user.id, None)
             if self.visits.get(to) == user.id:
                 del self.visits[to]
         if not await self._send(to, data):
             await self._error(user.id, "offline", "your friend is offline", ref)
+        elif kind == "visit.start":
+            self.visits[user.id] = to
 
     async def _mail(self, user: User, to: str, data: dict[str, Any], ref: str) -> None:
         mail_id = str(data.get("mail_id", ""))
         files = data.get("files") or []
-        if not mail_id or not isinstance(files, list):
+        if not mail_id or not isinstance(files, list) or not all(isinstance(f, dict) for f in files):
             await self._error(user.id, "bad_mail", "mail needs a mail_id", ref)
             return
         for f in files:
-            row = self.store.file(str((f or {}).get("file_id", "")))
+            row = self.store.file(str(f.get("file_id", "")))
             if row is None or row.owner != user.id or row.to != to:
                 await self._error(user.id, "bad_file", "a file in this mail wasn't uploaded for this friend", ref)
                 return
@@ -246,14 +247,18 @@ class Relay:
             return web.Response(status=507)
         path = self.files_dir / file_id
         written = 0
-        with path.open("wb") as out:
-            async for chunk in request.content.iter_chunked(CHUNK):
-                written += len(chunk)
-                if written > self.max_file:
-                    out.close()
-                    path.unlink(missing_ok=True)
-                    return web.Response(status=413)
-                out.write(chunk)
+        try:
+            with path.open("wb") as out:
+                async for chunk in request.content.iter_chunked(CHUNK):
+                    written += len(chunk)
+                    if written > self.max_file:
+                        out.close()
+                        path.unlink(missing_ok=True)
+                        return web.Response(status=413)
+                    out.write(chunk)
+        except BaseException:  # the client dropped mid-PUT: no orphan file
+            path.unlink(missing_ok=True)
+            raise
         self.store.add_file(file_id, user.id, to, name[:200], written, path)
         self.uploaded[user.id].append((self.clock(), written))
         return web.Response(status=201)

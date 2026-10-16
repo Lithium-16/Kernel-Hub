@@ -75,12 +75,21 @@ impl Pet {
     pub fn pat(&mut self) {
         if !matches!(
             self.state,
-            State::Held | State::Thrown | State::Fall | State::Carry | State::Exit | State::Enter
+            State::Held
+                | State::Thrown
+                | State::Fall
+                | State::Carry
+                | State::Exit
+                | State::Enter
+                | State::Peek
         ) {
             self.set(State::Patted);
         }
     }
     pub fn grab(&mut self) {
+        if self.state == State::Peek {
+            return; // the pose must finish: the friend is waiting on its PeekDone
+        }
         self.set(State::Held);
         self.vx = 0.0;
         self.vy = 0.0;
@@ -292,6 +301,17 @@ mod tests {
         (0..(secs * 60.0) as usize)
             .filter_map(|_| p.step(1.0 / 60.0, w, &mut rng))
             .collect()
+    }
+
+    #[test]
+    fn pat_and_grab_cannot_interrupt_the_peek_pose() {
+        let w = world(&[]);
+        let mut p = Pet::new(500.0, w.ground());
+        p.peek();
+        p.pat();
+        p.grab();
+        assert_eq!(p.state, State::Peek);
+        assert_eq!(run(&mut p, &w, 3.0), vec![Event::PeekDone]);
     }
 
     #[test]

@@ -9,12 +9,22 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 
 pub enum NetEvent {
-    Connected { me: Person, friends: Vec<Person> },
+    Connected {
+        me: Person,
+        friends: Vec<Person>,
+    },
     Disconnected,
     Message(Envelope),
     Upgrade,
-    Uploaded { file_id: String },
-    UploadFailed { file_id: String, error: String },
+    /// Another login with the same token took over; this client stays quiet.
+    Replaced,
+    Uploaded {
+        file_id: String,
+    },
+    UploadFailed {
+        file_id: String,
+        error: String,
+    },
 }
 
 pub enum NetCmd {
@@ -96,8 +106,15 @@ impl Outbox {
     }
 }
 
+fn client() -> anyhow::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .read_timeout(Duration::from_secs(60))
+        .build()?)
+}
+
 pub async fn download(config: &Config, file_id: &str) -> anyhow::Result<Vec<u8>> {
-    let r = reqwest::Client::new()
+    let r = client()?
         .get(format!("{}/{file_id}", config.files_url()))
         .bearer_auth(&config.token)
         .send()
@@ -113,7 +130,7 @@ async fn upload(
     name: &str,
     bytes: Vec<u8>,
 ) -> anyhow::Result<()> {
-    reqwest::Client::new()
+    client()?
         .put(format!("{}/{file_id}", config.files_url()))
         .query(&[("to", to), ("name", name)])
         .bearer_auth(&config.token)
@@ -157,6 +174,39 @@ impl Net {
 }
 
 type Wake = std::sync::Arc<dyn Fn() + Send + Sync>;
+type Emit = std::sync::Arc<dyn Fn(NetEvent) + Send + Sync>;
+
+/// Uploads run on their own task, not inside a relay session: whatever happens to the
+/// connection, each one ends in exactly one `Uploaded` or `UploadFailed`.
+fn spawn_upload(
+    config: &Config,
+    emit: &Emit,
+    file_id: String,
+    to: String,
+    name: String,
+    bytes: Vec<u8>,
+) {
+    let (config, emit) = (config.clone(), emit.clone());
+    tokio::spawn(async move {
+        emit(match upload(&config, &file_id, &to, &name, bytes).await {
+            Ok(()) => NetEvent::Uploaded { file_id },
+            Err(e) => NetEvent::UploadFailed {
+                file_id,
+                error: format!("{e:#}"),
+            },
+        });
+    });
+}
+
+/// What a relay close code means for this client.
+fn stop_for_close(code: u16) -> anyhow::Result<Stop> {
+    match code {
+        4426 => Ok(Stop::Upgrade),
+        4409 => Ok(Stop::Replaced),
+        4401 => anyhow::bail!("the relay refused the token"),
+        _ => Ok(Stop::Lost),
+    }
+}
 
 async fn run(
     config: Config,
@@ -165,10 +215,10 @@ async fn run(
     events: std::sync::mpsc::Sender<NetEvent>,
     wake: Wake,
 ) {
-    let emit = |e: NetEvent| {
+    let emit: Emit = std::sync::Arc::new(move |e: NetEvent| {
         let _ = events.send(e);
         wake();
-    };
+    });
     let mut outbox = Outbox::open(data_dir.join("outbox.json"));
     let mut attempt = 0u32;
     loop {
@@ -176,6 +226,10 @@ async fn run(
             Ok(Stop::Shutdown) => return,
             Ok(Stop::Upgrade) => {
                 emit(NetEvent::Upgrade);
+                return;
+            }
+            Ok(Stop::Replaced) => {
+                emit(NetEvent::Replaced);
                 return;
             }
             Ok(Stop::Lost) => {}
@@ -193,7 +247,7 @@ async fn run(
                 cmd = cmds.recv() => match cmd {
                     None | Some(NetCmd::Shutdown) => return,
                     Some(NetCmd::Send(e)) => outbox.push(e),
-                    Some(NetCmd::Upload { file_id, .. }) => emit(NetEvent::UploadFailed { file_id, error: "offline".into() }),
+                    Some(NetCmd::Upload { file_id, to, name, bytes }) => spawn_upload(&config, &emit, file_id, to, name, bytes),
                 },
             }
         }
@@ -204,12 +258,13 @@ enum Stop {
     Shutdown,
     Lost,
     Upgrade,
+    Replaced,
 }
 
 async fn session(
     config: &Config,
     cmds: &mut UnboundedReceiver<NetCmd>,
-    emit: &impl Fn(NetEvent),
+    emit: &Emit,
     outbox: &mut Outbox,
     attempt: &mut u32,
 ) -> anyhow::Result<Stop> {
@@ -224,15 +279,13 @@ async fn session(
     );
     tx.send(WsMessage::text(serde_json::to_string(&hello)?))
         .await?;
-    let mut uploads = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
             frame = rx.next() => {
                 let Some(frame) = frame else { return Ok(Stop::Lost) };
                 let text = match frame? {
                     WsMessage::Text(t) => t,
-                    WsMessage::Close(Some(c)) if u16::from(c.code) == 4426 => return Ok(Stop::Upgrade),
-                    WsMessage::Close(Some(c)) if u16::from(c.code) == 4401 => anyhow::bail!("the relay refused the token"),
+                    WsMessage::Close(Some(c)) => return stop_for_close(u16::from(c.code)),
                     WsMessage::Close(_) => return Ok(Stop::Lost),
                     _ => continue,
                 };
@@ -260,22 +313,8 @@ async fn session(
                     outbox.push(e.clone());
                     tx.send(WsMessage::text(serde_json::to_string(&e)?)).await?;
                 }
-                Some(NetCmd::Upload { file_id, to, name, bytes }) => {
-                    let config = config.clone();
-                    uploads.spawn(async move {
-                        let r = upload(&config, &file_id, &to, &name, bytes).await;
-                        (file_id, r)
-                    });
-                }
+                Some(NetCmd::Upload { file_id, to, name, bytes }) => spawn_upload(config, emit, file_id, to, name, bytes),
             },
-            Some(done) = uploads.join_next(), if !uploads.is_empty() => {
-                if let Ok((file_id, r)) = done {
-                    emit(match r {
-                        Ok(()) => NetEvent::Uploaded { file_id },
-                        Err(e) => NetEvent::UploadFailed { file_id, error: format!("{e:#}") },
-                    });
-                }
-            }
         }
     }
 }
@@ -306,6 +345,51 @@ mod tests {
                 files: vec![],
             },
         )
+    }
+
+    #[test]
+    fn close_codes_decide_whether_to_reconnect() {
+        assert!(matches!(stop_for_close(4409), Ok(Stop::Replaced)));
+        assert!(matches!(stop_for_close(4426), Ok(Stop::Upgrade)));
+        assert!(stop_for_close(4401).is_err());
+        assert!(matches!(stop_for_close(1000), Ok(Stop::Lost)));
+    }
+
+    #[test]
+    fn an_upload_with_no_relay_still_ends_in_upload_failed() {
+        let config = Config {
+            relay_url: "ws://127.0.0.1:9/ws".into(),
+            token: "t".into(),
+            scale: 2,
+            bow_hue: None,
+            peek: false,
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = std::sync::Mutex::new(tx);
+        let emit: Emit = std::sync::Arc::new(move |e| {
+            let _ = tx.lock().unwrap().send(e);
+        });
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            spawn_upload(
+                &config,
+                &emit,
+                "f1".into(),
+                "u".into(),
+                "a.txt".into(),
+                vec![1],
+            );
+            let got = loop {
+                if let Ok(e) = rx.try_recv() {
+                    break e;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            };
+            assert!(matches!(got, NetEvent::UploadFailed { file_id, .. } if file_id == "f1"));
+        });
     }
 
     #[test]
