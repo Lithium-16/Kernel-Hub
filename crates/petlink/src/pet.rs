@@ -10,7 +10,12 @@ const BOUNCE: f32 = 0.45;
 const PAT_S: f32 = 0.6;
 const DIZZY_S: f32 = 1.5;
 const PEEK_S: f32 = 2.0;
-const HALF_W: f32 = 16.0;
+pub const HALF_W: f32 = 16.0;
+/// Running after a treat is quicker than a stroll.
+const CHASE_SPEED: f32 = 110.0;
+/// A little hop in place (how high, and the pause before the next one).
+const HOP_H: f32 = 36.0;
+const HOP_GAP_S: f32 = 0.45;
 const FRAME_S: f32 = 0.1;
 /// Bouncing on landing: an impact faster than the minimum bounces back up by the factor.
 const BOUNCE_MIN_SPEED: f32 = 150.0;
@@ -74,6 +79,12 @@ pub enum State {
     HeadPatted,
     /// Putting the parcel down.
     Place,
+    /// Running after a treat.
+    Chase {
+        to_x: f32,
+    },
+    /// A small hop in place, trying to reach something above her.
+    Hop,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +201,7 @@ pub struct Pet {
     pub cursor: Option<(f32, f32)>,
     pub emote: Option<(Emote, f32)>,
     emote_cd: f32,
+    hop_cd: f32,
     /// The sound this pet wants played (bounce, purr, meow); the app takes it.
     sound: Option<Sound>,
     hover_t: f32,
@@ -218,6 +230,7 @@ impl Pet {
             cursor: None,
             emote: None,
             emote_cd: rand::rng().random_range(EMOTE_MIN_S..EMOTE_MAX_S),
+            hop_cd: 0.0,
             sound: None,
             hover_t: 0.0,
             hold: 0.0,
@@ -334,6 +347,49 @@ impl Pet {
         self.set(State::Approach { to_x });
         self.plan = Plan::Linger { secs, face_x };
     }
+    /// Free to be sent after a treat (not being held, patted, carrying, sleeping...).
+    pub fn free_to_chase(&self) -> bool {
+        matches!(
+            self.state,
+            State::Idle | State::Wander { .. } | State::Sit | State::Chase { .. } | State::Linger
+        )
+    }
+
+    /// Runs towards `to_x`; call it every frame with the latest target.
+    pub fn chase_to(&mut self, to_x: f32) {
+        if let State::Chase { .. } = self.state {
+            self.state = State::Chase { to_x };
+        } else if self.free_to_chase() {
+            self.set(State::Chase { to_x });
+        }
+    }
+
+    pub fn face(&mut self, x: f32) {
+        self.facing_left = x < self.x;
+    }
+
+    /// A small hop in place (at most one every so often).
+    pub fn hop(&mut self) {
+        if self.hop_cd > 0.0 || !self.free_to_chase() {
+            return;
+        }
+        self.vy = -(2.0 * GRAVITY * HOP_H).sqrt();
+        self.vx = 0.0;
+        self.hop_cd = HOP_GAP_S;
+        self.set(State::Hop);
+    }
+
+    #[cfg(test)]
+    pub fn is_hopping(&self) -> bool {
+        self.state == State::Hop
+    }
+
+    /// Happy about the treat she just got.
+    pub fn eat(&mut self) {
+        self.headpatted();
+        self.show_emote(Emote::Heart);
+    }
+
     pub fn release(&mut self) {
         self.set(State::Idle);
     }
@@ -365,9 +421,13 @@ impl Pet {
     }
 
     fn walk_towards(&mut self, to_x: f32, dt: f32) -> bool {
+        self.walk_at(to_x, dt, WALK_SPEED)
+    }
+
+    fn walk_at(&mut self, to_x: f32, dt: f32, speed: f32) -> bool {
         let d = to_x - self.x;
         self.facing_left = d < 0.0;
-        let step = WALK_SPEED * dt;
+        let step = speed * dt;
         self.walk_clock += dt;
         self.frame = (self.walk_clock / FRAME_S) as usize % 8;
         if d.abs() <= step {
@@ -487,11 +547,12 @@ impl Pet {
             self.angle = 0.0;
             self.set(State::Idle);
         }
+        self.hop_cd = (self.hop_cd - dt).max(0.0);
         self.update_emote(dt, rng);
         self.update_hover(dt);
         match self.state {
             State::Held => None,
-            State::Thrown | State::Fall | State::Jump => {
+            State::Thrown | State::Fall | State::Jump | State::Hop => {
                 self.vy += GRAVITY * dt;
                 let old_y = self.y;
                 self.x += self.vx * dt;
@@ -517,7 +578,7 @@ impl Pet {
                 {
                     self.y = f;
                     let impact = self.vy;
-                    if impact > BOUNCE_MIN_SPEED {
+                    if impact > BOUNCE_MIN_SPEED && self.state != State::Hop {
                         let k = if self.state == State::Jump {
                             JUMP_BOUNCE
                         } else {
@@ -557,6 +618,12 @@ impl Pet {
                 self.carry = false;
                 self.set(State::Idle);
                 Some(Event::Placed)
+            }
+            State::Chase { to_x } => {
+                if self.walk_at(to_x, dt, CHASE_SPEED) {
+                    self.set(State::Idle);
+                }
+                None
             }
             State::Approach { to_x } => {
                 if self.walk_towards(to_x, dt) {
