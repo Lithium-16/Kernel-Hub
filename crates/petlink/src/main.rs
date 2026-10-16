@@ -14,6 +14,7 @@ mod net;
 mod pet;
 mod protocol;
 mod social;
+mod sounds;
 mod sprites;
 #[cfg(windows)]
 mod tray;
