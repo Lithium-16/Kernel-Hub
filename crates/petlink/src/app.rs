@@ -363,6 +363,31 @@ fn inside(r: Rect, p: Pos2) -> bool {
     r.contains(p.x, p.y)
 }
 
+/// The grid cells of a line between two cells (Bresenham).
+fn grid_line(a: (i32, i32), b: (i32, i32)) -> Vec<(i32, i32)> {
+    let (mut x, mut y) = a;
+    let (dx, dy) = ((b.0 - a.0).abs(), -(b.1 - a.1).abs());
+    let (sx, sy) = (
+        if a.0 < b.0 { 1 } else { -1 },
+        if a.1 < b.1 { 1 } else { -1 },
+    );
+    let mut err = dx + dy;
+    let mut out = vec![(x, y)];
+    while (x, y) != b {
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y += sy;
+        }
+        out.push((x, y));
+    }
+    out
+}
+
 fn to_egui(r: Rect) -> egui::Rect {
     egui::Rect::from_min_size(Pos2::new(r.x, r.y), Vec2::new(r.w, r.h))
 }
@@ -1761,7 +1786,8 @@ impl PetApp {
         let can = self.can_interact();
         let peek_ok = self.peek_plan() != PeekPlan::No;
         let away = self.my_pet_away;
-        let no_treat = self.objects.items.is_empty();
+        let has = |k: Kind| self.objects.items.iter().any(|o| o.kind == k);
+        let (has_treat, has_yarn) = (has(Kind::Cake), has(Kind::Yarn));
         let resp = egui::Area::new(egui::Id::new("door_menu"))
             .fixed_pos(pos)
             .order(egui::Order::Foreground)
@@ -1773,11 +1799,21 @@ impl PetApp {
                     if ui.add_enabled(peek_ok, egui::Button::new("Peek")).clicked() {
                         action = Some(1);
                     }
-                    if ui
-                        .add_enabled(no_treat, egui::Button::new("Get treat"))
-                        .clicked()
-                    {
+                    let treat = if has_treat {
+                        "Remove treat"
+                    } else {
+                        "Get treat"
+                    };
+                    if ui.button(treat).clicked() {
                         action = Some(3);
+                    }
+                    let yarn = if has_yarn {
+                        "Remove yarn ball"
+                    } else {
+                        "Get yarn"
+                    };
+                    if ui.button(yarn).clicked() {
+                        action = Some(4);
                     }
                     let label = if away { "Call home" } else { "Send to visit" };
                     if ui
@@ -1801,10 +1837,17 @@ impl PetApp {
             Some(0) => self.open_compose(),
             Some(1) => self.start_peek(),
             Some(2) => self.start_visit(),
-            Some(3) => self
-                .objects
-                .items
-                .push(Object::new(Kind::Cake, pos.x + 60.0, pos.y)),
+            Some(n @ (3 | 4)) => {
+                // One button per thing: it fetches it, and once it is out it removes it.
+                let kind = if n == 3 { Kind::Cake } else { Kind::Yarn };
+                if self.objects.items.iter().any(|o| o.kind == kind) {
+                    self.objects.items.retain(|o| o.kind != kind);
+                } else {
+                    self.objects
+                        .items
+                        .push(Object::new(kind, pos.x + 60.0, pos.y));
+                }
+            }
             _ => {}
         }
     }
@@ -2121,11 +2164,25 @@ impl PetApp {
             pets.push(&mut v.pet);
         }
         let at = self.objects.items.first().map(|o| (o.x, o.y));
-        if self.objects.chase(&mut pets, &self.world, dt).is_some() {
+        let ate = self.objects.chase(&mut pets, &self.world, dt).is_some();
+        let yarn_at = self
+            .objects
+            .items
+            .iter()
+            .find(|o| o.kind.toy())
+            .map(|o| (o.x, o.y));
+        let swatted = self.objects.play(&mut pets, &self.world, dt).is_some();
+        if ate {
             if let Some((x, y)) = at {
                 self.hearts.burst(x, y - 20.0 * px, 3, &mut rand::rng());
             }
             self.play(Sound::Munch);
+        }
+        if swatted {
+            if let Some((x, y)) = yarn_at {
+                self.hearts.burst(x, y - 12.0 * px, 2, &mut rand::rng());
+            }
+            self.play(Sound::Boing);
         }
     }
 
@@ -2143,11 +2200,87 @@ impl PetApp {
             ".KBBBBBBBBBBBBK.",
             "..KKKKKKKKKKKK..",
         ];
+        // The yarn ball (k ink, d/m/l shadow/base/light, w winding), drawn turned by its real
+        // angle: every sprite pixel becomes a rotated square, so it spins smoothly.
+        const YARN: [&str; 11] = [
+            "...kkkkk...",
+            "..klllllk..",
+            ".kllwwmmdk.",
+            "kllmmmwmddk",
+            "klwwwwmwwdk",
+            "klmmmmwmddk",
+            "klwwwmmwddk",
+            "klmmmwwdwdk",
+            ".kdddddwdk.",
+            "..kdddddk..",
+            "...kkkkk...",
+        ];
         let px = self.px();
         let p = ui.painter();
         for o in &self.objects.items {
+            if let Some(rope) = &o.rope {
+                // The thread: its points snapped to the pixel grid and joined with 1px lines, in
+                // two alternating reds so it reads as twisted yarn.
+                let g = |(x, y): (f32, f32)| ((x / px).round() as i32, (y / px).round() as i32);
+                let mut n = 0;
+                for pair in rope.points().windows(2) {
+                    for (gx, gy) in grid_line(g(pair[0]), g(pair[1])) {
+                        let c = if (n / 2) % 2 == 0 {
+                            Color32::from_rgb(232, 101, 127)
+                        } else {
+                            Color32::from_rgb(125, 37, 71)
+                        };
+                        let at = Pos2::new(gx as f32 * px, gy as f32 * px);
+                        p.rect_filled(egui::Rect::from_min_size(at, Vec2::splat(px)), 0.0, c);
+                        n += 1;
+                    }
+                }
+            }
+            if o.kind == Kind::Yarn {
+                let n = YARN.len() as f32;
+                let lift = if o.motion == Motion::Held {
+                    -2.0 * px
+                } else {
+                    0.0
+                };
+                let centre = Pos2::new(o.x, o.y - n * px / 2.0 + lift);
+                let (sin, cos) = o.angle.sin_cos();
+                let h = px * 0.53; // a hair over half, so neighbouring squares leave no seams
+                for (ry, row) in YARN.iter().enumerate() {
+                    for (rx, ch) in row.chars().enumerate() {
+                        let c = match ch {
+                            'k' => Color32::from_rgb(42, 26, 46),
+                            'd' => Color32::from_rgb(168, 58, 99),
+                            'm' => Color32::from_rgb(232, 101, 127),
+                            'l' => Color32::from_rgb(255, 163, 181),
+                            'w' => Color32::from_rgb(125, 37, 71),
+                            _ => continue,
+                        };
+                        let (lx, ly) = (
+                            (rx as f32 + 0.5 - n / 2.0) * px,
+                            (ry as f32 + 0.5 - n / 2.0) * px,
+                        );
+                        let mid = centre + Vec2::new(lx * cos - ly * sin, lx * sin + ly * cos);
+                        let corner = |sx: f32, sy: f32| {
+                            mid + Vec2::new((sx * cos - sy * sin) * h, (sx * sin + sy * cos) * h)
+                        };
+                        p.add(egui::Shape::convex_polygon(
+                            vec![
+                                corner(-1.0, -1.0),
+                                corner(1.0, -1.0),
+                                corner(1.0, 1.0),
+                                corner(-1.0, 1.0),
+                            ],
+                            c,
+                            Stroke::NONE,
+                        ));
+                    }
+                }
+                continue;
+            }
             let rows: &[&str] = match o.kind {
                 Kind::Cake => &CAKE,
+                Kind::Yarn => &[],
             };
             let lift = if o.motion == Motion::Held {
                 -2.0 * px
